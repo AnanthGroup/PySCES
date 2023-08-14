@@ -1,0 +1,67 @@
+#!/bin/bash
+
+#SBATCH -J ABM_test
+#SBATCH -t 720:00:00
+#SBATCH -n 1
+#SBATCH -N 1 
+#SBATCH -p astra
+#SBATCH -o %x.o%j
+#SBATCH -e %x.e%j
+##SBATCH -w c0055
+##SBATCH -x c0055 
+##SBATCH --exclusive
+
+# Enter the working directory
+cd ${SLURM_SUBMIT_DIR}
+
+echo "starting $SLURM_JOB_ID at `date` on `hostname`"
+
+#echo "$USER"
+# Make a temp directory
+MYTMP=/tmp/${SLURM_JOB_ID}
+/usr/bin/mkdir -p $MYTMP
+#mpiexec -pernode /usr/bin/mkdir -vp $MYTMP 
+
+#mpiexec -pernode scp -v ${SLURM_SUBMIT_DIR}/restart.out  $MYTMP/. 
+#mpiexec -pernode scp -v ${SLURM_SUBMIT_DIR}/energy.out  $MYTMP/. 
+#mpiexec -pernode scp -v ${SLURM_SUBMIT_DIR}/corr.out  $MYTMP/. 
+#mpiexec -pernode scp -v ${SLURM_SUBMIT_DIR}/nuc_geo.xyz  $MYTMP/. 
+mpiexec -pernode scp -v ${SLURM_SUBMIT_DIR}/__init__.py  $MYTMP/. 
+mpiexec -pernode scp -v ${SLURM_SUBMIT_DIR}/main.py  $MYTMP/. 
+mpiexec -pernode scp -v ${SLURM_SUBMIT_DIR}/subroutines.py  $MYTMP/. 
+mpiexec -pernode scp -v ${SLURM_SUBMIT_DIR}/input_gamess.py  $MYTMP/. 
+mpiexec -pernode scp -v ${SLURM_SUBMIT_DIR}/input_simulation.py  $MYTMP/. 
+mpiexec -pernode scp -v ${SLURM_SUBMIT_DIR}/geo_gamess  $MYTMP/. 
+mpiexec -pernode scp -v ${SLURM_SUBMIT_DIR}/vec_gamess  $MYTMP/. 
+mpiexec -pernode scp -v ${SLURM_SUBMIT_DIR}/hess_gamess  $MYTMP/. 
+mpiexec -pernode scp -v ${SLURM_SUBMIT_DIR}/rungms-pool  $MYTMP/. 
+mpiexec -pernode scp -v ${SLURM_SUBMIT_DIR}/runG_common_pool  $MYTMP/. 
+
+cd $MYTMP
+
+### set up python environment ###
+module load python/3.6
+#creating a virtual environment
+python3.6 -m venv env
+source env/bin/activate
+
+pip install --upgrade pip
+pip install numpy 
+#pip list modules
+
+### run python ###
+time python3.6 main.py
+
+deactivate
+rm -r env
+
+# Copy output files back from the temp directory to working directory
+#mpiexec -pernode rsync -r $MYTMP/ $SLURM_SUBMIT_DIR/ 
+rsync -r $MYTMP/ $SLURM_SUBMIT_DIR/
+
+rm -rf $MYTMP
+
+exit 0 
+
+
+ 

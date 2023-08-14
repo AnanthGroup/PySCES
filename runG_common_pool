@@ -1,0 +1,32 @@
+#!/bin/csh
+
+# 19 feb 11:
+
+if ($#argv == 0) then
+  echo " "
+  echo " runG_1305 JOB NCPUS VERNO BASLIB"
+  echo " "
+  echo "     JOB defines the name of the JOB.inp file to be executed,"
+  echo "                                 JOB.out output file"
+  echo "                                 JOB.pun punch file"
+  echo "     NCPUS 1-12 (def 1)"
+  echo "     VERNO [00|77]  00=xlf 77=g77  (def 00)"
+  exit
+endif
+
+#####Change to location of rungms file
+set DIR=.        
+
+set JOB=$1      # name of the input file xxx.inp (the xxx part may be given)
+set NCPUS=$2    # number of compute processes to be run
+set VERNO=$3    # revision number of the executable created by 'lked' step
+set BASLIB=$4   # set basis library, full path and file name
+# provide defaults if last two arguments are not given to this script
+if (null$VERNO == null) set VERNO=00
+if (null$NCPUS == null) set NCPUS=1
+if (null$BASLIB == null )set BASLIB=''
+set BASLIB=`pwd`/$BASLIB
+
+if ($JOB:r.inp == $JOB) set JOB=$JOB:r      # strip off possible .inp
+
+$DIR/rungms-pool ${JOB} ${VERNO} ${NCPUS} ${BASLIB}>& $JOB.out
