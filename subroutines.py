@@ -19,7 +19,16 @@ import subprocess as sp
 import random
 from input_simulation import * 
 from input_gamess import nacme_option as opt 
-__location__ = os.path.realpath(os.path.join(os.getcwd(), os.path.dirname(__file__)))
+# __location__ = os.path.realpath(os.path.join(os.getcwd(), os.path.dirname(__file__)))
+__location__ = ''
+
+#   temporary work arround for using local settings
+try:
+    sys.path.append(os.path.abspath(os.path.curdir))
+    from input_simulation_local import * 
+except:
+    from input_simulation import * 
+
 
 # Physical constants and unit conversion factors
 pi       = np.pi
@@ -359,7 +368,7 @@ def write_gms_input(input_name, opt, atoms, amu_mat, cart_ang):
     g.close()
     f.close()
     
-    return()
+    return input_file
 
 
 ##########################################
@@ -390,26 +399,34 @@ def write_subm_script(input_name):
 #####################################
 ### Call GAMESS NACME calculation ###
 #####################################
-def run_gms_cas(input_name, opt, atoms, amu_mat, qCart):
+def run_gms_cas(input_name, opt, atoms, amu_mat, qCart, submit_script_loc=None):
+    print("RUNNING CAS")
     # Convert Bohr into Angstrom
     qCart_ang = qCart/ang2bohr
     
     # Write an input file
-    write_gms_input(input_name, opt, atoms, amu_mat, qCart_ang)
+    input_file = write_gms_input(input_name, opt, atoms, amu_mat, qCart_ang)
     
-    # Write a submission script
-    write_subm_script(input_name)
-    
-    # change # ppn per node in 'rungms-pool' script
-    with open(os.path.join(__location__, 'rungms-pool'), 'r') as g:
-        all_lines = g.readlines()
-        all_lines[509] = "      @ NSMPCPU = %d \n" %(ncpu)
-            
-    # Change the mode of submission script
-    sp.run(['chmod', '777', 'run_%s' %input_name])
-    
-    # Submit the bash submission script to execute GAMESS
-    sp.call('./run_%s' %input_name)
+    if submit_script_loc is None:
+        # Write a submission script
+        write_subm_script(input_name)
+        
+        # change # ppn per node in 'rungms-pool' script
+        with open(os.path.join(__location__, 'rungms-pool'), 'r') as g:
+            all_lines = g.readlines()
+            all_lines[509] = "      @ NSMPCPU = %d \n" %(ncpu)
+                
+        # Change the mode of submission script
+        sp.run(['chmod', '777', 'run_%s' %input_name])
+        
+        # Submit the bash submission script to execute GAMESS
+        sp.call('./run_%s' %input_name)
+    else:
+        #   call supplied submission script
+        output_file = 'cas.out'
+        sp.call(f'{submit_script_loc} {input_file} {output_file}'.split())
+    print("DONE RUNNING CAS")
+
     return()
 
 
@@ -473,7 +490,7 @@ def read_gms_dat(input_name):
     dat_file = input_name + '.dat'
     with open(os.path.join(__location__, dat_file), 'r') as f:
         for line in f:
-            if 'OPTIMIZED MCSCF' in line:
+            if 'OPTIMIZED MCSCF' in line or 'MCSCF OPTIMIZED' in line:
                 flag_orb = 0
                 [f.readline() for i in range(2)]
                 with open(os.path.join(__location__, 'vec_gamess'), 'w') as g:
@@ -1325,6 +1342,10 @@ def scipy_rk4(elecE, grad, nac, yvar, dt, au_mas):
 Main driver of RK4 and electronic structure 
 '''
 def rk4(initq,initp,tStop,H,restart,amu_mat,U):
+   if QC_RUNNER == 'terachem':
+    from qcRunners.TeraChem import TCRunner, format_output_LSCIVR
+
+
    proceed      = True
    input_name   = 'cas'
    au_mas = np.diag(amu_mat) * amu2au # masses of atoms in atomic unit (vector)
@@ -1354,25 +1375,31 @@ def rk4(initq,initp,tStop,H,restart,amu_mat,U):
         # Write initial nuclear geometry in the output file
         record_nuc_geo(restart, t, atoms, qC)
 
-        # Update geo_gamess with qC
-        update_geo_gamess(atoms, amu_mat, qC)
-    
-        # Call GAMESS to compute E, dE/dR, and NAC
-        run_gms_cas(input_name, opt, atoms, amu_mat, qC)
-        elecE, grad, nac, flag_grad, flag_nac = read_gms_out(input_name)
-        if any([el == 1  for el in flag_grad]) or flag_nac == 1:
-            proceed = False
-        flag_orb = read_gms_dat(input_name)
-        if flag_orb == 1:
-            proceed = False
-        if not proceed:
-            sys.exit("Electronic structure calculation failed at initial time. Exitting.")
-
+        if QC_RUNNER == 'gamess':
+            # Update geo_gamess with qC
+            update_geo_gamess(atoms, amu_mat, qC)
+        
+            # Call GAMESS to compute E, dE/dR, and NAC
+            run_gms_cas(input_name, opt, atoms, amu_mat, qC, sub_script)
+            elecE, grad, nac, flag_grad, flag_nac = read_gms_out(input_name)
+            if any([el == 1  for el in flag_grad]) or flag_nac == 1:
+                proceed = False
+            flag_orb = read_gms_dat(input_name)
+            if flag_orb == 1:
+                proceed = False
+            if not proceed:
+                sys.exit("Electronic structure calculation failed at initial time. Exitting.")
+        else:
+            tc_runner = TCRunner(tcr_host, tcr_port, atoms, tcr_job_options, tcr_state_options)
+            job_results = tc_runner.run_TC(qC/ang2bohr)
+            elecE, grad, nac = format_output_LSCIVR(len(q0), job_results)
+            # exit()
         # Total initial energy at t=0
         init_energy = get_energy(au_mas, q, p, elecE)
         with open(os.path.join(__location__, 'energy.out'), 'a') as g:
             g.write(total_format.format(t, init_energy, *elecE))
 
+   
    elif restart == 1:
         q, p = np.zeros(ndof), np.zeros(ndof)
         F = np.zeros((2,ndof))
@@ -1396,16 +1423,20 @@ def rk4(initq,initp,tStop,H,restart,amu_mat,U):
         # Get atom labels
         atoms = get_atom_label()
 
-        # Call GAMESS to compute E, dE/dR, and NAC
-        run_gms_cas(input_name, opt, atoms, amu_mat, qC)
-        elecE, grad, nac, flag_grad, flag_nac = read_gms_out(input_name)
-        if any([el == 1  for el in flag_grad]) or flag_nac == 1:
-            proceed = False
-        flag_orb = read_gms_dat(input_name)
-        if flag_orb == 1:
-            proceed = False
-        if not proceed:
-            sys.exit("Electronic structure calculation failed at initial time. Exitting.")
+        if QC_RUNNER == 'gamess':
+            # Call GAMESS to compute E, dE/dR, and NAC
+            run_gms_cas(input_name, opt, atoms, amu_mat, qC, sub_script)
+            elecE, grad, nac, flag_grad, flag_nac = read_gms_out(input_name)
+            if any([el == 1  for el in flag_grad]) or flag_nac == 1:
+                proceed = False
+            flag_orb = read_gms_dat(input_name)
+            if flag_orb == 1:
+                proceed = False
+            if not proceed:
+                sys.exit("Electronic structure calculation failed at initial time. Exitting.")
+        else:
+            job_results = tc_runner.run_TC(qC/ang2bohr)
+            elecE, grad, nac = format_output_LSCIVR(len(q0), job_results)
    
    X,Y = [],[]
    X.append(t)
@@ -1437,15 +1468,21 @@ def rk4(initq,initp,tStop,H,restart,amu_mat,U):
             with open(os.path.join(__location__, 'progress.out'), 'a') as f:
                 f.write('\n')
                 f.write('Runge-Kutta step has been accepted.\n')
+
             qC = y[nel:ndof]
-            update_geo_gamess(atoms, amu_mat, qC)
-            run_gms_cas(input_name, opt, atoms, amu_mat, qC)
-            elecE, grad, nac, flag_grad, flag_nac = read_gms_out(input_name)
-            if any([el == 1 for el in flag_grad]) or flag_nac == 1:
-                proceed = False
-            flag_orb = read_gms_dat(input_name)
-            if flag_orb == 1:
-                proceed = False
+
+            if QC_RUNNER == 'gamess':
+                update_geo_gamess(atoms, amu_mat, qC)
+                run_gms_cas(input_name, opt, atoms, amu_mat, qC, sub_script)
+                elecE, grad, nac, flag_grad, flag_nac = read_gms_out(input_name)
+                if any([el == 1 for el in flag_grad]) or flag_nac == 1:
+                    proceed = False
+                flag_orb = read_gms_dat(input_name)
+                if flag_orb == 1:
+                    proceed = False
+            else:
+                job_results = tc_runner.run_TC(qC/ang2bohr)
+                elecE, grad, nac = format_output_LSCIVR(len(q0), job_results)
 
         if proceed:
             # Compute energy

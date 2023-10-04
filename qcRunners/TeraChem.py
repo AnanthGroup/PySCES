@@ -1,11 +1,9 @@
 #!/usr/bin/env python
 # Basic energy calculation
-import sys, os
+import os
 import numpy as np
-from qcelemental.models import AtomicInput, Molecule
 from tcpb import TCProtobufClient as TCPBClient
-from tcpb.exceptions import ServerError
-import subprocess, time
+import time
 
 
 def _wait_until_available(client: TCPBClient, max_wait=10.0, time_btw_check=1.0):
@@ -45,8 +43,9 @@ def _val_or_iter(x):
     return x
 
 class TCRunner():
-    def __init__(self, host: str, port: int, atoms: list, tc_options: dict, run_options: dict={}, max_wait=20) -> None:
+    def __init__(self, host: str, port: int, atoms: list, tc_options: dict, run_options: dict={}, max_wait=20, dipole_deriv = False) -> None:
         self._client = client = TCPBClient(host=host, port=port)
+        print("HOST/PORT: ", host, port)
         _wait_until_available(client, max_wait=max_wait)
         self._atoms = np.copy(atoms)
 
@@ -55,13 +54,22 @@ class TCRunner():
         self._max_state = run_options.get('max_state', 0)
         self._grads = run_options.get('grads', [])
         self._NACs = run_options.pop('NACs', [])
+        self._dipole_deriv = dipole_deriv
 
 
     def run_TC(self, geom):
-        return self.run_TC_with_options(self._client, geom, self._atoms, self._base_options, self._max_state, self._grads, self._NACs)
+        return self.run_TC_with_options(
+            self._client, 
+            geom, 
+            self._atoms, 
+            self._base_options, 
+            self._dipole_deriv,
+            self._max_state, 
+            self._grads, 
+            self._NACs)
 
     @staticmethod
-    def run_TC_with_options(client, geom, atoms, opts: dict, 
+    def run_TC_with_options(client: TCPBClient, geom, atoms, opts: dict, dipole_deriv=False,
             max_state:int=0, 
             grads:list[int]|int|str=[], 
             NACs:list[int]|float|str=[]):
@@ -105,6 +113,7 @@ class TCRunner():
             results = client.compute_job_sync('energy', geom, 'angstrom', **job_opts)
             times[f'energy_{state}'] = time.time() - start
             results['run'] = 'energy'
+            results.update(job_opts)
             all_results.append(results)
 
         #   gradient computations have to be separated from NACs
@@ -126,6 +135,7 @@ class TCRunner():
             results = client.compute_job_sync('gradient', geom, 'angstrom', **job_opts)
             times[f'gradient_{state}'] = time.time() - start
             results['run'] = 'gradient'
+            results.update(job_opts)
             all_results.append(results)
 
         #   run NAC jobs
@@ -136,6 +146,9 @@ class TCRunner():
             job_opts['nacstate2'] = nac2
             job_opts['cis'] = 'yes'
             job_opts['cisnumstates'] = max_state + 2
+            if dipole_deriv:
+                pass
+                # job_opts['cistransdipolederiv'] = 'yes'
             if job_i > 0:
                 job_opts['guess'] = all_results[-1]['orbfile']
 
@@ -143,10 +156,32 @@ class TCRunner():
             results = client.compute_job_sync('coupling', geom, 'angstrom', **job_opts)
             times[f'nac_{nac1}_{nac2}'] = time.time() - start
             results['run'] = 'coupling'
+            results.update(job_opts)
             all_results.append(results)
 
 
         _print_times(times)
         return all_results
 
-   
+def format_output_LSCIVR(n_elec, job_data: list[dict]):
+    atoms = job_data[0]['atoms']
+    n_atoms = len(atoms)
+    energies = np.zeros(n_elec)
+    grads = np.zeros((n_elec, n_atoms*3))
+    nacs = np.zeros((n_elec, n_elec, n_atoms*3))
+    
+    for job in job_data:
+        if job['run'] == 'gradient':
+            state = job.get('cistarget', 0)
+            grads[state] = np.array(job['gradient']).flatten()
+            if isinstance(job['energy'], float):
+                energies[state] = job['energy']
+            else:
+                energies[state] = job['energy'][state]
+        elif job['run'] == 'coupling':
+            state_1 = job['nacstate1']
+            state_2 = job['nacstate2']
+            nacs[state_1, state_2] = np.array(job['nacme']).flatten()
+            nacs[state_2, state_1] = - nacs[state_1, state_2]
+
+    return energies, grads, nacs

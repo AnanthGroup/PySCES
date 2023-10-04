@@ -12,10 +12,17 @@ Main code to run LSC-IVR dynamics
 
 import os
 import numpy as np
-from input_simulation import * 
 from input_gamess import * 
 from subroutines import *
-__location__ = os.path.realpath(os.path.join(os.getcwd(), os.path.dirname(__file__)))
+# __location__ = os.path.realpath(os.path.join(os.getcwd(), os.path.dirname(__file__)))
+__location__ = ''
+
+#   temporary work arround for using local settings
+try:
+    sys.path.append(os.path.abspath(os.path.curdir))
+    from input_simulation_local import * 
+except:
+    from input_simulation import * 
 
 
 ###################################
