@@ -1342,24 +1342,24 @@ def scipy_rk4(elecE, grad, nac, yvar, dt, au_mas):
 Main driver of RK4 and electronic structure 
 '''
 def rk4(initq,initp,tStop,H,restart,amu_mat,U):
-   if QC_RUNNER == 'terachem':
-    from qcRunners.TeraChem import TCRunner, format_output_LSCIVR
+    if QC_RUNNER == 'terachem':
+        from qcRunners.TeraChem import TCRunner, format_output_LSCIVR
 
 
-   proceed      = True
-   input_name   = 'cas'
-   au_mas = np.diag(amu_mat) * amu2au # masses of atoms in atomic unit (vector)
+    proceed      = True
+    input_name   = 'cas'
+    au_mas = np.diag(amu_mat) * amu2au # masses of atoms in atomic unit (vector)
 
-   # Format descriptor depending on the number of electronic states
-   total_format = '{:>12.4f}{:>12.5f}' # "time" "total"
-   for i in range(nel):
-        total_format += '{:>12.5f}' # "elec1" "elec2" ...
-   total_format += '\n'
+    # Format descriptor depending on the number of electronic states
+    total_format = '{:>12.4f}{:>12.5f}' # "time" "total"
+    for i in range(nel):
+            total_format += '{:>12.5f}' # "elec1" "elec2" ...
+    total_format += '\n'
 
-   ### Initial-time property calculation ###
-   with open(os.path.join(__location__, 'progress.out'), 'a') as f:
-      f.write("Initial property evaluation started.\n")
-   if restart == 0:
+    ### Initial-time property calculation ###
+    with open(os.path.join(__location__, 'progress.out'), 'a') as f:
+        f.write("Initial property evaluation started.\n")
+    if restart == 0:
         t       = 0.0
         initial_time = 0.0
         q, p    = np.zeros(ndof), np.zeros(ndof)          # collections of all mapping variables
@@ -1400,7 +1400,7 @@ def rk4(initq,initp,tStop,H,restart,amu_mat,U):
             g.write(total_format.format(t, init_energy, *elecE))
 
    
-   elif restart == 1:
+    elif restart == 1:
         q, p = np.zeros(ndof), np.zeros(ndof)
         F = np.zeros((2,ndof))
         # Read the restart file
@@ -1437,20 +1437,20 @@ def rk4(initq,initp,tStop,H,restart,amu_mat,U):
         else:
             job_results = tc_runner.run_TC(qC/ang2bohr)
             elecE, grad, nac = format_output_LSCIVR(len(q0), job_results)
-   
-   X,Y = [],[]
-   X.append(t)
-   Y.append(y)
-   flag_energy = 0
-   flag_grad   = 0
-   flag_nac    = 0
-   flag_orb    = 0
-   energy      = [init_energy]
-   with open(os.path.join(__location__, 'progress.out'), 'a') as f:
+    
+    X,Y = [],[]
+    X.append(t)
+    Y.append(y)
+    flag_energy = 0
+    flag_grad   = 0
+    flag_nac    = 0
+    flag_orb    = 0
+    energy      = [init_energy]
+    with open(os.path.join(__location__, 'progress.out'), 'a') as f:
         f.write("Initilization done. Move on to propagation routine.\n")
 
-   ### Runge-Kutta routine ###
-   while t < tStop:
+    ### Runge-Kutta routine ###
+    while t < tStop:
         if not proceed:
             sys.exit("Electronic structure calculation failed in Runge-Kutta routine. Exitting.")
         else:
@@ -1511,15 +1511,15 @@ def rk4(initq,initp,tStop,H,restart,amu_mat,U):
                 with open(os.path.join(__location__, 'progress.out'), 'a') as f:
                     f.write('Propagated to the final time step.\n')
 
-   coord = np.zeros((2,ndof,len(Y)))
-   for i in range(len(Y)):
-      coord[0,:,i] = Y[i][:ndof]
-      coord[1,:,i] = Y[i][ndof:]
+    coord = np.zeros((2,ndof,len(Y)))
+    for i in range(len(Y)):
+        coord[0,:,i] = Y[i][:ndof]
+        coord[1,:,i] = Y[i][ndof:]
 
-   ############################
-   ### Write a restart file ###
-   ############################
-   with open(os.path.join(__location__, 'restart.out'), 'w') as gg:
+    ############################
+    ### Write a restart file ###
+    ############################
+    with open(os.path.join(__location__, 'restart.out'), 'w') as gg:
         # Write the coordinates
         gg.write('Coordinates (a.u.) at the last update: \n')
         for i in range(ndof):
@@ -1554,7 +1554,7 @@ def rk4(initq,initp,tStop,H,restart,amu_mat,U):
         gg.write('{:>16.10f} \n'.format(t))
         gg.write('\n')
 
-   return(np.array(X), coord, initial_time)
+    return(np.array(X), coord, initial_time)
 
 
 '''
