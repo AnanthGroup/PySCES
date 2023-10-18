@@ -125,28 +125,59 @@ def write_restart(file_loc: str, coord: list | np.ndarray, energy: float, time: 
         exit(f'ERROR: only RK4 is implimented fileIO')
 
 class SimulationLogger():
-    def __init__(self, n_states, save_energy=False, save_grad=True, save_nac=True, dir=None) -> None:
+    def __init__(self, n_states, save_energy=False, save_grad=True, save_nac=True, save_corr=True, dir=None) -> None:
         if dir is None:
             dir = os.path.abspath(os.path.curdir)
         self._energy_logger = None
         self._grad_logger = None
         self._nac_logger = None
+        self._corr_logger = None
         if save_energy:
             self._energy_logger = EnergyLogger(os.path.join(dir, 'energy.txt'), n_states)
         if save_grad:
             self._grad_logger = GradientLogger(os.path.join(dir, 'grad.txt'), n_states)
         if save_nac:
             self._nac_logger = NACLogger(os.path.join(dir, 'nac.txt'), n_states)
+        if save_corr:
+            self._corr_logger = CorrelationLogger(os.path.join(dir, 'corr.out'), n_states)
 
-    def write(self, time, total_E=None, elec_E=None, grads=None, NACs=None):
+    def write(self, time, total_E=None, elec_E=None, grads=None, NACs=None, pops=None):
         if self._energy_logger is not None:
             self._energy_logger.write(time, total_E, elec_E)
         if self._grad_logger is not None:
-            print("Writing grad")
             self._grad_logger.write(time, grads)
         if self._nac_logger is not None:
-            print("Writing NAC")
             self._nac_logger.write(time, NACs)
+        if self._corr_logger is not None:
+            self._corr_logger.write(time, pops)
+        
+class CorrelationLogger():
+    def __init__(self, file_loc: str, n_states: int) -> None:
+        self._total_format = '{:>12.4f}'
+        for i in range(n_states + 1):
+            self._total_format += '{:>16.10f}'
+        self._total_format += '\n'
+
+        self._file = open(file_loc, 'w')
+        
+        #   write file header
+        self._file.write('%12s' % 'Time')
+        self._file.write(' %16s' % 'Total')
+        for i in range(n_states):
+            self._file.write(' %16s' % f'S{i}')
+        self._file.write('\n')
+        self._write_header = False
+
+    def __del__(self):
+        self._file.close()
+
+    def write(self, time: float, pops):
+        total = np.sum(pops)
+        out_str = f'{time:12.6f} {total:16.10f}'
+        for i in range(len(pops)):
+            out_str += f' {pops[i]:16.10f}'
+        self._file.write(f'{out_str}\n')
+        self._file.flush()
 
 class EnergyLogger():
     def __init__(self, file_loc: str, n_states: int) -> None:
@@ -166,26 +197,10 @@ class EnergyLogger():
         self._file.close()
 
     def write(self, time: float, total: float, elec: list | np.ndarray):
-
-
-
         out_str = f'{time:12.6f} {total:16.10f}'
         for i in range(len(elec)):
             out_str += f' {elec[i]:16.10f}'
-        self._file.write(f'\n{out_str}')
-
-
-        # current_values = {}
-        # current_values['Time'] = [time]
-        # current_values['Total'] = [total]
-        # for i in range(len(elec)):
-        #     current_values[f'S{i}'] =  [elec[i]]
-        # df = DataFrame(current_values)
-
-        # df.to_csv(self._file, sep=' ', float_format='%16.10f', header=False, index=False)
-        # if self._write_header:
-        #     self._write_header = False
-        # self._total_writes += 1
+        self._file.write(f'{out_str}\n')
 
         self._file.flush()
     

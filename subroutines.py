@@ -19,6 +19,7 @@ import subprocess as sp
 import random
 from input_simulation import * 
 from input_gamess import nacme_option as opt 
+from fileIO import SimulationLogger, write_restart, read_restart
 # __location__ = os.path.realpath(os.path.join(os.getcwd(), os.path.dirname(__file__)))
 __location__ = ''
 
@@ -347,7 +348,8 @@ def write_gms_input(input_name, opt, atoms, amu_mat, cart_ang):
     f.write('         iroot=%d' %opt['iroot'] +' wstate(1)='+opt['wstate']+' itermx=%d' %opt['itermx'] +' $end \n')
     f.write(' $cpmchf gcro='+opt['gcro']+' micit=%d kicit=%d' %(opt['micit'],opt['kicit']) +' prcchg='+opt['prcchg']+' prctol=%.1f' %opt['prctol'] +' \n')
     f.write('         napick='+opt['napick']+' nacst(1)='+opt['nacst']+' $end \n')
-    f.write(' $guess  guess='+opt['guess']+' norb=%d' %opt['norb'] +' $end \n')
+    if opt.get('guess', '') != '':
+        f.write(' $guess  guess='+opt['guess']+' norb=%d' %opt['norb'] +' $end \n')
     f.write(' $data \n')
     f.write('comment comment comment \n')
     f.write(opt['sym']+' \n')
@@ -1345,6 +1347,7 @@ def rk4(initq,initp,tStop,H,restart,amu_mat,U):
     if QC_RUNNER == 'terachem':
         from qcRunners.TeraChem import TCRunner, format_output_LSCIVR
 
+    logger = SimulationLogger(nel)
 
     proceed      = True
     input_name   = 'cas'
@@ -1355,6 +1358,9 @@ def rk4(initq,initp,tStop,H,restart,amu_mat,U):
     for i in range(nel):
             total_format += '{:>12.5f}' # "elec1" "elec2" ...
     total_format += '\n'
+
+    #   very first step does not need a GAMESS guess
+    # opt['guess'] = ''
 
     ### Initial-time property calculation ###
     with open(os.path.join(__location__, 'progress.out'), 'a') as f:
@@ -1398,12 +1404,15 @@ def rk4(initq,initp,tStop,H,restart,amu_mat,U):
         init_energy = get_energy(au_mas, q, p, elecE)
         with open(os.path.join(__location__, 'energy.out'), 'a') as g:
             g.write(total_format.format(t, init_energy, *elecE))
-
    
     elif restart == 1:
+
+        # q, p, init_energy, initial_time = read_restart('restart.json', ndof=ndof)
+        # t = initial_time
+
+        # Read the restart file
         q, p = np.zeros(ndof), np.zeros(ndof)
         F = np.zeros((2,ndof))
-        # Read the restart file
         with open(os.path.join(__location__, 'restart.out'), 'r') as ff:
                 ff.readline() 
                 for i in range(ndof):
@@ -1415,13 +1424,17 @@ def rk4(initq,initp,tStop,H,restart,amu_mat,U):
                 [ff.readline() for i in range(2)]
 
                 initial_time = float(ff.readline()) # Total simulation time at the beginning of restart run
-                t = initial_time       
+                t = initial_time   
+                
     
         qC, pC = q[nel:], p[nel:]
         y = np.concatenate((q, p))
-        
+
         # Get atom labels
         atoms = get_atom_label()
+
+        # write_restart('restart_init.json', [y[:ndof], y[ndof:]], init_energy, t, nel, 'rk4')
+
 
         if QC_RUNNER == 'gamess':
             # Call GAMESS to compute E, dE/dR, and NAC
@@ -1438,6 +1451,10 @@ def rk4(initq,initp,tStop,H,restart,amu_mat,U):
             job_results = tc_runner.run_TC(qC/ang2bohr)
             elecE, grad, nac = format_output_LSCIVR(len(q0), job_results)
     
+    pops = compute_CF_single(q[0:nel], p[0:nel])
+    logger.write(t,init_energy, elecE,  grad, nac, pops)
+
+    # opt['guess'] = 'moread'
     X,Y = [],[]
     X.append(t)
     Y.append(y)
@@ -1507,6 +1524,11 @@ def rk4(initq,initp,tStop,H,restart,amu_mat,U):
             with open(os.path.join(__location__, 'energy.out'), 'a') as g:
                 g.write(total_format.format(t, new_energy, *elecE))
 
+            #   New logging information
+            pops = compute_CF_single(y[0:nel], y[ndof:ndof+nel])
+            logger.write(t, total_E=new_energy, elec_E=elecE,  grads=grad, NACs=nac, pops=pops)
+            write_restart('restart.json', [Y[-1][:ndof], Y[-1][ndof:]], new_energy, t, nel, 'rk4')
+
             if t == tStop:
                 with open(os.path.join(__location__, 'progress.out'), 'a') as f:
                     f.write('Propagated to the final time step.\n')
@@ -1555,6 +1577,17 @@ def rk4(initq,initp,tStop,H,restart,amu_mat,U):
         gg.write('\n')
 
     return(np.array(X), coord, initial_time)
+
+def compute_CF_single(q, p):
+   ### Compute the estimator of electronic state population ###
+   pop = np.zeros(nel)
+
+   common_TCF = 2**(nel+1) * np.exp(-np.dot(q, q) - np.dot(p, p))
+   for i in range(nel):
+        final_state_TCF = q[i]**2 + p[i]**2 - 0.5
+        pop[i] = common_TCF * final_state_TCF
+
+   return pop
 
 
 '''

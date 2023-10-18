@@ -32,7 +32,7 @@ nacme_option = {
     'gbasis': 'n31',
     'ngauss': 6,
     'ndfunc': 1,
-    'diffsp': '.f.',
+    'diffsp': '.t.',
     # $scf card
     'conv': '1.0d-06',
     'dirscf': '.t.',
