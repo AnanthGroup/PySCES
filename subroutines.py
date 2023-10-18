@@ -426,7 +426,8 @@ def run_gms_cas(input_name, opt, atoms, amu_mat, qCart, submit_script_loc=None):
     else:
         #   call supplied submission script
         output_file = 'cas.out'
-        sp.call(f'{submit_script_loc} {input_file} {output_file}'.split())
+        script_loc = os.path.abspath(submit_script_loc)
+        sp.call(f'{script_loc} {input_file} {output_file}'.split())
     print("DONE RUNNING CAS")
 
     return()
@@ -1360,7 +1361,7 @@ def rk4(initq,initp,tStop,H,restart,amu_mat,U):
     total_format += '\n'
 
     #   very first step does not need a GAMESS guess
-    # opt['guess'] = ''
+    opt['guess'] = ''
 
     ### Initial-time property calculation ###
     with open(os.path.join(__location__, 'progress.out'), 'a') as f:
@@ -1406,6 +1407,7 @@ def rk4(initq,initp,tStop,H,restart,amu_mat,U):
             g.write(total_format.format(t, init_energy, *elecE))
    
     elif restart == 1:
+        opt['guess'] = 'moread'
 
         # q, p, init_energy, initial_time = read_restart('restart.json', ndof=ndof)
         # t = initial_time
@@ -1454,7 +1456,7 @@ def rk4(initq,initp,tStop,H,restart,amu_mat,U):
     pops = compute_CF_single(q[0:nel], p[0:nel])
     logger.write(t,init_energy, elecE,  grad, nac, pops)
 
-    # opt['guess'] = 'moread'
+    opt['guess'] = 'moread'
     X,Y = [],[]
     X.append(t)
     Y.append(y)
