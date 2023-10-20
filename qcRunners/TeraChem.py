@@ -6,7 +6,7 @@ from tcpb import TCProtobufClient as TCPBClient
 import time
 
 
-def _wait_until_available(client: TCPBClient, max_wait=10.0, time_btw_check=1.0):
+def wait_until_available(client: TCPBClient, max_wait=10.0, time_btw_check=1.0):
     total_wait = 0.0
     avail = False
     while not avail:
@@ -42,23 +42,77 @@ def _val_or_iter(x):
         x = [x]
     return x
 
+def _convert(value):
+    if isinstance(value, list):
+        new = []
+        for i in range(len(value)):
+            new.append(_convert(value[i]))
+        return new
+    elif isinstance(value, bytes):
+        return value.decode('utf-8')
+    elif isinstance(value, np.ndarray):
+        new = []
+        for i in range(len(value)):
+            new.append(_convert(value[i]))
+        return new
+    else:
+        return value
+
+def cleanup_job(results: dict, *remove: str):
+    '''
+        Removes unwanted entries in the TC output dictionary and converts
+        all numpy arrays to lists
+    '''
+    #   
+    if remove:
+        if len(remove) == 1 and remove[0] == '':
+            remove = []
+    else:
+        remove = ['charges', 'orb_energies']
+
+    #   remove unwanted entries
+    for r in remove:
+        if r in results:
+            results.pop(r)
+
+    #   convert all numpy arrays to lists
+    cleaned = {}
+    for key in results:
+        cleaned[key] = _convert(results[key])
+        # if isinstance(results[key], np.ndarray):
+        #     results[key] = results[key].tolist()
+        # if isinstance(results[key], list) and len(results[key]):
+        #     if isinstance(results[key][0], np.ndarray):
+        #         results[key] = np.array(results[key]).tolist()
+
+    return cleaned
+
 class TCRunner():
     def __init__(self, host: str, port: int, atoms: list, tc_options: dict, run_options: dict={}, max_wait=20, dipole_deriv = False) -> None:
+
+        #   set up the server
         self._client = client = TCPBClient(host=host, port=port)
-        print("HOST/PORT: ", host, port)
-        _wait_until_available(client, max_wait=max_wait)
+        wait_until_available(client, max_wait=max_wait)
+
+
         self._atoms = np.copy(atoms)
-
         self._base_options = tc_options.copy()
-
         self._max_state = run_options.get('max_state', 0)
         self._grads = run_options.get('grads', [])
         self._NACs = run_options.pop('NACs', [])
         self._dipole_deriv = dipole_deriv
 
+    def run_TC_single(client: TCPBClient, geom, atoms: list[str], opts: dict):
+        opts['atoms'] = atoms
+        start = time.time()
+        results = client.compute_job_sync('energy', geom, 'angstrom', **opts)
+        end = time.time()
+        print(f"Job completed in {end - start: .2f} seconds")
 
-    def run_TC(self, geom):
-        return self.run_TC_with_options(
+        return results
+
+    def run_TC_new_geom(self, geom):
+        return self.run_TC_all_states(
             self._client, 
             geom, 
             self._atoms, 
@@ -67,9 +121,9 @@ class TCRunner():
             self._max_state, 
             self._grads, 
             self._NACs)
-
+    
     @staticmethod
-    def run_TC_with_options(client: TCPBClient, geom, atoms, opts: dict, dipole_deriv=False,
+    def run_TC_all_states(client: TCPBClient, geom, atoms: list[str], opts: dict, dipole_deriv=False,
             max_state:int=0, 
             grads:list[int]|int|str=[], 
             NACs:list[int]|float|str=[]):
@@ -81,7 +135,7 @@ class TCRunner():
             if grads.lower() == 'all':
                 grads = list(range(max_state+1))
             else:
-                raise ValueError('grads must be an iterable in ints or "all"')
+                raise ValueError('grads must be an iterable of ints or "all"')
         else:
             grads = _val_or_iter(grads)
         if isinstance(NACs, str):
@@ -98,20 +152,21 @@ class TCRunner():
         #   make sure we are computing enough states
         base_options = opts.copy()
         if max_state > 0:
+            base_options['cisrestart'] = 'cis_restart_' + str(os.getpid())
             if 'cisnumstates' not in base_options:
                 base_options['cisnumstates'] = max_state + 2
             elif base_options['cisnumstates'] < max_state:
                 raise ValueError('"cisnumstates" is less than requested electronic state')
-        base_options['cisrestart'] = 'cis_restart_' + str(os.getpid())
         base_options['purify'] = False
         base_options['atoms'] = atoms
         
         #   run energy only if gradients and NACs are not requested
         all_results = []
         if len(grads) == 0 and len(NACs) == 0:
+            job_opts = base_options.copy()
             start = time.time()
             results = client.compute_job_sync('energy', geom, 'angstrom', **job_opts)
-            times[f'energy_{state}'] = time.time() - start
+            times[f'energy'] = time.time() - start
             results['run'] = 'energy'
             results.update(job_opts)
             all_results.append(results)

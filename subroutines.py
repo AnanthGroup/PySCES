@@ -1398,7 +1398,7 @@ def rk4(initq,initp,tStop,H,restart,amu_mat,U):
                 sys.exit("Electronic structure calculation failed at initial time. Exitting.")
         else:
             tc_runner = TCRunner(tcr_host, tcr_port, atoms, tcr_job_options, tcr_state_options)
-            job_results = tc_runner.run_TC(qC/ang2bohr)
+            job_results = tc_runner.run_TC_all_states(qC/ang2bohr)
             elecE, grad, nac = format_output_LSCIVR(len(q0), job_results)
             # exit()
         # Total initial energy at t=0
@@ -1450,7 +1450,7 @@ def rk4(initq,initp,tStop,H,restart,amu_mat,U):
             if not proceed:
                 sys.exit("Electronic structure calculation failed at initial time. Exitting.")
         else:
-            job_results = tc_runner.run_TC(qC/ang2bohr)
+            job_results = tc_runner.run_TC_all_states(qC/ang2bohr)
             elecE, grad, nac = format_output_LSCIVR(len(q0), job_results)
     
     pops = compute_CF_single(q[0:nel], p[0:nel])
@@ -1500,7 +1500,7 @@ def rk4(initq,initp,tStop,H,restart,amu_mat,U):
                 if flag_orb == 1:
                     proceed = False
             else:
-                job_results = tc_runner.run_TC(qC/ang2bohr)
+                job_results = tc_runner.run_TC_all_states(qC/ang2bohr)
                 elecE, grad, nac = format_output_LSCIVR(len(q0), job_results)
 
         if proceed:
