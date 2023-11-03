@@ -4,24 +4,9 @@ import os
 import numpy as np
 from tcpb import TCProtobufClient as TCPBClient
 import time
+import warnings
+import json
 
-
-def wait_until_available(client: TCPBClient, max_wait=10.0, time_btw_check=1.0):
-    total_wait = 0.0
-    avail = False
-    while not avail:
-        try:
-            client.connect()
-            client.is_available()
-            avail = True
-        except:
-            print(f'TeraChem server not available: \
-                    trying again in {time_btw_check} seconds')
-            time.sleep(time_btw_check)
-            total_wait += time_btw_check
-            if total_wait >= max_wait:
-                raise TimeoutError('Maximum time allotted for checking for TeraChem server')
-    print('Terachem Server is available')
 
 def _print_times(times):
     total = 0.0
@@ -55,44 +40,21 @@ def _convert(value):
         for i in range(len(value)):
             new.append(_convert(value[i]))
         return new
+    elif isinstance(value, dict):
+        new = {}
+        for key, v in value.items():
+            new[key] = _convert(v)
+        return new
     else:
         return value
 
-def cleanup_job(results: dict, *remove: str):
-    '''
-        Removes unwanted entries in the TC output dictionary and converts
-        all numpy arrays to lists
-    '''
-    #   
-    if remove:
-        if len(remove) == 1 and remove[0] == '':
-            remove = []
-    else:
-        remove = ['charges', 'orb_energies']
-
-    #   remove unwanted entries
-    for r in remove:
-        if r in results:
-            results.pop(r)
-
-    #   convert all numpy arrays to lists
-    cleaned = {}
-    for key in results:
-        cleaned[key] = _convert(results[key])
-        # if isinstance(results[key], np.ndarray):
-        #     results[key] = results[key].tolist()
-        # if isinstance(results[key], list) and len(results[key]):
-        #     if isinstance(results[key][0], np.ndarray):
-        #         results[key] = np.array(results[key]).tolist()
-
-    return cleaned
 
 class TCRunner():
     def __init__(self, host: str, port: int, atoms: list, tc_options: dict, run_options: dict={}, max_wait=20, dipole_deriv = False) -> None:
 
         #   set up the server
-        self._client = client = TCPBClient(host=host, port=port)
-        wait_until_available(client, max_wait=max_wait)
+        self._client = TCPBClient(host=host, port=port)
+        self.wait_until_available(self._client, max_wait=max_wait)
 
 
         self._atoms = np.copy(atoms)
@@ -101,6 +63,68 @@ class TCRunner():
         self._grads = run_options.get('grads', [])
         self._NACs = run_options.pop('NACs', [])
         self._dipole_deriv = dipole_deriv
+
+    @staticmethod
+    def wait_until_available(client: TCPBClient, max_wait=10.0, time_btw_check=1.0):
+        total_wait = 0.0
+        avail = False
+        while not avail:
+            try:
+                client.connect()
+                client.is_available()
+                avail = True
+            except:
+                print(f'TeraChem server not available: \
+                        trying again in {time_btw_check} seconds')
+                time.sleep(time_btw_check)
+                total_wait += time_btw_check
+                if total_wait >= max_wait:
+                    raise TimeoutError('Maximum time allotted for checking for TeraChem server')
+        print('Terachem Server is available')
+
+    @staticmethod
+    def append_results_file(results: dict):
+        results_file = os.path.join(results['job_scr_dir'], 'results.dat')
+        results['results.dat'] = open(results_file).readlines()
+        return results
+
+    @staticmethod
+    def cleanup_multiple_jobs(results: list, *remove: str):
+        new_results = []
+        for res in results:
+            new_results.append(TCRunner.cleanup_job(res, *remove))
+        return new_results
+
+    @staticmethod
+    def cleanup_job(results: dict, *remove: str):
+        '''
+            Removes unwanted entries in the TC output dictionary and converts
+            all numpy arrays to lists
+        '''
+        
+        if remove:
+            if len(remove) == 1 and remove[0] == '':
+                remove = []
+        else:
+            remove = ['charges', 'orb_energies']
+
+        #   remove unwanted entries
+        for r in remove:
+            if r in results:
+                results.pop(r)
+
+        #   convert all numpy arrays to lists
+        cleaned = {}
+        for key in results:
+            cleaned[key] = _convert(results[key])
+            # if isinstance(results[key], np.ndarray):
+            #     results[key] = results[key].tolist()
+            # if isinstance(results[key], list) and len(results[key]):
+            #     if isinstance(results[key][0], np.ndarray):
+            #         results[key] = np.array(results[key]).tolist()
+
+        return cleaned
+
 
     def run_TC_single(client: TCPBClient, geom, atoms: list[str], opts: dict):
         opts['atoms'] = atoms
@@ -112,7 +136,7 @@ class TCRunner():
         return results
 
     def run_TC_new_geom(self, geom):
-        return self.run_TC_all_states(
+        return self.run_TC_all_states_2(
             self._client, 
             geom, 
             self._atoms, 
@@ -121,6 +145,152 @@ class TCRunner():
             self._max_state, 
             self._grads, 
             self._NACs)
+    
+    
+    @staticmethod
+    def run_TC_all_states_2(client: TCPBClient, geom, atoms: list[str], opts: dict, dipole_deriv=False,
+            max_state:int=0, 
+            gradients:bool=True, 
+            couplings:bool=True):
+        
+        times = {}
+
+        #   convert all keys to lowercase
+        orig_opts = {}
+        for key, val in opts.items():
+            orig_opts[key.lower()] = val
+
+        #   Determine the type of excited state calculations to run, if any.
+        #   Also remove any non-excited state options for the 'base_options'
+        excited_options = {}
+        base_options = {}
+        excited_type = None
+        cis_possible_opts = ['cis', 'cisrestart', 'cisnumstates', 'cistarget']
+        cas_possible_opts = ['casscf', 'casci', 'closed', 'active', 'cassinglets', 'castarget', 'castargetmult', 'fon']
+
+        if orig_opts.get('cis', '') == 'yes':
+            #   CI and TDDFT
+            excited_type = 'cis'
+            for key, val in orig_opts.items():
+                if key in cis_possible_opts:
+                    excited_options[key] = val
+                else:
+                    base_options[key] = val
+        elif orig_opts.get('casscf', '') == 'yes':
+            excited_type = 'cas'
+            #   CAS-CI and CAS-SCF
+            for key, val in orig_opts.items():
+                if key in cas_possible_opts:
+                    excited_options[key] = val
+                else:
+                    base_options[key] = val
+        else:
+            base_options.update(orig_opts)
+
+        #   determine the range of gradients and couplings to compute
+        grads = []
+        NACs = []
+        if gradients:
+            grads = list(range(max_state+1))
+        if couplings:
+            NACs = []
+            for i in range(max_state+1):
+                for j in range(i+1, max_state+1):
+                    NACs.append((i, j))
+
+        #   make sure we are computing enough states
+        if excited_type == 'cis':
+            if excited_options.get('cisnumstates', 0) < max_state:
+                warnings.warn(f'Number of states in TC options is less than `max_state`. Increasing number of states to {max_state}')
+                excited_options['cisnumstates'] = max_state + 1
+        if excited_type == 'cas':
+            if excited_options.get('cassinglets', 0) < max_state:
+                warnings.warn(f'Number of states in TC options is less than `max_state`. Increasing number of states to {max_state}')
+                excited_options['cassinglets'] = max_state + 1
+
+        if max_state > 0:
+            base_options['cisrestart'] = 'cis_restart_' + str(os.getpid())
+        base_options['purify'] = False
+        base_options['atoms'] = atoms
+        
+        #   run energy only if gradients and NACs are not requested
+        all_results = []
+        if len(grads) == 0 and len(NACs) == 0:
+            job_opts = base_options.copy()
+            start = time.time()
+            results = client.compute_job_sync('energy', geom, 'angstrom', **job_opts)
+            times[f'energy'] = time.time() - start
+            results['run'] = 'energy'
+            results.update(job_opts)
+            all_results.append(results)
+
+        #   gradient computations have to be separated from NACs
+        for job_i, state in enumerate(grads):
+            print("Grad ", job_i+1)
+            job_opts = base_options.copy()
+            if state > 0:
+                job_opts.update(excited_options)
+
+                if excited_type == 'cis':
+                    job_opts.update(excited_options)
+                    job_opts['cistarget'] = state
+                elif excited_type == 'cas':
+                    job_opts.update(excited_options)
+                    job_opts['castarget'] = state
+
+            if job_i > 0:
+                job_opts['guess'] = all_results[-1]['orbfile']
+
+                #   This is to fix a bug in terachem that still sets the c0.casscf file as the
+                #   previous job's orbital file
+                if job_i == 1:
+                    job_opts['guess'] = job_opts['guess'].replace('.casscf', '')
+            
+            start = time.time()
+
+            results = client.compute_job_sync('gradient', geom, 'angstrom', **job_opts)
+
+            # results['job_options'] = job_opts
+            # results = cleanup_job(results)
+            # json.dump(results, open(results['job_dir'] + '/results.json', 'w'), indent=2)
+
+            times[f'gradient_{state}'] = time.time() - start
+            results['run'] = 'gradient'
+            results.update(job_opts)
+            all_results.append(results)
+
+        #   run NAC jobs
+        for job_i, (nac1, nac2) in enumerate(NACs):
+            print("NAC ", job_i+1)
+            job_opts = base_options.copy()
+            job_opts.update(excited_options)
+
+            if excited_type == 'cis':
+                job_opts.update(excited_options)
+                job_opts['cistarget'] = state
+            elif excited_type == 'cas':
+                job_opts.update(excited_options)
+                job_opts['castarget'] = state
+
+            job_opts['nacstate1'] = nac1
+            job_opts['nacstate2'] = nac2
+
+            if dipole_deriv:
+                pass
+                # job_opts['cistransdipolederiv'] = 'yes'
+            if job_i > 0:
+                job_opts['guess'] = all_results[-1]['orbfile']
+
+            start = time.time()
+            results = client.compute_job_sync('coupling', geom, 'angstrom', **job_opts)
+            times[f'nac_{nac1}_{nac2}'] = time.time() - start
+            results['run'] = 'coupling'
+            results.update(job_opts)
+            all_results.append(results)
+
+
+        _print_times(times)
+        return all_results
     
     @staticmethod
     def run_TC_all_states(client: TCPBClient, geom, atoms: list[str], opts: dict, dipole_deriv=False,
@@ -217,6 +387,7 @@ class TCRunner():
 
         _print_times(times)
         return all_results
+    
 
 def format_output_LSCIVR(n_elec, job_data: list[dict]):
     atoms = job_data[0]['atoms']
