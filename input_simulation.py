@@ -32,13 +32,13 @@ pN0 = 0.0
 width = [1.0, 1.0, 1.0]
 
 # Specify an integrator (Choose from 'ABM', 'BSH', and 'RK4')
-integrator = 'RK4'
+integrator = 'ABM'
 # Size of time step (a.u.), number of steps (Only relevant for ABM)
 timestep, nstep = 1.0, 16700
 # Maximum propagation time (a.u.), BSH step to be tried (a.u.), error tolerance (ratio) (Only relevant for BSH)
 tmax_bsh, Hbsh, tol = 10, 3.0, 0.01 
 # Maximum propagation time (a.u.), one Runge-Kutta step (a.u.) (Only relevant for RK4)
-tmax_rk4, Hrk4 = 20, 5.0 
+tmax_rk4, Hrk4 = 20, 3.0 
 
 # Scaling factor of normal mode frequancies
 frq_scale = 0.967
@@ -58,14 +58,4 @@ init_state = 2
 # Restart request: 0 = no restart, 1 = restart
 restart = 0
 
-#   type of QC runner, either 'gamess or 'terachem'
-QC_RUNNER = 'gamess'
 
-#   TeraChem runner options
-tcr_host = '10.1.1.154'
-tcr_port = 9876
-tcr_job_options = {}
-tcr_state_options = {}
-
-#   GAMESS submission script name
-sub_script = None
