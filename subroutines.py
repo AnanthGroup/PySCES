@@ -19,7 +19,17 @@ import subprocess as sp
 import random
 from input_simulation import * 
 from input_gamess import nacme_option as opt 
-__location__ = os.path.realpath(os.path.join(os.getcwd(), os.path.dirname(__file__)))
+from fileIO import SimulationLogger, write_restart, read_restart
+# __location__ = os.path.realpath(os.path.join(os.getcwd(), os.path.dirname(__file__)))
+__location__ = ''
+
+#   temporary work arround for using local settings
+try:
+    sys.path.append(os.path.abspath(os.path.curdir))
+    from input_simulation_local import * 
+except:
+    from input_simulation import * 
+
 
 # Physical constants and unit conversion factors
 pi       = np.pi
@@ -338,7 +348,8 @@ def write_gms_input(input_name, opt, atoms, amu_mat, cart_ang):
     f.write('         iroot=%d' %opt['iroot'] +' wstate(1)='+opt['wstate']+' itermx=%d' %opt['itermx'] +' $end \n')
     f.write(' $cpmchf gcro='+opt['gcro']+' micit=%d kicit=%d' %(opt['micit'],opt['kicit']) +' prcchg='+opt['prcchg']+' prctol=%.1f' %opt['prctol'] +' \n')
     f.write('         napick='+opt['napick']+' nacst(1)='+opt['nacst']+' $end \n')
-    f.write(' $guess  guess='+opt['guess']+' norb=%d' %opt['norb'] +' $end \n')
+    if opt.get('guess', '') != '':
+        f.write(' $guess  guess='+opt['guess']+' norb=%d' %opt['norb'] +' $end \n')
     f.write(' $data \n')
     f.write('comment comment comment \n')
     f.write(opt['sym']+' \n')
@@ -359,7 +370,7 @@ def write_gms_input(input_name, opt, atoms, amu_mat, cart_ang):
     g.close()
     f.close()
     
-    return()
+    return input_file
 
 
 ##########################################
@@ -390,26 +401,35 @@ def write_subm_script(input_name):
 #####################################
 ### Call GAMESS NACME calculation ###
 #####################################
-def run_gms_cas(input_name, opt, atoms, amu_mat, qCart):
+def run_gms_cas(input_name, opt, atoms, amu_mat, qCart, submit_script_loc=None):
+    print("RUNNING CAS")
     # Convert Bohr into Angstrom
     qCart_ang = qCart/ang2bohr
     
     # Write an input file
-    write_gms_input(input_name, opt, atoms, amu_mat, qCart_ang)
+    input_file = write_gms_input(input_name, opt, atoms, amu_mat, qCart_ang)
     
-    # Write a submission script
-    write_subm_script(input_name)
-    
-    # change # ppn per node in 'rungms-pool' script
-    with open(os.path.join(__location__, 'rungms-pool'), 'r') as g:
-        all_lines = g.readlines()
-        all_lines[509] = "      @ NSMPCPU = %d \n" %(ncpu)
-            
-    # Change the mode of submission script
-    sp.run(['chmod', '777', 'run_%s' %input_name])
-    
-    # Submit the bash submission script to execute GAMESS
-    sp.call('./run_%s' %input_name)
+    if submit_script_loc is None:
+        # Write a submission script
+        write_subm_script(input_name)
+        
+        # change # ppn per node in 'rungms-pool' script
+        with open(os.path.join(__location__, 'rungms-pool'), 'r') as g:
+            all_lines = g.readlines()
+            all_lines[509] = "      @ NSMPCPU = %d \n" %(ncpu)
+                
+        # Change the mode of submission script
+        sp.run(['chmod', '777', 'run_%s' %input_name])
+        
+        # Submit the bash submission script to execute GAMESS
+        sp.call('./run_%s' %input_name)
+    else:
+        #   call supplied submission script
+        output_file = 'cas.out'
+        script_loc = os.path.abspath(submit_script_loc)
+        sp.call(f'{script_loc} {input_file} {output_file}'.split())
+    print("DONE RUNNING CAS")
+
     return()
 
 
@@ -473,7 +493,7 @@ def read_gms_dat(input_name):
     dat_file = input_name + '.dat'
     with open(os.path.join(__location__, dat_file), 'r') as f:
         for line in f:
-            if 'OPTIMIZED MCSCF' in line:
+            if 'OPTIMIZED MCSCF' in line or 'MCSCF OPTIMIZED' in line:
                 flag_orb = 0
                 [f.readline() for i in range(2)]
                 with open(os.path.join(__location__, 'vec_gamess'), 'w') as g:
@@ -1286,21 +1306,21 @@ def integrate_rk4(elecE, grad, nac, xvar, yvar, xStop, amu_mat):
    k1 = get_derivatives(au_mas, y0[:ndof], y0[ndof:], nac, grad, elecE)
    k1 = k1.flatten()
    for i in range(2*ndof):
-      y1[i] = y0[i] + 0.5*h*k1[i]
+        y1[i] = y0[i] + 0.5*h*k1[i]
 
    # Get derivatives (k2) at y1
    k2 = get_derivatives(au_mas, y1[:ndof], y1[ndof:], nac, grad, elecE)
    k2 = k2.flatten()
    # Take an intermediate step to y2
    for i in range(2*ndof):
-      y2[i] = y0[i] + 0.5*h*k2[i] # position
+        y2[i] = y0[i] + 0.5*h*k2[i] # position
 
    # Get derivatives (k3) at y2
    k3 = get_derivatives(au_mas, y2[:ndof], y2[ndof:], nac, grad, elecE)
    k3 = k3.flatten()
    # Take an intermediate step to y3
    for i in range(2*ndof):
-      y3[i] = y0[i] + h*k3[i] # position
+        y3[i] = y0[i] + h*k3[i] # position
 
    # Get derivatives (k4) at y3
    k4 = get_derivatives(au_mas, y3[:ndof], y3[ndof:], nac, grad, elecE)
@@ -1325,139 +1345,175 @@ def scipy_rk4(elecE, grad, nac, yvar, dt, au_mas):
 Main driver of RK4 and electronic structure 
 '''
 def rk4(initq,initp,tStop,H,restart,amu_mat,U):
-   proceed      = True
-   input_name   = 'cas'
-   au_mas = np.diag(amu_mat) * amu2au # masses of atoms in atomic unit (vector)
+    if QC_RUNNER == 'terachem':
+        from qcRunners.TeraChem import TCRunner, format_output_LSCIVR
 
-   # Format descriptor depending on the number of electronic states
-   total_format = '{:>12.4f}{:>12.5f}' # "time" "total"
-   for i in range(nel):
-      total_format += '{:>12.5f}' # "elec1" "elec2" ...
-   total_format += '\n'
+    logger = SimulationLogger(nel)
 
-   ### Initial-time property calculation ###
-   with open(os.path.join(__location__, 'progress.out'), 'a') as f:
-      f.write("Initial property evaluation started.\n")
-   if restart == 0:
-      t       = 0.0
-      initial_time = 0.0
-      q, p    = np.zeros(ndof), np.zeros(ndof)          # collections of all mapping variables
-      q[:nel], p[:nel] = initq[:nel], initp[:nel]
-      qN, pN  = initq[nel:], initp[nel:]                # collections of nuclear variables in normal coordinate
-      qC, pC  = rotate_norm_to_cart(qN, pN, U, amu_mat) # collections of nuclear variables in Cartesian coordinate
-      q[nel:], p[nel:] = qC, pC
-      y = np.concatenate((q, p))
+    proceed      = True
+    input_name   = 'cas'
+    au_mas = np.diag(amu_mat) * amu2au # masses of atoms in atomic unit (vector)
 
-      # Get atom labels
-      atoms = get_atom_label()
+    # Format descriptor depending on the number of electronic states
+    total_format = '{:>12.4f}{:>12.5f}' # "time" "total"
+    for i in range(nel):
+            total_format += '{:>12.5f}' # "elec1" "elec2" ...
+    total_format += '\n'
 
-      # Write initial nuclear geometry in the output file
-      record_nuc_geo(restart, t, atoms, qC)
+    #   very first step does not need a GAMESS guess
+    opt['guess'] = ''
 
-      # Update geo_gamess with qC
-      update_geo_gamess(atoms, amu_mat, qC)
-  
-      # Call GAMESS to compute E, dE/dR, and NAC
-      run_gms_cas(input_name, opt, atoms, amu_mat, qC)
-      elecE, grad, nac, flag_grad, flag_nac = read_gms_out(input_name)
-      if any([el == 1  for el in flag_grad]) or flag_nac == 1:
-         proceed = False
-      flag_orb = read_gms_dat(input_name)
-      if flag_orb == 1:
-         proceed = False
-      if not proceed:
-         sys.exit("Electronic structure calculation failed at initial time. Exitting.")
+    ### Initial-time property calculation ###
+    with open(os.path.join(__location__, 'progress.out'), 'a') as f:
+        f.write("Initial property evaluation started.\n")
+    if restart == 0:
+        t       = 0.0
+        initial_time = 0.0
+        q, p    = np.zeros(ndof), np.zeros(ndof)          # collections of all mapping variables
+        q[:nel], p[:nel] = initq[:nel], initp[:nel]
+        qN, pN  = initq[nel:], initp[nel:]                # collections of nuclear variables in normal coordinate
+        qC, pC  = rotate_norm_to_cart(qN, pN, U, amu_mat) # collections of nuclear variables in Cartesian coordinate
+        q[nel:], p[nel:] = qC, pC
+        y = np.concatenate((q, p))
 
-      # Total initial energy at t=0
-      init_energy = get_energy(au_mas, q, p, elecE)
-      with open(os.path.join(__location__, 'energy.out'), 'a') as g:
-         g.write(total_format.format(t, init_energy, *elecE))
+        # Get atom labels
+        atoms = get_atom_label()
 
-   elif restart == 1:
-      q, p = np.zeros(ndof), np.zeros(ndof)
-      F = np.zeros((2,ndof))
-      # Read the restart file
-      with open(os.path.join(__location__, 'restart.out'), 'r') as ff:
-         ff.readline() 
-         for i in range(ndof):
-            x = ff.readline().split()
-            q[i], p[i] = float(x[0]), float(x[1]) # Mapping variables already in Cartesian coordinate
-         [ff.readline() for i in range(2)]
+        # Write initial nuclear geometry in the output file
+        record_nuc_geo(restart, t, atoms, qC)
 
-         init_energy = float(ff.readline()) # Total energy
-         [ff.readline() for i in range(2)]
-
-         initial_time = float(ff.readline()) # Total simulation time at the beginning of restart run
-         t = initial_time       
- 
-      qC, pC = q[nel:], p[nel:]
-      y = np.concatenate((q, p))
-      
-      # Get atom labels
-      atoms = get_atom_label()
-
-      # Call GAMESS to compute E, dE/dR, and NAC
-      run_gms_cas(input_name, opt, atoms, amu_mat, qC)
-      elecE, grad, nac, flag_grad, flag_nac = read_gms_out(input_name)
-      if any([el == 1  for el in flag_grad]) or flag_nac == 1:
-         proceed = False
-      flag_orb = read_gms_dat(input_name)
-      if flag_orb == 1:
-         proceed = False
-      if not proceed:
-         sys.exit("Electronic structure calculation failed at initial time. Exitting.")
+        if QC_RUNNER == 'gamess':
+            # Update geo_gamess with qC
+            update_geo_gamess(atoms, amu_mat, qC)
+        
+            # Call GAMESS to compute E, dE/dR, and NAC
+            run_gms_cas(input_name, opt, atoms, amu_mat, qC, sub_script)
+            elecE, grad, nac, flag_grad, flag_nac = read_gms_out(input_name)
+            if any([el == 1  for el in flag_grad]) or flag_nac == 1:
+                proceed = False
+            flag_orb = read_gms_dat(input_name)
+            if flag_orb == 1:
+                proceed = False
+            if not proceed:
+                sys.exit("Electronic structure calculation failed at initial time. Exitting.")
+        else:
+            tc_runner = TCRunner(tcr_host, tcr_port, atoms, tcr_job_options, tcr_state_options)
+            job_results = tc_runner.run_TC_all_states(qC/ang2bohr)
+            elecE, grad, nac = format_output_LSCIVR(len(q0), job_results)
+            # exit()
+        # Total initial energy at t=0
+        init_energy = get_energy(au_mas, q, p, elecE)
+        with open(os.path.join(__location__, 'energy.out'), 'a') as g:
+            g.write(total_format.format(t, init_energy, *elecE))
    
-   X,Y = [],[]
-   X.append(t)
-   Y.append(y)
-   flag_energy = 0
-   flag_grad   = 0
-   flag_nac    = 0
-   flag_orb    = 0
-   energy      = [init_energy]
-   with open(os.path.join(__location__, 'progress.out'), 'a') as f:
-      f.write("Initilization done. Move on to propagation routine.\n")
+    elif restart == 1:
+        opt['guess'] = 'moread'
 
-   ### Runge-Kutta routine ###
-   while t < tStop:
-      if not proceed:
-         sys.exit("Electronic structure calculation failed in Runge-Kutta routine. Exitting.")
-      else:
-         H  = min(H, tStop-t)
-         with open(os.path.join(__location__, 'progress.out'), 'a') as f:
-            f.write('\n')
-            f.write('Starting 4th-order Runge-Kutta routine.\n')
-         #y  = integrate_rk4(elecE,grad,nac,t,y,t+H,amu_mat) 
-         y  = scipy_rk4(elecE,grad,nac,y,H,au_mas)
-         t += H
-         X.append(t)
-         Y.append(y)
-   
-         # ES calculation at new y
-         with open(os.path.join(__location__, 'progress.out'), 'a') as f:
-            f.write('\n')
-            f.write('Runge-Kutta step has been accepted.\n')
-         qC = y[nel:ndof]
-         update_geo_gamess(atoms, amu_mat, qC)
-         run_gms_cas(input_name, opt, atoms, amu_mat, qC)
-         elecE, grad, nac, flag_grad, flag_nac = read_gms_out(input_name)
-         if any([el == 1 for el in flag_grad]) or flag_nac == 1:
-            proceed = False
-         flag_orb = read_gms_dat(input_name)
-         if flag_orb == 1:
-            proceed = False
+        # q, p, init_energy, initial_time = read_restart('restart.json', ndof=ndof)
+        # t = initial_time
 
-         if proceed:
+        # Read the restart file
+        q, p = np.zeros(ndof), np.zeros(ndof)
+        F = np.zeros((2,ndof))
+        with open(os.path.join(__location__, 'restart.out'), 'r') as ff:
+                ff.readline() 
+                for i in range(ndof):
+                    x = ff.readline().split()
+                    q[i], p[i] = float(x[0]), float(x[1]) # Mapping variables already in Cartesian coordinate
+                [ff.readline() for i in range(2)]
+
+                init_energy = float(ff.readline()) # Total energy
+                [ff.readline() for i in range(2)]
+
+                initial_time = float(ff.readline()) # Total simulation time at the beginning of restart run
+                t = initial_time   
+                
+    
+        qC, pC = q[nel:], p[nel:]
+        y = np.concatenate((q, p))
+
+        # Get atom labels
+        atoms = get_atom_label()
+
+        # write_restart('restart_init.json', [y[:ndof], y[ndof:]], init_energy, t, nel, 'rk4')
+
+
+        if QC_RUNNER == 'gamess':
+            # Call GAMESS to compute E, dE/dR, and NAC
+            run_gms_cas(input_name, opt, atoms, amu_mat, qC, sub_script)
+            elecE, grad, nac, flag_grad, flag_nac = read_gms_out(input_name)
+            if any([el == 1  for el in flag_grad]) or flag_nac == 1:
+                proceed = False
+            flag_orb = read_gms_dat(input_name)
+            if flag_orb == 1:
+                proceed = False
+            if not proceed:
+                sys.exit("Electronic structure calculation failed at initial time. Exitting.")
+        else:
+            job_results = tc_runner.run_TC_all_states(qC/ang2bohr)
+            elecE, grad, nac = format_output_LSCIVR(len(q0), job_results)
+    
+    pops = compute_CF_single(q[0:nel], p[0:nel])
+    logger.write(t,init_energy, elecE,  grad, nac, pops)
+
+    opt['guess'] = 'moread'
+    X,Y = [],[]
+    X.append(t)
+    Y.append(y)
+    flag_energy = 0
+    flag_grad   = 0
+    flag_nac    = 0
+    flag_orb    = 0
+    energy      = [init_energy]
+    with open(os.path.join(__location__, 'progress.out'), 'a') as f:
+        f.write("Initilization done. Move on to propagation routine.\n")
+
+    ### Runge-Kutta routine ###
+    while t < tStop:
+        if not proceed:
+            sys.exit("Electronic structure calculation failed in Runge-Kutta routine. Exitting.")
+        else:
+            H  = min(H, tStop-t)
+            with open(os.path.join(__location__, 'progress.out'), 'a') as f:
+                f.write('\n')
+                f.write('Starting 4th-order Runge-Kutta routine.\n')
+            #y  = integrate_rk4(elecE,grad,nac,t,y,t+H,amu_mat) 
+            y  = scipy_rk4(elecE,grad,nac,y,H,au_mas)
+            t += H
+            X.append(t)
+            Y.append(y)
+    
+            # ES calculation at new y
+            with open(os.path.join(__location__, 'progress.out'), 'a') as f:
+                f.write('\n')
+                f.write('Runge-Kutta step has been accepted.\n')
+
+            qC = y[nel:ndof]
+
+            if QC_RUNNER == 'gamess':
+                update_geo_gamess(atoms, amu_mat, qC)
+                run_gms_cas(input_name, opt, atoms, amu_mat, qC, sub_script)
+                elecE, grad, nac, flag_grad, flag_nac = read_gms_out(input_name)
+                if any([el == 1 for el in flag_grad]) or flag_nac == 1:
+                    proceed = False
+                flag_orb = read_gms_dat(input_name)
+                if flag_orb == 1:
+                    proceed = False
+            else:
+                job_results = tc_runner.run_TC_all_states(qC/ang2bohr)
+                elecE, grad, nac = format_output_LSCIVR(len(q0), job_results)
+
+        if proceed:
             # Compute energy
             new_energy = get_energy(au_mas, y[:ndof], y[ndof:], elecE)
             with open(os.path.join(__location__, 'progress.out'), 'a') as f:
-               f.write('Energy = {:<12.6f} \n'.format(new_energy))
+                f.write('Energy = {:<12.6f} \n'.format(new_energy))
 
             # Check energy conservation
             if (init_energy-new_energy)/init_energy > 0.02: # 2% deviation = terrible without doubt
-               flag_energy = 1
-               proceed = False
-               sys.exit("Energy conservation failed during the propagation. Exitting.")
+                flag_energy = 1
+                proceed = False
+                sys.exit("Energy conservation failed during the propagation. Exitting.")
 
             # Update & store energy
             old_energy  = new_energy
@@ -1468,56 +1524,72 @@ def rk4(initq,initp,tStop,H,restart,amu_mat,U):
 
             # Record the electronic state energies
             with open(os.path.join(__location__, 'energy.out'), 'a') as g:
-               g.write(total_format.format(t, new_energy, *elecE))
+                g.write(total_format.format(t, new_energy, *elecE))
+
+            #   New logging information
+            pops = compute_CF_single(y[0:nel], y[ndof:ndof+nel])
+            logger.write(t, total_E=new_energy, elec_E=elecE,  grads=grad, NACs=nac, pops=pops)
+            write_restart('restart.json', [Y[-1][:ndof], Y[-1][ndof:]], new_energy, t, nel, 'rk4')
 
             if t == tStop:
-               with open(os.path.join(__location__, 'progress.out'), 'a') as f:
-                  f.write('Propagated to the final time step.\n')
+                with open(os.path.join(__location__, 'progress.out'), 'a') as f:
+                    f.write('Propagated to the final time step.\n')
 
-   coord = np.zeros((2,ndof,len(Y)))
-   for i in range(len(Y)):
-      coord[0,:,i] = Y[i][:ndof]
-      coord[1,:,i] = Y[i][ndof:]
+    coord = np.zeros((2,ndof,len(Y)))
+    for i in range(len(Y)):
+        coord[0,:,i] = Y[i][:ndof]
+        coord[1,:,i] = Y[i][ndof:]
 
-   ############################
-   ### Write a restart file ###
-   ############################
-   with open(os.path.join(__location__, 'restart.out'), 'w') as gg:
-       # Write the coordinates
-       gg.write('Coordinates (a.u.) at the last update: \n')
-       for i in range(ndof):
-           gg.write('{:>16.10f}{:>16.10f} \n'.format(coord[0,i,-1], coord[1,i,-1]))
-       gg.write('\n')
+    ############################
+    ### Write a restart file ###
+    ############################
+    with open(os.path.join(__location__, 'restart.out'), 'w') as gg:
+        # Write the coordinates
+        gg.write('Coordinates (a.u.) at the last update: \n')
+        for i in range(ndof):
+            gg.write('{:>16.10f}{:>16.10f} \n'.format(coord[0,i,-1], coord[1,i,-1]))
+        gg.write('\n')
 
-#       # Write the ES variables at the final step
-#       gg.write('Energies (a.u.) at the last update: \n')
-#       form = ''
-#       for i in range(nel):
-#           form += '{:>16.10f}'
-#        form += '\n'
-#       gg.write(form.format(*elecE))
-#       gg.write('\n')
-#
-#       gg.write('Gradients (a.u.) at the last update: \n')
-#       form = ''
-#       for i in range(nnuc):
-#           form += '{:>16.10f}'
-#       form += '\n'
-#       for i in range(nel):
-#          gg.write(form.format(*grad[i]))
-#       gg.write('\n')
+    #       # Write the ES variables at the final step
+    #       gg.write('Energies (a.u.) at the last update: \n')
+    #       form = ''
+    #       for i in range(nel):
+    #           form += '{:>16.10f}'
+    #        form += '\n'
+    #       gg.write(form.format(*elecE))
+    #       gg.write('\n')
+    #
+    #       gg.write('Gradients (a.u.) at the last update: \n')
+    #       form = ''
+    #       for i in range(nnuc):
+    #           form += '{:>16.10f}'
+    #       form += '\n'
+    #       for i in range(nel):
+    #          gg.write(form.format(*grad[i]))
+    #       gg.write('\n')
 
-       # Record the energy and the total time
-       gg.write('Energy at the last time step \n')
-       gg.write('{:>16.10f} \n'.format(energy[-1]))
-       gg.write('\n')
+        # Record the energy and the total time
+        gg.write('Energy at the last time step \n')
+        gg.write('{:>16.10f} \n'.format(energy[-1]))
+        gg.write('\n')
 
-       # Record the total time
-       gg.write('Total time in a.u. \n')
-       gg.write('{:>16.10f} \n'.format(t))
-       gg.write('\n')
+        # Record the total time
+        gg.write('Total time in a.u. \n')
+        gg.write('{:>16.10f} \n'.format(t))
+        gg.write('\n')
 
-   return(np.array(X), coord, initial_time)
+    return(np.array(X), coord, initial_time)
+
+def compute_CF_single(q, p):
+   ### Compute the estimator of electronic state population ###
+   pop = np.zeros(nel)
+
+   common_TCF = 2**(nel+1) * np.exp(-np.dot(q, q) - np.dot(p, p))
+   for i in range(nel):
+        final_state_TCF = q[i]**2 + p[i]**2 - 0.5
+        pop[i] = common_TCF * final_state_TCF
+
+   return pop
 
 
 '''

@@ -1,0 +1,14 @@
+#!/bin/bash 
+#SBATCH -J cas 
+#SBATCH -t 240:00:00 
+#SBATCH -n 1
+#SBATCH -N 1
+#SBATCH -p astra
+#SBATCH -o %x.o%j 
+#SBATCH -e %x.e%j 
+scontrol show hostnames $SLURM_JOB_NODELIST > HostFile 
+for node in $(scontrol show hostnames $SLURM_NODELIST); do 
+   srun -N 1-1 -n 1 -w $node /usr/bin/mkdir -p /tmp/$SLURM_JOB_ID/ 
+done 
+sleep 4 
+./runG_common_pool cas.inp 1
