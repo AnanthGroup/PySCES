@@ -12,7 +12,6 @@ dynamics of polyatomic molecules
 """
 
 import numpy as np
-import scipy.integrate as it
 import os
 import sys
 import subprocess as sp
@@ -1273,7 +1272,10 @@ def BulStoer(initq,initp,xStop,H,tol,restart,amu_mat,U):
 '''
 Function to take one integration step by 4th-order Runge-Kutta
 '''
-def integrate_rk4(elecE, grad, nac, xvar, yvar, xStop, amu_mat):
+def integrate_rk4(F, xvar, yvar, xStop, input_name, atoms, amu_mat, qC):
+   proceed = True
+
+   ### 4th-order Runge-Kutta formula ###
    au_mas = np.diag(amu_mat) * amu2au
    h  = xStop - xvar
    y0 = yvar.copy()
@@ -1281,45 +1283,91 @@ def integrate_rk4(elecE, grad, nac, xvar, yvar, xStop, amu_mat):
    y2 = np.zeros(2*ndof)
    y3 = np.zeros(2*ndof)
 
-   ### 4th-order Runge-Kutta routine ###
-   # Get derivatives (k1) at y0
-   k1 = get_derivatives(au_mas, y0[:ndof], y0[ndof:], nac, grad, elecE)
-   k1 = k1.flatten()
+   k1 = F.copy()
    for i in range(2*ndof):
-      y1[i] = y0[i] + 0.5*h*k1[i]
+      if i < ndof:
+         y1[i] = y0[i] + 0.5*h*k1[0,i] # position
+      elif i >= ndof:
+         y1[i] = y0[i] + 0.5*h*k1[1,i-ndof] # momentum
 
-   # Get derivatives (k2) at y1
-   k2 = get_derivatives(au_mas, y1[:ndof], y1[ndof:], nac, grad, elecE)
-   k2 = k2.flatten()
-   # Take an intermediate step to y2
-   for i in range(2*ndof):
-      y2[i] = y0[i] + 0.5*h*k2[i] # position
+   # ES calculation at y1
+   qC = y1[nel:ndof]
+   update_geo_gamess(atoms, amu_mat, qC)
+   with open(os.path.join(__location__, 'progress.out'), 'a') as aa:
+      aa.write('CAS calculation at y1\n')
+   run_gms_cas(input_name, opt, atoms, amu_mat, qC)
+   elecE, grad, nac, flag_grad, flag_nac = read_gms_out(input_name)
+   if any([el == 1 for el in flag_grad]) or flag_nac == 1:
+      proceed = False
+   flag_orb = read_gms_dat(input_name)
+   if flag_orb == 1:
+      proceed = False
 
-   # Get derivatives (k3) at y2
-   k3 = get_derivatives(au_mas, y2[:ndof], y2[ndof:], nac, grad, elecE)
-   k3 = k3.flatten()
-   # Take an intermediate step to y3
-   for i in range(2*ndof):
-      y3[i] = y0[i] + h*k3[i] # position
+   if proceed:
+      # Get derivatives (k2) at y1
+      k2 = get_derivatives(au_mas, y1[:ndof], y1[ndof:], nac, grad, elecE)
 
-   # Get derivatives (k4) at y3
-   k4 = get_derivatives(au_mas, y3[:ndof], y3[ndof:], nac, grad, elecE)
-   k4 = k4.flatten()
+      # Take an intermediate step to y2
+      for i in range(2*ndof):
+         if i < ndof:
+            y2[i] = y0[i] + 0.5*h*k2[0,i] # position
+         elif i >= ndof:
+            y2[i] = y0[i] + 0.5*h*k2[1,i-ndof] # momentum
+
+      # ES calculation at y2
+      qC = y2[nel:ndof]
+      update_geo_gamess(atoms, amu_mat, qC)
+      with open(os.path.join(__location__, 'progress.out'), 'a') as aa:
+         aa.write('CAS calculation at y2\n')
+      run_gms_cas(input_name, opt, atoms, amu_mat, qC)
+      elecE, grad, nac, flag_grad, flag_nac = read_gms_out(input_name)
+      if any([el == 1 for el in flag_grad]) or flag_nac == 1:
+         proceed = False
+      flag_orb = read_gms_dat(input_name)
+      if flag_orb == 1:
+         proceed = False
+
+   if proceed:
+      # Get derivatives (k3) at y2
+      k3 = get_derivatives(au_mas, y2[:ndof], y2[ndof:], nac, grad, elecE)
+
+      # Take an intermediate step to y3
+      for i in range(2*ndof):
+         if i < ndof:
+            y3[i] = y0[i] + h*k3[0,i] # position
+         elif i >= ndof:
+            y3[i] = y0[i] + h*k3[1,i-ndof] # momentum
+
+      # ES calculation at y3
+      qC = y3[nel:ndof]
+      update_geo_gamess(atoms, amu_mat, qC)
+      with open(os.path.join(__location__, 'progress.out'), 'a') as aa:
+         aa.write('CAS calculation at y3\n')
+      run_gms_cas(input_name, opt, atoms, amu_mat, qC)
+      elecE, grad, nac, flag_grad, flag_nac = read_gms_out(input_name)
+      if any([el == 1 for el in flag_grad]) or flag_nac == 1:
+         proceed = False
+      flag_orb = read_gms_dat(input_name)
+      if flag_orb == 1:
+         proceed = False
+
+   if proceed:
+      # Get derivatives (k4) at y3
+      k4 = get_derivatives(au_mas, y3[:ndof], y3[ndof:], nac, grad, elecE)
+
+   if not proceed:
+      sys.exit("Electronic structure calculation failed in midpoint algorithm. Exitting.")
 
    # Compute the coordinates at t=x+H
    result = np.zeros(2*ndof)
    for i in range(2*ndof):
-      result[i] = y0[i] + h*(k1[i] + 2*k2[i] + 2*k3[i] + k4[i])/6.0
+      if i < ndof:
+         result[i] = y0[i] + h*(k1[0,i] + 2*k2[0,i] + 2*k3[0,i] + k4[0,i])/6.0
+      elif i >= ndof:
+         result[i] = y0[i] + h*(k1[1,i-ndof] + 2*k2[1,i-ndof] + 2*k3[1,i-ndof] + k4[1,i-ndof])/6.0
 
    return(result)
 
-def scipy_rk4(elecE, grad, nac, yvar, dt, au_mas):
-    def get_deriv(t, y0):
-        der = get_derivatives(au_mas, y0[:ndof], y0[ndof:], nac, grad, elecE)
-        der = der.flatten()
-        return(der)
-    result = it.solve_ivp(get_deriv, (0,dt), yvar, method='RK45', max_step=dt, t_eval=[dt], rtol=1e-10, atol=1e-10)
-    return(result.y.flatten())
 
 '''
 Main driver of RK4 and electronic structure 
@@ -1365,6 +1413,7 @@ def rk4(initq,initp,tStop,H,restart,amu_mat,U):
       flag_orb = read_gms_dat(input_name)
       if flag_orb == 1:
          proceed = False
+
       if not proceed:
          sys.exit("Electronic structure calculation failed at initial time. Exitting.")
 
@@ -1372,6 +1421,9 @@ def rk4(initq,initp,tStop,H,restart,amu_mat,U):
       init_energy = get_energy(au_mas, q, p, elecE)
       with open(os.path.join(__location__, 'energy.out'), 'a') as g:
          g.write(total_format.format(t, init_energy, *elecE))
+
+      # Get derivatives at t=0
+      F = get_derivatives(au_mas, q, p, nac, grad, elecE)
 
    elif restart == 1:
       q, p = np.zeros(ndof), np.zeros(ndof)
@@ -1382,6 +1434,11 @@ def rk4(initq,initp,tStop,H,restart,amu_mat,U):
          for i in range(ndof):
             x = ff.readline().split()
             q[i], p[i] = float(x[0]), float(x[1]) # Mapping variables already in Cartesian coordinate
+         [ff.readline() for i in range(2)]
+
+         for i in range(ndof):
+            x = ff.readline().split()
+            F[0,i], F[1,i] = float(x[0]), float(x[1]) # derivative of each MV
          [ff.readline() for i in range(2)]
 
          init_energy = float(ff.readline()) # Total energy
@@ -1395,17 +1452,6 @@ def rk4(initq,initp,tStop,H,restart,amu_mat,U):
       
       # Get atom labels
       atoms = get_atom_label()
-
-      # Call GAMESS to compute E, dE/dR, and NAC
-      run_gms_cas(input_name, opt, atoms, amu_mat, qC)
-      elecE, grad, nac, flag_grad, flag_nac = read_gms_out(input_name)
-      if any([el == 1  for el in flag_grad]) or flag_nac == 1:
-         proceed = False
-      flag_orb = read_gms_dat(input_name)
-      if flag_orb == 1:
-         proceed = False
-      if not proceed:
-         sys.exit("Electronic structure calculation failed at initial time. Exitting.")
    
    X,Y = [],[]
    X.append(t)
@@ -1421,14 +1467,13 @@ def rk4(initq,initp,tStop,H,restart,amu_mat,U):
    ### Runge-Kutta routine ###
    while t < tStop:
       if not proceed:
-         sys.exit("Electronic structure calculation failed in Runge-Kutta routine. Exitting.")
+         sys.exit("Electronic structure calculation failed in Bulirsch-Stoer routine. Exitting.")
       else:
          H  = min(H, tStop-t)
          with open(os.path.join(__location__, 'progress.out'), 'a') as f:
             f.write('\n')
             f.write('Starting 4th-order Runge-Kutta routine.\n')
-         #y  = integrate_rk4(elecE,grad,nac,t,y,t+H,amu_mat) 
-         y  = scipy_rk4(elecE,grad,nac,y,H,au_mas)
+         y  = integrate_rk4(F,t,y,t+H,input_name,atoms,amu_mat,qC) # midpoint method
          t += H
          X.append(t)
          Y.append(y)
@@ -1448,6 +1493,9 @@ def rk4(initq,initp,tStop,H,restart,amu_mat,U):
             proceed = False
 
          if proceed:
+            # Get derivatives at new y
+            F = get_derivatives(au_mas, y[:ndof], y[ndof:], nac, grad, elecE)
+         
             # Compute energy
             new_energy = get_energy(au_mas, y[:ndof], y[ndof:], elecE)
             with open(os.path.join(__location__, 'progress.out'), 'a') as f:
@@ -1459,7 +1507,7 @@ def rk4(initq,initp,tStop,H,restart,amu_mat,U):
                proceed = False
                sys.exit("Energy conservation failed during the propagation. Exitting.")
 
-            # Update & store energy
+            # Update energy, derivatives, coordinates, and total time
             old_energy  = new_energy
             energy.append(new_energy)
 
@@ -1489,23 +1537,11 @@ def rk4(initq,initp,tStop,H,restart,amu_mat,U):
            gg.write('{:>16.10f}{:>16.10f} \n'.format(coord[0,i,-1], coord[1,i,-1]))
        gg.write('\n')
 
-#       # Write the ES variables at the final step
-#       gg.write('Energies (a.u.) at the last update: \n')
-#       form = ''
-#       for i in range(nel):
-#           form += '{:>16.10f}'
-#        form += '\n'
-#       gg.write(form.format(*elecE))
-#       gg.write('\n')
-#
-#       gg.write('Gradients (a.u.) at the last update: \n')
-#       form = ''
-#       for i in range(nnuc):
-#           form += '{:>16.10f}'
-#       form += '\n'
-#       for i in range(nel):
-#          gg.write(form.format(*grad[i]))
-#       gg.write('\n')
+       # Write the deerivatives
+       gg.write('Forces (a.u.) at the last update: \n')
+       for i in range(ndof):
+           gg.write('{:>16.10f}{:>16.10f} \n'.format(F[0,i],F[1,i]))
+       gg.write('\n')
 
        # Record the energy and the total time
        gg.write('Energy at the last time step \n')
