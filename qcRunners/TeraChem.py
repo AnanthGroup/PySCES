@@ -5,7 +5,7 @@ import numpy as np
 from tcpb import TCProtobufClient as TCPBClient
 import time
 import warnings
-import json
+import shutil
 
 
 def _print_times(times):
@@ -87,6 +87,19 @@ class TCRunner():
         results_file = os.path.join(results['job_scr_dir'], 'results.dat')
         results['results.dat'] = open(results_file).readlines()
         return results
+    
+    @staticmethod
+    def remove_previous_job_dir(client: TCPBClient):
+        results = client.prev_results
+        TCRunner.remove_previous_scr_dir(client)
+        job_dir = results['job_dir']
+        shutil.rmtree(job_dir)
+
+    @staticmethod
+    def remove_previous_scr_dir(client: TCPBClient):
+        results = client.prev_results
+        scr_dir = results['job_scr_dir']
+        shutil.rmtree(scr_dir)
 
     @staticmethod
     def cleanup_multiple_jobs(results: list, *remove: str):
@@ -125,7 +138,7 @@ class TCRunner():
 
         return cleaned
 
-
+    @staticmethod
     def run_TC_single(client: TCPBClient, geom, atoms: list[str], opts: dict):
         opts['atoms'] = atoms
         start = time.time()
