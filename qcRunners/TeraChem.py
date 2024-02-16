@@ -3,12 +3,25 @@
 import os
 import numpy as np
 from tcpb import TCProtobufClient as TCPBClient
+from tcpb.exceptions import ServerError
 import time
 import warnings
 import shutil
+import socket
+import subprocess
+import multiprocessing
+import time
+import psutil
+
+_server_processes = {}
+
+class TCServerStallError(Exception):
+    def __init__(self, message):            
+        # Call the base class constructor with the parameters it needs
+        super().__init__(message)
 
 
-def _print_times(times):
+def _print_times(times: dict):
     total = 0.0
     print()
     print("Timings")
@@ -48,21 +61,120 @@ def _convert(value):
     else:
         return value
 
+def start_TC_server(port: int):
+    '''
+        Start a new TeraChem server. 
+        
+        Parameters
+        ----------
+        port: int, port number for the server to use
+
+        Returns
+        -------
+        host: string, the host of the server being run
+    '''
+    host = socket.gethostbyname(socket.gethostname())
+
+    #   make sure terachem executable is found
+    tc_bin = shutil.which('terachem')
+    if tc_bin is None:
+        raise RuntimeError("executable 'terachem' not fond")
+    
+    #   make sure the server isn't already running with this host:port combo
+    try:
+        tmp_client = TCPBClient(host, port)
+        tmp_client.connect()
+        if tmp_client.is_available():
+            raise Exception(f'Python does not controll TC Server at {host}:{port}')
+    except ServerError:
+        #   A server error indicates that it is NOT running.
+        #   This is GOOD, now we can continue to start our own process.
+        pass
+    
+    #   start TC process
+    command = f'terachem -s {port}'
+    process = subprocess.Popen(command.split(), shell=False)
+    time.sleep(10)
+
+    #   set up a temporary client to make sure it is open
+    try:
+        tmp_client = TCPBClient(host, port)
+        TCRunner.wait_until_available(tmp_client)
+        _server_processes[(host, port)] = process
+        tmp_client.disconnect()
+    except TimeoutError as e:
+        raise RuntimeError(f'Could not start TeraChem server on {host} with port {port}')
+    
+    return host
+
+def stop_TC_server(host: str, port: int):
+    '''
+        Stop the TC Server. Python must have started the server in the first place.
+    '''
+    key = (host, port)
+    if key not  in _server_processes:
+        raise ValueError(f'Host:port {host}:{port} not found in current process list. Python must own the server process.')
+    
+    parent_pid = _server_processes[(host, port)].pid
+    parent = psutil.Process(parent_pid)
+    for child in parent.children(recursive=True):  # or parent.children() for recursive=False
+        child.kill()
+    parent.kill()
+
+def _start_TC_server(port: int):
+    ip = socket.gethostbyname(socket.gethostname())
+
+    #   make sure terachem executable is found
+    tc_bin = shutil.which('terachem')
+    if tc_bin is None:
+        raise RuntimeError("executable 'terachem' not fond")
+    
+    try:
+        command = f'terachem -s {port}'
+        process = subprocess.Popen(command.split())
+        # process = subprocess.run(command.split())
+        _server_processes[port] = process
+    except:
+        return None
+    
+    return ip
 
 class TCRunner():
-    def __init__(self, host: str, port: int, atoms: list, tc_options: dict, run_options: dict={}, max_wait=20, dipole_deriv = False) -> None:
+    def __init__(self, 
+                 host: str, 
+                 port: int, 
+                 atoms: list,
+                 tc_options: dict,
+                 start_new:  bool=False,
+                 run_options: dict={}, 
+                 max_wait=20, 
+                 dipole_deriv = False) -> None:
 
         #   set up the server
+        if start_new:
+            host = start_TC_server(port)
+
         self._client = TCPBClient(host=host, port=port)
         self.wait_until_available(self._client, max_wait=max_wait)
-
+        self._host = host
+        self._port = port
 
         self._atoms = np.copy(atoms)
         self._base_options = tc_options.copy()
         self._max_state = run_options.get('max_state', 0)
-        self._grads = run_options.get('grads', [])
-        self._NACs = run_options.pop('NACs', [])
+        self._grads = run_options.get('grads', False)
+        self._NACs = run_options.pop('NACs', False)
         self._dipole_deriv = dipole_deriv
+
+        self._cas_guess = None
+        self._scf_guess = None
+        self._ci_guess = None
+
+        #   timings and server stalling
+        self._max_time_list = []
+        self._max_time = None
+        self._restart_on_stall = True
+        self._n_calls = 0
 
     @staticmethod
     def wait_until_available(client: TCPBClient, max_wait=10.0, time_btw_check=1.0):
@@ -81,6 +193,7 @@ class TCRunner():
                 if total_wait >= max_wait:
                     raise TimeoutError('Maximum time allotted for checking for TeraChem server')
         print('Terachem Server is available')
+        print(avail)
 
     @staticmethod
     def append_results_file(results: dict):
@@ -147,25 +260,97 @@ class TCRunner():
         print(f"Job completed in {end - start: .2f} seconds")
 
         return results
+    
+    def compute_job_sync(self, jobType="energy", geom=None, unitType="bohr", **kwargs):
+        """Wrapper for send_job_async() and recv_job_async(), using check_job_complete() to poll the server.
+           Main funcitonality is coppied from TCProtobufClient.send_job_async()
+
+        Parameters
+        ----------
+            jobType:    Job type key, as defined in the pb.JobInput.RunType enum (defaults to 'energy')
+            geom:       Cartesian geometry of the new point
+            unitType:   Unit type key, as defined in the pb.Mol.UnitType enum (defaults to 'bohr')
+            **kwargs:   Additional TeraChem keywords, check _process_kwargs for behaviour
+
+        Returns
+        -------
+            dict: Results mirroring recv_job_async
+        """
+
+        max_time = self._max_time
+        if max_time is None and self._restart_on_stall:
+            return self._client.compute_job_sync(jobType, geom, unitType, **kwargs)
+        else:
+            total_time = 0.0
+            accepted = self._client.send_job_async(jobType, geom, unitType, **kwargs)
+            while accepted is False:
+                start_time = time.time()
+                time.sleep(0.5)
+                accepted = self._client.send_job_async(jobType, geom, unitType, **kwargs)
+                end_time = time.time()
+                total_time += (end_time - start_time)
+                if total_time > max_time and max_time >= 0.0:
+                    print("FAILING: ", total_time, max_time)
+                    raise TCServerStallError('TeraChem server might have stalled')
+
+            completed = self._client.check_job_complete()
+            while completed is False:
+                start_time = time.time()
+                time.sleep(0.5)
+                completed = self._client.check_job_complete()
+                
+                # if self._n_calls == 2:
+                #     max_time = 12
+                #     print("STALLING: ", total_time, max_time)
+                #     completed = False
+                # else:
+                #     completed = self._client.check_job_complete()
+
+                end_time = time.time()
+                total_time += (end_time - start_time)
+                if total_time > max_time and max_time >= 0.0:
+                    print("FAILING: ", total_time, max_time)
+                    raise TCServerStallError('TeraChem server might have stalled')
+
+            return self._client.recv_job_async()
 
     def run_TC_new_geom(self, geom):
-        return self.run_TC_all_states_2(
-            self._client, 
-            geom, 
-            self._atoms, 
-            self._base_options, 
-            self._dipole_deriv,
-            self._max_state, 
-            self._grads, 
-            self._NACs)
+
+        try:
+            result = self._run_TC_new_geom_kernel(geom)
+        except TCServerStallError as error:
+            host, port = self._host, self._port
+            print('TC Server stalled: attempting to restart server')
+            stop_TC_server(host, port)
+            time.sleep(2.0)
+            start_TC_server(port)
+            self._client = TCPBClient(host=host, port=port)
+            self.wait_until_available(self._client, max_wait=20)
+            print('Started new TC Server: re-running current step')
+            result = self.run_TC_new_geom(geom)
+                
+        return result
     
+    def set_avg_max_times(self, times: dict):
+        print(f'{times=}')
+        max_time = np.max(list(times.values()))
+        self._max_time_list.append(max_time)
+        self._max_time = np.mean(self._max_time_list)*5
     
-    @staticmethod
-    def run_TC_all_states_2(client: TCPBClient, geom, atoms: list[str], opts: dict, dipole_deriv=False,
-            max_state:int=0, 
-            gradients:bool=True, 
-            couplings:bool=True):
-        
+
+    def _run_TC_new_geom_kernel(self, geom):
+
+        self._n_calls += 1
+        client = self._client
+        atoms = self._atoms
+        opts = self._base_options.copy()
+        dipole_deriv = self._dipole_deriv
+        max_state = self._max_state
+        gradients = self._grads
+        couplings = self._NACs
+
+        self._job_counter = 0
+    
         times = {}
 
         #   convert all keys to lowercase
@@ -189,7 +374,8 @@ class TCRunner():
                     excited_options[key] = val
                 else:
                     base_options[key] = val
-        elif orig_opts.get('casscf', '') == 'yes':
+            self._ci_guess = 'cis_restart_' + str(os.getpid())
+        elif orig_opts.get('casscf', '') == 'yes' or orig_opts.get('casci', '') == 'yes':
             excited_type = 'cas'
             #   CAS-CI and CAS-SCF
             for key, val in orig_opts.items():
@@ -225,13 +411,13 @@ class TCRunner():
             base_options['cisrestart'] = 'cis_restart_' + str(os.getpid())
         base_options['purify'] = False
         base_options['atoms'] = atoms
-        
+
         #   run energy only if gradients and NACs are not requested
         all_results = []
         if len(grads) == 0 and len(NACs) == 0:
             job_opts = base_options.copy()
             start = time.time()
-            results = client.compute_job_sync('energy', geom, 'angstrom', **job_opts)
+            results = self.compute_job_sync('energy', geom, 'angstrom', **job_opts)
             times[f'energy'] = time.time() - start
             results['run'] = 'energy'
             results.update(job_opts)
@@ -241,31 +427,22 @@ class TCRunner():
         for job_i, state in enumerate(grads):
             print("Grad ", job_i+1)
             job_opts = base_options.copy()
-            if state > 0:
-                job_opts.update(excited_options)
 
+            if excited_type == 'cas':
+                job_opts.update(excited_options)
+                job_opts['castarget'] = state
+
+            elif state > 0:
                 if excited_type == 'cis':
                     job_opts.update(excited_options)
                     job_opts['cistarget'] = state
-                elif excited_type == 'cas':
-                    job_opts.update(excited_options)
-                    job_opts['castarget'] = state
+                    
 
-            if job_i > 0:
-                job_opts['guess'] = all_results[-1]['orbfile']
+            self._set_guess(job_opts, excited_type, all_results, state)
 
-                #   This is to fix a bug in terachem that still sets the c0.casscf file as the
-                #   previous job's orbital file
-                if job_i == 1:
-                    job_opts['guess'] = job_opts['guess'].replace('.casscf', '')
-            
             start = time.time()
 
-            results = client.compute_job_sync('gradient', geom, 'angstrom', **job_opts)
-
-            # results['job_options'] = job_opts
-            # results = cleanup_job(results)
-            # json.dump(results, open(results['job_dir'] + '/results.json', 'w'), indent=2)
+            results = self.compute_job_sync('gradient', geom, 'angstrom', **job_opts)
 
             times[f'gradient_{state}'] = time.time() - start
             results['run'] = 'gradient'
@@ -294,8 +471,10 @@ class TCRunner():
             if job_i > 0:
                 job_opts['guess'] = all_results[-1]['orbfile']
 
+            self._set_guess(job_opts, excited_type, all_results, max(nac1, nac2))
+
             start = time.time()
-            results = client.compute_job_sync('coupling', geom, 'angstrom', **job_opts)
+            results = self.compute_job_sync('coupling', geom, 'angstrom', **job_opts)
             times[f'nac_{nac1}_{nac2}'] = time.time() - start
             results['run'] = 'coupling'
             results.update(job_opts)
@@ -303,7 +482,36 @@ class TCRunner():
 
 
         _print_times(times)
+        self.set_avg_max_times(times)
         return all_results
+    
+    def _set_guess(self, job_opts: dict, excited_type: str, all_results: list[dict], state):
+
+        if state > 0:
+            if excited_type == 'cas':
+                for prev_job in reversed(all_results):
+                    if prev_job.get('castarget', 0) >= 1:
+                        prev_orb_file = prev_job['orbfile']
+                        if prev_orb_file[-6:] == 'casscf':
+                            self._cas_guess = prev_orb_file
+                            break
+
+        for prev_job in reversed(all_results):
+            if 'orbfile' in prev_job:
+                self._scf_guess = prev_job['orbfile']
+                #   This is to fix a bug in terachem that still sets the c0.casscf file as the
+                #   previous job's orbital file
+                if self._scf_guess[-6:] == 'casscf':
+                    self._scf_guess = self._scf_guess[0:-7]
+                break
+
+        if os.path.isfile(str(self._cas_guess)):
+            job_opts['casguess'] = self._cas_guess
+        if os.path.isfile(str(self._scf_guess)):
+            job_opts['guess'] = self._scf_guess
+        if os.path.isfile(str(self._ci_guess)):
+            job_opts['cisrestart'] = self._scf_guess
+
     
     @staticmethod
     def run_TC_all_states(client: TCPBClient, geom, atoms: list[str], opts: dict, dipole_deriv=False,
@@ -411,7 +619,7 @@ def format_output_LSCIVR(n_elec, job_data: list[dict]):
     
     for job in job_data:
         if job['run'] == 'gradient':
-            state = job.get('cistarget', 0)
+            state = job.get('cistarget', job.get('castarget', 0))
             grads[state] = np.array(job['gradient']).flatten()
             if isinstance(job['energy'], float):
                 energies[state] = job['energy']

@@ -1397,8 +1397,8 @@ def rk4(initq,initp,tStop,H,restart,amu_mat,U):
             if not proceed:
                 sys.exit("Electronic structure calculation failed at initial time. Exitting.")
         else:
-            tc_runner = TCRunner(tcr_host, tcr_port, atoms, tcr_job_options, tcr_state_options)
-            job_results = tc_runner.run_TC_all_states(qC/ang2bohr)
+            tc_runner = TCRunner(tcr_host, tcr_port, atoms, tcr_job_options, run_options=tcr_state_options, start_new=True)
+            job_results = tc_runner.run_TC_new_geom(qC/ang2bohr)
             elecE, grad, nac = format_output_LSCIVR(len(q0), job_results)
             # exit()
         # Total initial energy at t=0
@@ -1440,6 +1440,7 @@ def rk4(initq,initp,tStop,H,restart,amu_mat,U):
 
         if QC_RUNNER == 'gamess':
             # Call GAMESS to compute E, dE/dR, and NAC
+            print("QC: ", qC/ang2bohr)
             run_gms_cas(input_name, opt, atoms, amu_mat, qC, sub_script)
             elecE, grad, nac, flag_grad, flag_nac = read_gms_out(input_name)
             if any([el == 1  for el in flag_grad]) or flag_nac == 1:
@@ -1450,9 +1451,12 @@ def rk4(initq,initp,tStop,H,restart,amu_mat,U):
             if not proceed:
                 sys.exit("Electronic structure calculation failed at initial time. Exitting.")
         else:
-            job_results = tc_runner.run_TC_all_states(qC/ang2bohr)
+            tc_runner = TCRunner(tcr_host, tcr_port, atoms, tcr_job_options, run_options=tcr_state_options)
+            job_results = tc_runner.run_TC_new_geom(qC/ang2bohr)
+            # import json
+            # json.dump(tc_runner.cleanup_multiple_jobs(job_results), open('tmp.json', 'w'), indent=4)
             elecE, grad, nac = format_output_LSCIVR(len(q0), job_results)
-    
+
     pops = compute_CF_single(q[0:nel], p[0:nel])
     logger.write(t,init_energy, elecE,  grad, nac, pops)
 
@@ -1500,7 +1504,7 @@ def rk4(initq,initp,tStop,H,restart,amu_mat,U):
                 if flag_orb == 1:
                     proceed = False
             else:
-                job_results = tc_runner.run_TC_all_states(qC/ang2bohr)
+                job_results = tc_runner.run_TC_new_geom(qC/ang2bohr)
                 elecE, grad, nac = format_output_LSCIVR(len(q0), job_results)
 
         if proceed:
