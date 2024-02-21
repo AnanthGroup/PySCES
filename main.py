@@ -31,7 +31,7 @@ except:
 initq, initp = np.zeros(ndof-6), np.zeros(ndof-6)
 
 # Read geo_gamess and hess_gamess
-amu_mat, xyz_ang, frq, redmas, L, U = get_geo_hess()
+amu_mat, xyz_ang, frq, redmas, L, U, com_ang = get_geo_hess()
 
 if restart == 0: # If this is not a restart run
     # Rotate Cartesian coordinate into normal coordinate (normal_geo is in A.U.)
@@ -50,17 +50,17 @@ if restart == 0: # If this is not a restart run
 
 # Start the propagation routine
 if integrator == 'ABM':
-    time_array,coord,flag_energy,flag_grad,flag_nac,flag_orb,initial_time = ME_ABM(restart, initq, initp, amu_mat, U)
+    time_array,coord,flag_energy,flag_grad,flag_nac,flag_orb,initial_time = ME_ABM(restart, initq, initp, amu_mat, U, com_ang)
     if flag_energy == 0: # If energy is conserved,
         if all([el == 0 for el in flag_grad]) and flag_nac == 0 and flag_orb == 0: # If no error is raised by the CAS calculations
             compute_CF(time_array, coord)
 
 elif integrator == 'BSH':
-    time_array, coord, initial_time = BulStoer(initq,initp,tmax_bsh,Hbsh,tol,restart,amu_mat,U)
+    time_array, coord, initial_time = BulStoer(initq,initp,tmax_bsh,Hbsh,tol,restart,amu_mat,U, com_ang)
     compute_CF(time_array, coord)
 
 elif integrator == 'RK4':
-    time_array, coord, initial_time = rk4(initq,initp,tmax_rk4,Hrk4,restart,amu_mat,U)
+    time_array, coord, initial_time = rk4(initq,initp,tmax_rk4,Hrk4,restart,amu_mat,U, com_ang)
     compute_CF(time_array, coord)
 
 

@@ -29,6 +29,7 @@ try:
     from input_simulation_local import * 
 except:
     from input_simulation import * 
+    
 
 
 # Physical constants and unit conversion factors
@@ -54,6 +55,7 @@ beta     = 1.0/(temp * k2autmp) # inverse temperature in atomic unit
 ### 4. Normal mode reduced masses
 ### 5. L matrix (GAMESS hassian output)
 ### 6. U matrix (Hessian unitary matrix)
+### 7. center of mass vector
 ####################################################
 def get_geo_hess():
     # Read Cartesian coordinate of initial geometry
@@ -129,8 +131,14 @@ def get_geo_hess():
         new = U[:,i]/np.sqrt(norm)
         U = np.delete(U, i, axis=1)
         U = np.insert(U, i, new, axis=1)
+
+    #   compute center of mass and remove from geometry
+    amu = np.array(amu)
+    xyz_shaped = xyz_ang.reshape((-1, 3))
+    com = np.average(xyz_shaped, axis=0, weights=amu)
+    xyz_ang = (xyz_shaped - com).flatten()
     
-    return(amu_mat, xyz_ang, frq, redmas, L, U)
+    return(amu_mat, xyz_ang, frq, redmas, L, U, com)
 
 
 ##############################################################################
@@ -290,14 +298,21 @@ def rotate_norm_to_cart(qN, pN, U, amu_mat):
 #####################################################
 ### Record the nuclear geometry at each time step ###
 #####################################################
-def record_nuc_geo(restart, total_time, atoms, qCart):
+def record_nuc_geo(restart, total_time, atoms, qCart, com_ang=None):
     f = open(os.path.join(__location__, 'nuc_geo.xyz'), 'a')
     
+    if com_ang is None:
+        com_ang = np.zeros(3)
+
     qCart_ang = qCart/ang2bohr
     f.write('%d \n' %natom)
     f.write('%f \n' %total_time)
     for i in range(natom):
-        f.write('{:<5s}{:>12.6f}{:>12.6f}{:>12.6f} \n'.format(atoms[i],qCart_ang[3*i+0],qCart_ang[3*i+1],qCart_ang[3*i+2]))
+        f.write('{:<5s}{:>12.6f}{:>12.6f}{:>12.6f} \n'.format(
+            atoms[i],
+            qCart_ang[3*i+0] + com_ang[0],
+            qCart_ang[3*i+1] + com_ang[1],
+            qCart_ang[3*i+2] + com_ang[2]))
     f.close()
     return()
 
@@ -637,7 +652,7 @@ def get_energy(au_mas, q, p, elecE):
 ### MASS-WEIGHTED.  
 #############################################################################
 '''Last edited by by Ken Miyazaki on 05/10/2023'''
-def ME_ABM(restart, initq, initp, amu_mat, U):
+def ME_ABM(restart, initq, initp, amu_mat, U, com_ang):
     force = np.zeros((2, ndof, 5))
     der   = np.zeros((2, ndof))
     coord = np.zeros((2, ndof, nstep+1))
@@ -665,7 +680,7 @@ def ME_ABM(restart, initq, initp, amu_mat, U):
         atoms = get_atom_label()
         
         # Write initial nuclear geometry in the output file
-        record_nuc_geo(restart, x, atoms, qC)
+        record_nuc_geo(restart, x, atoms, qC, com_ang)
         
     elif restart == 1: # If this is a restart run
         q, p    = np.zeros(ndof), np.zeros(ndof)
@@ -899,7 +914,7 @@ def ME_ABM(restart, initq, initp, amu_mat, U):
                 X.append(x)
                 
                 # Record nuclear geometry in angstrom
-                record_nuc_geo(restart, x, atoms, qC)
+                record_nuc_geo(restart, x, atoms, qC, com_ang)
                 
                 # Record the electronic state energies
                 with open(os.path.join(__location__, 'energy.out'), 'a') as g:
@@ -1107,7 +1122,7 @@ def integrate(F, xvar, yvar, xStop, tol, input_name, atoms, amu_mat, qC):
 # H     = increment of x at which results are stored
 # F     = user-supplied function that returns the array F(x,y)={y'[0],y'[1],...,y'[n-1]}
 # =============================================================================
-def BulStoer(initq,initp,xStop,H,tol,restart,amu_mat,U):
+def BulStoer(initq,initp,xStop,H,tol,restart,amu_mat,U, com_ang):
    proceed      = True
    input_name   = 'cas'
    au_mas = np.diag(amu_mat) * amu2au # masses of atoms in atomic unit (vector)
@@ -1135,7 +1150,7 @@ def BulStoer(initq,initp,xStop,H,tol,restart,amu_mat,U):
       atoms = get_atom_label()
 
       # Write initial nuclear geometry in the output file
-      record_nuc_geo(restart, x, atoms, qC)
+      record_nuc_geo(restart, x, atoms, qC, com_ang)
 
       # Update geo_gamess with qC
       update_geo_gamess(atoms, amu_mat, qC)
@@ -1246,7 +1261,7 @@ def BulStoer(initq,initp,xStop,H,tol,restart,amu_mat,U):
             energy.append(new_energy)
 
             # Record nuclear geometry in angstrom
-            record_nuc_geo(restart, x, atoms, qC)
+            record_nuc_geo(restart, x, atoms, qC, com_ang)
 
             # Record the electronic state energies
             with open(os.path.join(__location__, 'energy.out'), 'a') as g:
@@ -1344,7 +1359,7 @@ def scipy_rk4(elecE, grad, nac, yvar, dt, au_mas):
 '''
 Main driver of RK4 and electronic structure 
 '''
-def rk4(initq,initp,tStop,H,restart,amu_mat,U):
+def rk4(initq,initp,tStop,H,restart,amu_mat,U, com_ang):
     if QC_RUNNER == 'terachem':
         from qcRunners.TeraChem import TCRunner, format_output_LSCIVR
 
@@ -1380,7 +1395,7 @@ def rk4(initq,initp,tStop,H,restart,amu_mat,U):
         atoms = get_atom_label()
 
         # Write initial nuclear geometry in the output file
-        record_nuc_geo(restart, t, atoms, qC)
+        record_nuc_geo(restart, t, atoms, qC, com_ang)
 
         if QC_RUNNER == 'gamess':
             # Update geo_gamess with qC
@@ -1524,7 +1539,7 @@ def rk4(initq,initp,tStop,H,restart,amu_mat,U):
             energy.append(new_energy)
 
             # Record nuclear geometry in angstrom
-            record_nuc_geo(restart, t, atoms, qC)
+            record_nuc_geo(restart, t, atoms, qC, com_ang)
 
             # Record the electronic state energies
             with open(os.path.join(__location__, 'energy.out'), 'a') as g:
