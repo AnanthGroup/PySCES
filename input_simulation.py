@@ -59,13 +59,16 @@ init_state = 2
 restart = 0
 
 #   type of QC runner, either 'gamess or 'terachem'
-QC_RUNNER = 'gamess'
+QC_RUNNER = 'terachem'
 
 #   TeraChem runner options
 tcr_host = '10.1.1.154'
 tcr_port = 9876
 tcr_job_options = {}
 tcr_state_options = {}
+
+# Terachem files
+fname_tc_out = "terachem_output/run.out"
 
 #   GAMESS submission script name
 sub_script = None

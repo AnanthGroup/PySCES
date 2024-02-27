@@ -58,6 +58,116 @@ beta     = 1.0/(temp * k2autmp) # inverse temperature in atomic unit
 ### 7. center of mass vector
 ####################################################
 def get_geo_hess():
+    if(QC_RUNNER == "terachem"):
+        amu_mat, xyz_ang, frq, redmas, L, U = get_geo_hess_terachem()
+    elif(QC_RUNNER == "gamess"):
+        amu_mat, xyz_ang, frq, redmas, L, U = get_geo_hess_gamess()
+    else:
+        print("Error: get_geo_hess ran in undefined QC_RUNNER case")        
+        exit()
+    return(amu_mat, xyz_ang, frq, redmas, L, U)
+
+def get_geo_hess_terachem():
+    # Read Cartesian coordinate of initial geometry
+    # initialize arrays
+    amu = []
+    xyz_ang = np.zeros(nnuc)
+    amu_mat = np.zeros((nnuc,nnuc))
+
+    # Open terachem output file
+    f = open(os.path.join(__location__,fname_tc_out))
+    # Search output file for Reference Geometry entry
+    iline = 0
+    for jline in f:
+        iline = iline + 1 
+        if "*** Reference Geometry ***" in jline:
+            coord_line = iline + 2 # The coordinates start 2 lines after the "Reference Geometry"
+            print(iline)
+            print(jline)
+            break
+    # Read in coords
+    for iat in range(natom):
+        line = f.readline().split()
+        for j in range(3):
+            xyz_ang[3*i+j] = float(line[2+j]) 
+            TODO contine programming here   
+
+    f.close()
+        
+        
+    #f.readline()
+    #for i in range(natom):
+    #    x = f.readline().split()
+    #    amu.append(float(x[1]))
+    #    for j in range(3):
+    #        xyz_ang[3*i+j] = float(x[2+j])
+    
+    ## Form a diagonal matrix for atomic mass in amu
+    #for i in range(natom):
+    #    for j in range(3):
+    #        amu_mat[3*i+j,3*i+j] = amu[i]
+    f.close()
+    
+    # Read hessian from hess_gamess
+    frq, redmas = np.zeros(nnuc), np.zeros(nnuc)
+    L, U = np.zeros((nnuc,nnuc)), np.zeros((nnuc,nnuc))
+    if nnuc%5 == 0:
+        nchunk = int(nnuc/5)
+    else:
+        nchunk = int(nnuc/5) + 1
+    nline = 6 + nnuc + 11
+    f = open(os.path.join(__location__,'hess_gamess'))
+    for ichunk in range(nchunk):
+        if ichunk == nchunk-1:
+            if nnuc%5 == 0:
+                ncolumn = 5
+            else:
+                ncolumn = int(nnuc%5)
+        else:
+            ncolumn = 5
+        
+        for iline in range(nline):
+            x = f.readline()
+            if iline == 1:
+                x = x.split()
+                for icolumn in range(ncolumn):
+                    frq[ichunk*5+icolumn] = float(x[icolumn])
+            elif iline == 3:
+                x = x.split()
+                for icolumn in range(ncolumn):
+                    redmas[ichunk*5+icolumn] = float(x[icolumn])
+            elif iline >= 6:
+                if iline < nnuc+6:
+                    x = x.split()
+                    for icolumn in range(ncolumn):
+                        L[ichunk*5+icolumn, iline-6] = float(x[icolumn])
+    f.close()
+    print(L)
+    # Convert frq & red. mass into atomic unit
+    for i in range(nnuc):
+        frq[i] *= 2.0*pi * clight*100 * autime2s * frq_scale
+        redmas[i] *= amu2au
+    
+    # Redefine L so that the row of L, for example L(1,:),  
+    # is (dx1/dq1, dx1/dq2, ..., dx1/dq3N)
+    L = L.T
+    
+    # Define a unitary matrix U based on L
+    U = np.zeros((nnuc,nnuc))
+    U = np.matmul(L.T, amu_mat**0.5)
+    # Have to normalize 'U'. 
+    # Although it is supposed to be orthonormal already (otherwise not unitary), 
+    # it is NOT apparently :(
+    for i in range(nnuc):
+        norm = sum(U[:,i]**2)
+        new = U[:,i]/np.sqrt(norm)
+        U = np.delete(U, i, axis=1)
+        U = np.insert(U, i, new, axis=1)
+    
+    return(amu_mat, xyz_ang, frq, redmas, L, U)
+
+
+def get_geo_hess_gamess():
     # Read Cartesian coordinate of initial geometry
     amu = []
     xyz_ang = np.zeros(nnuc)
