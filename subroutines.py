@@ -160,7 +160,6 @@ def get_normal_geo(U, xyz_ang, amu_mat):
     # matrix. 
     # NOTE: The row of L.T as well as U is reading the GAMESS hessian matrix VERTICALLY.  
     normal_geo = np.matmul(U[6:,:], np.matmul(np.matmul(amu_mat, amu2au_mat)**0.5, xyz_bohr))
-    
     return(normal_geo)
         
         
@@ -417,7 +416,6 @@ def write_subm_script(input_name):
 ### Call GAMESS NACME calculation ###
 #####################################
 def run_gms_cas(input_name, opt, atoms, amu_mat, qCart, submit_script_loc=None):
-    print("RUNNING CAS")
     # Convert Bohr into Angstrom
     qCart_ang = qCart/ang2bohr
     
@@ -1455,6 +1453,7 @@ def rk4(initq,initp,tStop,H,restart,amu_mat,U, com_ang):
 
         if QC_RUNNER == 'gamess':
             # Call GAMESS to compute E, dE/dR, and NAC
+            print("QC: ", qC/ang2bohr)
             print("QC: ", qC/ang2bohr)
             run_gms_cas(input_name, opt, atoms, amu_mat, qC, sub_script)
             elecE, grad, nac, flag_grad, flag_nac = read_gms_out(input_name)

@@ -21,7 +21,9 @@ __location__ = ''
 try:
     sys.path.append(os.path.abspath(os.path.curdir))
     from input_simulation_local import * 
-except:
+    print("Importing local settings")
+except Exception as e:
+    print("Importing global settings: ", e)
     from input_simulation import * 
 
 
