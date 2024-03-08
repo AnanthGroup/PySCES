@@ -483,7 +483,7 @@ class TCRunner():
             # if job_i > 0:
             #     job_opts['guess'] = all_results[-1]['orbfile']
 
-            # self._set_guess(job_opts, excited_type, all_results, )
+            self._set_guess(job_opts, excited_type, all_results, )
 
             jobs_to_run[job_num % n_clients][name] = {
                 'opts': job_opts.copy(),
@@ -510,123 +510,10 @@ class TCRunner():
         _print_times(times)
         self.set_avg_max_times(times)
         return all_results
-
     
-    @staticmethod
-    def run_TC_all_states(clients: list[TCPBClient], geom, atoms: list[str], opts: dict, dipole_deriv=False,
-            max_state:int=0, 
-            grads:list[int]|int|str=[], 
-            NACs:list[int]|float|str=[]):
-        
-        times = {}
+    def _set_guess(self, job_opts: dict, excited_type: str, all_results: list[dict], state):
+        return _set_guess(job_opts, excited_type, all_results, state)
 
-        #   convert grads and NACs to list format 
-        if isinstance(grads, str):
-            if grads.lower() == 'all':
-                grads = list(range(max_state+1))
-            else:
-                raise ValueError('grads must be an iterable of ints or "all"')
-        else:
-            grads = _val_or_iter(grads)
-        if isinstance(NACs, str):
-            if NACs.lower() == 'all':
-                NACs = []
-                for i in range(max_state+1):
-                    for j in range(i+1, max_state+1):
-                        NACs.append((i, j))
-            else:
-                raise ValueError('NACs must be an iterable in ints or "all"')
-        else:
-            NACs = _val_or_iter(NACs)
-
-        #   make sure we are computing enough states
-        base_options = opts.copy()
-        if max_state > 0:
-            base_options['cisrestart'] = 'cis_restart_' + str(os.getpid())
-            if 'cisnumstates' not in base_options:
-                base_options['cisnumstates'] = max_state + 2
-            elif base_options['cisnumstates'] < max_state:
-                raise ValueError('"cisnumstates" is less than requested electronic state')
-        base_options['purify'] = False
-        base_options['atoms'] = atoms
-        
-        jobs_to_run = [{} for i in len(clients)]
-        client_id = 0
-
-        #   run energy only if gradients and NACs are not requested
-        all_results = []
-        if len(grads) == 0 and len(NACs) == 0:
-            job_opts = base_options.copy()
-            jobs_to_run[client_id][name] = {'opts': job_opts.copy(), 'type': 'energy'}
-            client_id += 1
-            # start = time.time()
-            # results = client.compute_job_sync('energy', geom, 'angstrom', **job_opts)
-            # times[f'energy'] = time.time() - start
-            # results['run'] = 'energy'
-            # results.update(job_opts)
-            # all_results.append(results)
-
-        #   gradient computations have to be separated from NACs
-        for job_i, state in enumerate(grads):
-            print("Grad ", job_i+1)
-            name = f'gradient_{state}'
-            job_opts = base_options.copy()
-            if state > 0:
-                job_opts['cis'] = 'yes'
-                if 'cisnumstates' not in job_opts:
-                    job_opts['cisnumstates'] = max_state + 2
-                elif job_opts['cisnumstates'] < max_state:
-                    raise ValueError('"cisnumstates" is less than requested electronic state')
-                job_opts['cistarget'] = state
-            if job_i > 0:
-                job_opts['guess'] = all_results[-1]['orbfile']
-            jobs_to_run[client_id][name] = {'opts': job_opts.copy(), 'type': 'gradient'}
-            client_id += 1
-            # start = time.time()
-            # results = client.compute_job_sync('gradient', geom, 'angstrom', **job_opts)
-            # times[name] = time.time() - start
-            # results['run'] = 'gradient'
-            # results.update(job_opts)
-            # all_results.append(results)
-
-        #   run NAC jobs
-        for job_i, (nac1, nac2) in enumerate(NACs):
-            print("NAC ", job_i+1)
-            name = f'nac_{nac1}_{nac2}'
-            job_opts = base_options.copy()
-            job_opts['nacstate1'] = nac1
-            job_opts['nacstate2'] = nac2
-            job_opts['cis'] = 'yes'
-            job_opts['cisnumstates'] = max_state + 2
-            if dipole_deriv:
-                pass
-                # job_opts['cistransdipolederiv'] = 'yes'
-            if job_i > 0:
-                job_opts['guess'] = all_results[-1]['orbfile']
-            jobs_to_run[client_id][name] = {'opts': job_opts.copy(), 'type': 'coupling'}
-            client_id += 1
-            # start = time.time()
-            # results = client.compute_job_sync('coupling', geom, 'angstrom', **job_opts)
-            # times[name] = time.time() - start
-            # results['run'] = 'coupling'
-            # results.update(job_opts)
-            # all_results.append(results)
-
-        # for job in jobs_to_run.values():
-        #     start = time.time()
-        #     results = client.compute_job_sync(job['type'], geom, 'angstrom', **job['opts'])
-        #     times[job['type']] = time.time() - start
-        #     results['run'] = job['type']
-        #     results.update(job_opts)
-        #     all_results.append(results)
-
-        exit()
-        for i in range(clients):
-            _run_jobs(clients[i], jobs_to_run[i], geom)
-
-
-        _print_times(times)
-        return all_results
     
 def _set_guess(job_opts: dict, excited_type: str, all_results: list[dict], state):
 
