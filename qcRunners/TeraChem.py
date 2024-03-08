@@ -412,6 +412,11 @@ class TCRunner():
         base_options['purify'] = False
         base_options['atoms'] = atoms
 
+
+        n_clients = 1
+        jobs_to_run = [{} for i in range(n_clients)]
+        job_num = 0
+
         #   run energy only if gradients and NACs are not requested
         all_results = []
         if len(grads) == 0 and len(NACs) == 0:
@@ -426,6 +431,7 @@ class TCRunner():
         #   gradient computations have to be separated from NACs
         for job_i, state in enumerate(grads):
             print("Grad ", job_i+1)
+            name = f'gradient_{state}'
             job_opts = base_options.copy()
 
             if excited_type == 'cas':
@@ -437,22 +443,27 @@ class TCRunner():
                     job_opts.update(excited_options)
                     job_opts['cistarget'] = state
                     
+            # self._set_guess(job_opts, excited_type, all_results, state)
 
-            self._set_guess(job_opts, excited_type, all_results, state)
+            jobs_to_run[job_num % n_clients][name] = {
+                'opts': job_opts.copy(), 
+                'type': 'gradient', 
+                'state': state
+                }
+            job_num += 1
 
-            start = time.time()
-
-            results = self.compute_job_sync('gradient', geom, 'angstrom', **job_opts)
-
-            times[f'gradient_{state}'] = time.time() - start
-            results['run'] = 'gradient'
-            results.update(job_opts)
-            all_results.append(results)
+            # start = time.time()
+            # results = self.compute_job_sync('gradient', geom, 'angstrom', **job_opts)
+            # times[name] = time.time() - start
+            # results['run'] = 'gradient'
+            # results.update(job_opts)
+            # all_results.append(results)
 
 
         #   run NAC jobs
         for job_i, (nac1, nac2) in enumerate(NACs):
             print("NAC ", job_i+1)
+            name = f'nac_{nac1}_{nac2}'
             job_opts = base_options.copy()
             job_opts.update(excited_options)
 
@@ -469,52 +480,205 @@ class TCRunner():
             if dipole_deriv:
                 pass
                 # job_opts['cistransdipolederiv'] = 'yes'
-            if job_i > 0:
-                job_opts['guess'] = all_results[-1]['orbfile']
+            # if job_i > 0:
+            #     job_opts['guess'] = all_results[-1]['orbfile']
 
-            self._set_guess(job_opts, excited_type, all_results, max(nac1, nac2))
+            # self._set_guess(job_opts, excited_type, all_results, )
 
-            self._set_guess(job_opts, excited_type, all_results, max(nac1, nac2))
+            jobs_to_run[job_num % n_clients][name] = {
+                'opts': job_opts.copy(),
+                'type': 'gradient',
+                'state': max(nac1, nac2)
+                }
+            job_num += 1
 
-            start = time.time()
-            results = self.compute_job_sync('coupling', geom, 'angstrom', **job_opts)
-            times[f'nac_{nac1}_{nac2}'] = time.time() - start
-            results['run'] = 'coupling'
-            results.update(job_opts)
-            all_results.append(results)
+            # start = time.time()
+            # results = self.compute_job_sync('coupling', geom, 'angstrom', **job_opts)
+            # times[name] = time.time() - start
+            # results['run'] = 'coupling'
+            # results.update(job_opts)
+            # all_results.append(results)
+
+
+        for i in range(1):
+            jobs = jobs_to_run[i]
+            batch_results, batch_times = _run_jobs(self._client, jobs, geom, excited_type=excited_type)
+            times.update(batch_times)
+            all_results += batch_results
 
 
         _print_times(times)
         self.set_avg_max_times(times)
         return all_results
+
     
-    def _set_guess(self, job_opts: dict, excited_type: str, all_results: list[dict], state):
+    @staticmethod
+    def run_TC_all_states(clients: list[TCPBClient], geom, atoms: list[str], opts: dict, dipole_deriv=False,
+            max_state:int=0, 
+            grads:list[int]|int|str=[], 
+            NACs:list[int]|float|str=[]):
+        
+        times = {}
 
-        if state > 0:
-            if excited_type == 'cas':
-                for prev_job in reversed(all_results):
-                    if prev_job.get('castarget', 0) >= 1:
-                        prev_orb_file = prev_job['orbfile']
-                        if prev_orb_file[-6:] == 'casscf':
-                            self._cas_guess = prev_orb_file
-                            break
+        #   convert grads and NACs to list format 
+        if isinstance(grads, str):
+            if grads.lower() == 'all':
+                grads = list(range(max_state+1))
+            else:
+                raise ValueError('grads must be an iterable of ints or "all"')
+        else:
+            grads = _val_or_iter(grads)
+        if isinstance(NACs, str):
+            if NACs.lower() == 'all':
+                NACs = []
+                for i in range(max_state+1):
+                    for j in range(i+1, max_state+1):
+                        NACs.append((i, j))
+            else:
+                raise ValueError('NACs must be an iterable in ints or "all"')
+        else:
+            NACs = _val_or_iter(NACs)
 
-        for prev_job in reversed(all_results):
-            if 'orbfile' in prev_job:
-                self._scf_guess = prev_job['orbfile']
-                #   This is to fix a bug in terachem that still sets the c0.casscf file as the
-                #   previous job's orbital file
-                if self._scf_guess[-6:] == 'casscf':
-                    self._scf_guess = self._scf_guess[0:-7]
-                break
+        #   make sure we are computing enough states
+        base_options = opts.copy()
+        if max_state > 0:
+            base_options['cisrestart'] = 'cis_restart_' + str(os.getpid())
+            if 'cisnumstates' not in base_options:
+                base_options['cisnumstates'] = max_state + 2
+            elif base_options['cisnumstates'] < max_state:
+                raise ValueError('"cisnumstates" is less than requested electronic state')
+        base_options['purify'] = False
+        base_options['atoms'] = atoms
+        
+        jobs_to_run = [{} for i in len(clients)]
+        client_id = 0
+
+        #   run energy only if gradients and NACs are not requested
+        all_results = []
+        if len(grads) == 0 and len(NACs) == 0:
+            job_opts = base_options.copy()
+            jobs_to_run[client_id][name] = {'opts': job_opts.copy(), 'type': 'energy'}
+            client_id += 1
+            # start = time.time()
+            # results = client.compute_job_sync('energy', geom, 'angstrom', **job_opts)
+            # times[f'energy'] = time.time() - start
+            # results['run'] = 'energy'
+            # results.update(job_opts)
+            # all_results.append(results)
+
+        #   gradient computations have to be separated from NACs
+        for job_i, state in enumerate(grads):
+            print("Grad ", job_i+1)
+            name = f'gradient_{state}'
+            job_opts = base_options.copy()
+            if state > 0:
+                job_opts['cis'] = 'yes'
+                if 'cisnumstates' not in job_opts:
+                    job_opts['cisnumstates'] = max_state + 2
+                elif job_opts['cisnumstates'] < max_state:
+                    raise ValueError('"cisnumstates" is less than requested electronic state')
+                job_opts['cistarget'] = state
+            if job_i > 0:
+                job_opts['guess'] = all_results[-1]['orbfile']
+            jobs_to_run[client_id][name] = {'opts': job_opts.copy(), 'type': 'gradient'}
+            client_id += 1
+            # start = time.time()
+            # results = client.compute_job_sync('gradient', geom, 'angstrom', **job_opts)
+            # times[name] = time.time() - start
+            # results['run'] = 'gradient'
+            # results.update(job_opts)
+            # all_results.append(results)
+
+        #   run NAC jobs
+        for job_i, (nac1, nac2) in enumerate(NACs):
+            print("NAC ", job_i+1)
+            name = f'nac_{nac1}_{nac2}'
+            job_opts = base_options.copy()
+            job_opts['nacstate1'] = nac1
+            job_opts['nacstate2'] = nac2
+            job_opts['cis'] = 'yes'
+            job_opts['cisnumstates'] = max_state + 2
+            if dipole_deriv:
+                pass
+                # job_opts['cistransdipolederiv'] = 'yes'
+            if job_i > 0:
+                job_opts['guess'] = all_results[-1]['orbfile']
+            jobs_to_run[client_id][name] = {'opts': job_opts.copy(), 'type': 'coupling'}
+            client_id += 1
+            # start = time.time()
+            # results = client.compute_job_sync('coupling', geom, 'angstrom', **job_opts)
+            # times[name] = time.time() - start
+            # results['run'] = 'coupling'
+            # results.update(job_opts)
+            # all_results.append(results)
+
+        # for job in jobs_to_run.values():
+        #     start = time.time()
+        #     results = client.compute_job_sync(job['type'], geom, 'angstrom', **job['opts'])
+        #     times[job['type']] = time.time() - start
+        #     results['run'] = job['type']
+        #     results.update(job_opts)
+        #     all_results.append(results)
+
+        exit()
+        for i in range(clients):
+            _run_jobs(clients[i], jobs_to_run[i], geom)
 
 
-        if os.path.isfile(str(self._cas_guess)):
-            job_opts['casguess'] = self._cas_guess
-        if os.path.isfile(str(self._scf_guess)):
-            job_opts['guess'] = self._scf_guess
-        if os.path.isfile(str(self._ci_guess)):
-            job_opts['cisrestart'] = self._ci_guess
+        _print_times(times)
+        return all_results
+    
+def _set_guess(job_opts: dict, excited_type: str, all_results: list[dict], state):
+
+    cas_guess = None
+    scf_guess = None
+    ci_guess = None
+    if state > 0:
+        if excited_type == 'cas':
+            for prev_job in reversed(all_results):
+                if prev_job.get('castarget', 0) >= 1:
+                    prev_orb_file = prev_job['orbfile']
+                    if prev_orb_file[-6:] == 'casscf':
+                        cas_guess = prev_orb_file
+                        break
+
+    for prev_job in reversed(all_results):
+        if 'orbfile' in prev_job:
+            scf_guess = prev_job['orbfile']
+            #   This is to fix a bug in terachem that still sets the c0.casscf file as the
+            #   previous job's orbital file
+            if scf_guess[-6:] == 'casscf':
+                scf_guess = scf_guess[0:-7]
+            break
+
+
+    if os.path.isfile(str(cas_guess)):
+        job_opts['casguess'] = cas_guess
+    if os.path.isfile(str(scf_guess)):
+        job_opts['guess'] = scf_guess
+    if os.path.isfile(str(ci_guess)):
+        job_opts['cisrestart'] = ci_guess
+
+def _run_jobs(client, jobs, geom, excited_type):
+    times = {}
+    all_results = []
+    for job_name, job_props in jobs.items():
+        job_opts = job_props['opts']
+        job_type = job_props['type']
+        job_state = job_props['state']
+
+        _set_guess(job_opts, excited_type, all_results, job_state)
+        print("Running ", job_name)
+
+        start = time.time()
+        results = client.compute_job_sync(job_type, geom, 'angstrom', **job_opts)
+        times[job_type] = time.time() - start
+        results['run'] = job_type
+        results.update(job_opts)
+        all_results.append(results)
+
+    return all_results, times
+
     
 
 def format_output_LSCIVR(n_elec, job_data: list[dict]):
