@@ -40,7 +40,7 @@ tmax_bsh, Hbsh, tol = 10, 3.0, 0.01
 # Maximum propagation time (a.u.), one Runge-Kutta step (a.u.) (Only relevant for RK4)
 tmax_rk4, Hrk4 = 20, 5.0 
 
-# Scaling factor of normal mode frequancies
+# Scaling factor of normal mode frequencies
 frq_scale = 0.967
 
 # Number of CPUs and nodes in each internal NACME calculation
@@ -58,8 +58,9 @@ init_state = 2
 # Restart request: 0 = no restart, 1 = restart
 restart = 0
 
-#   type of QC runner, either 'gamess or 'terachem'
-QC_RUNNER = 'terachem'
+#   type of QC runner, either 'gamess' or 'terachem'
+QC_RUNNER = 'gamess'
+#QC_RUNNER = 'terachem'
 
 #   TeraChem runner options
 tcr_host = '10.1.1.154'
@@ -68,7 +69,9 @@ tcr_job_options = {}
 tcr_state_options = {}
 
 # Terachem files
-fname_tc_out = "terachem_output/run.out"
+fname_tc_geo_freq = "tmp/tc_hf/hf.spherical.freq/Geometry.frequencies.dat"
+fname_tc_redmas   = "tmp/tc_hf/hf.spherical.freq/Reduced.mass.dat"
+fname_tc_freq     = "tmp/tc_hf/hf.spherical.freq/Frequencies.dat"
 
 #   GAMESS submission script name
 sub_script = None

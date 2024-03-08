@@ -4,13 +4,13 @@
 Created on Wed May  3 18:55:55 2023
 
 @author: kenmiyazaki
+@coauthors: Chris Myers, Tom Trepl
 """
 
 """
 The repository of functions to perform ab initio LSC-IVR nonadiabatic 
 dynamics of polyatomic molecules
 """
-
 import numpy as np
 import scipy.integrate as it
 import os
@@ -23,7 +23,7 @@ from fileIO import SimulationLogger, write_restart, read_restart
 # __location__ = os.path.realpath(os.path.join(os.getcwd(), os.path.dirname(__file__)))
 __location__ = ''
 
-#   temporary work arround for using local settings
+#   temporary work around for using local settings
 try:
     sys.path.append(os.path.abspath(os.path.curdir))
     from input_simulation_local import * 
@@ -42,7 +42,7 @@ eh2j     = 4.359744650*10**-18  # Hartree to Joule
 amu2au   = 1.822888486*10**3    # atomic mass unit to atomic unit 
 autime2s = hbar/eh2j            # atomic unit time to second
 au2fs    = autime2s*10**15      # atomic unit time to second
-ang2bohr = 1.88973              # angstroms to bohr
+ang2bohr = 1.8897259886         # angstroms to bohr
 k2autmp  = kb/eh2j              # Kelvin to atomic unit temperature
 beta     = 1.0/(temp * k2autmp) # inverse temperature in atomic unit
 
@@ -53,118 +53,162 @@ beta     = 1.0/(temp * k2autmp) # inverse temperature in atomic unit
 ### 2. molecular xyz geometry
 ### 3. Normal mode frequencies
 ### 4. Normal mode reduced masses
-### 5. L matrix (GAMESS hassian output)
+### 5. L matrix (GAMESS hessian output)
 ### 6. U matrix (Hessian unitary matrix)
 ### 7. center of mass vector
 ####################################################
 def get_geo_hess():
     if(QC_RUNNER == "terachem"):
-        amu_mat, xyz_ang, frq, redmas, L, U = get_geo_hess_terachem()
+        amu_mat, xyz_ang, frq, redmas, L, U, com_ang = get_geo_hess_terachem()
     elif(QC_RUNNER == "gamess"):
-        amu_mat, xyz_ang, frq, redmas, L, U = get_geo_hess_gamess()
+        amu_mat, xyz_ang, frq, redmas, L, U, com_ang = get_geo_hess_gamess()
     else:
         print("Error: get_geo_hess ran in undefined QC_RUNNER case")        
         exit()
-    return(amu_mat, xyz_ang, frq, redmas, L, U)
+    return(amu_mat, xyz_ang, frq, redmas, L, U, com_ang)
 
 def get_geo_hess_terachem():
-    # Read Cartesian coordinate of initial geometry
+    ##--------------------------------------------------
+    ## 1 & 2 Read Cartesian coordinate of initial geometry
+    ##--------------------------------------------------
+    
+    ## LEGACY ##
+    ## Open terachem output file
+    #f = open(os.path.join(__location__,fname_tc_out))
+    #f_lines = f.readlines()
+    ## Search output file for Reference Geometry entry
+    #ref_geo_index = -1
+    #for i, line in enumerate(f_lines):
+    #    if "*** Reference Geometry ***" in line:
+    #        ref_geo_index = i 
+    #        break
+
+    #if ref_geo_index != -1:
+    #    # Coordinates start 2 lines below "Reference Geometry"
+    #    print(f_lines[ref_geo_index+2].split())
+    #    for i in range(0,natom):
+    #        current_line = f_lines[ref_geo_index+2+i].split()
+    #        for j in range(0,3):
+    #            # xyz entries in TC output file are in a.u.
+    #            xyz_ang[3*i+j] = 1.0/ang2bohr * float(current_line[j+1])
+    #else:
+    #    print("Reference Geometry entry not found")
+    #f.close()
+    #exit()
+    ## END LEGACY ##
+
     # initialize arrays
     amu = []
     xyz_ang = np.zeros(nnuc)
     amu_mat = np.zeros((nnuc,nnuc))
+    
+    n_vib_modes = nnuc - 6
+    
+    # Open TeraChem Geometry.frequencies.dat file from scratch dir
+    # This file contains the geometry in bohr after removing the center of mass
+    # Note: if a different file is used for coords, check whether COM is removed
+    with open(os.path.join(__location__,fname_tc_geo_freq)) as f:
+        f_lines = f.readlines()
+    
+    # Coordinates start in second line
+    for ia in range(0,natom):
+        current_line = f_lines[ia+1].split()
+        amu.append(float(current_line[0]))
+        for ja in range(0,3):
+            # mass entries in TC geometry frequencies file are in amu
+            amu_mat[3*ia+ja,3*ia+ja] = float(current_line[0])
+            # xyz entries in TC geometry file are in a.u.
+            xyz_ang[3*ia+ja] = 1.0/ang2bohr * float(current_line[ja+1])
+    print(xyz_ang)
 
-    # Open terachem output file
-    f = open(os.path.join(__location__,fname_tc_out))
-    # Search output file for Reference Geometry entry
-    iline = 0
-    for jline in f:
-        iline = iline + 1 
-        if "*** Reference Geometry ***" in jline:
-            coord_line = iline + 2 # The coordinates start 2 lines after the "Reference Geometry"
-            print(iline)
-            print(jline)
-            break
-    # Read in coords
-    for iat in range(natom):
-        line = f.readline().split()
-        for j in range(3):
-            xyz_ang[3*i+j] = float(line[2+j]) 
-            TODO contine programming here   
+    ##--------------------------------------------------
+    ## 4. Read in reduced mass
+    ##--------------------------------------------------
+    # Allocate reduced mass array
+    #TODO tom: can be calulated - reading unnecessary
+    redmas = np.zeros(nnuc) # in a.u.
+   
+    # Open Reduced.mass.dat
+    with open(os.path.join(__location__,fname_tc_redmas)) as f:
+        f_lines = f.readlines()
+    
+    # Read reduced masses   
+    for ivm in range(0,n_vib_modes):
+        current_line = f_lines[ivm+1].split()
+        # keep first 6 entries empty for 3 trans. and 3 rot. modes
+        # and convert from amu to a.u.
+        redmas[ivm+6] = amu2au*float(current_line[2])
 
-    f.close()
-        
-        
-    #f.readline()
-    #for i in range(natom):
-    #    x = f.readline().split()
-    #    amu.append(float(x[1]))
-    #    for j in range(3):
-    #        xyz_ang[3*i+j] = float(x[2+j])
+    ##--------------------------------------------------
+    ## 3. Read in frequencies
+    ## 5. Read in eigenvectors
+    ##--------------------------------------------------
+    # Definition of L:
+    # Columns of L (e.g. L[:,0]) contain the eigenvectors
+    # Rows of L (e.g. L[0,:]) contain (dx1/dq1, dx1/dq2, dx1/dq3, ...)
+    # Note: L is not unitless! L has units 1/sqrt(amu)
+
+    # Initialize structures
+    # allocate frequencies array
+    frq = np.zeros(nnuc)
+    # L contains eigenvectors (EV). E.g. L[:,0] is the first EV
+    L = np.zeros((nnuc,nnuc))
+    with open(os.path.join(__location__,fname_tc_freq)) as f:
+        f_lines = f.readlines()
+
+    for ivm in range(0,n_vib_modes):
+        # line begin (which contains the first data) of mode ivm
+        # add 6 for the 6 header lines; 4 resembles number of columns
+        lbegin = 6+int((ivm-ivm%4)/4)*((3*natom)+4)
+        # column of mode ivm
+        lcolumn = ivm%4
+        # get frequency in 1/cm (skip 6 indices for trans+rot modes)
+        # and convert to a.u. and scale by frq_scale
+        frq[ivm+6] = f_lines[lbegin-2].split()[lcolumn]
+        frq[ivm+6] = frq[ivm+6] * 2.0*pi*clight*100*autime2s*frq_scale
+        # Get eigenvectors
+        # For the x direction we need one more column, because this line also contains the atom number
+        # (skip 6 indices in L for the trans+rot modes)
+        for ia in range(0,natom):
+            L[3*ia+0,ivm+6] = float(f_lines[lbegin+ia*3+0].split()[lcolumn+1])
+            L[3*ia+1,ivm+6] = float(f_lines[lbegin+ia*3+1].split()[lcolumn+0])
+            L[3*ia+2,ivm+6] = float(f_lines[lbegin+ia*3+2].split()[lcolumn+0])
+
+    #TODO begin debugging test
+    #test_vec = L[:,6] #first EV
+    #print(test_vec)
+    #for i in range(0,nnuc):
+    #    test_vec = L[i,:]
+    #    #print("testvec",test_vec)
+    #    print("L2-norm testvec",np.dot(test_vec,test_vec))
+    #    print("tv*m(au)*tv",np.dot(test_vec,amu2au*np.matmul(amu_mat,test_vec)))
+    #exit()
+    # end debugging test
     
-    ## Form a diagonal matrix for atomic mass in amu
-    #for i in range(natom):
-    #    for j in range(3):
-    #        amu_mat[3*i+j,3*i+j] = amu[i]
-    f.close()
-    
-    # Read hessian from hess_gamess
-    frq, redmas = np.zeros(nnuc), np.zeros(nnuc)
-    L, U = np.zeros((nnuc,nnuc)), np.zeros((nnuc,nnuc))
-    if nnuc%5 == 0:
-        nchunk = int(nnuc/5)
-    else:
-        nchunk = int(nnuc/5) + 1
-    nline = 6 + nnuc + 11
-    f = open(os.path.join(__location__,'hess_gamess'))
-    for ichunk in range(nchunk):
-        if ichunk == nchunk-1:
-            if nnuc%5 == 0:
-                ncolumn = 5
-            else:
-                ncolumn = int(nnuc%5)
-        else:
-            ncolumn = 5
-        
-        for iline in range(nline):
-            x = f.readline()
-            if iline == 1:
-                x = x.split()
-                for icolumn in range(ncolumn):
-                    frq[ichunk*5+icolumn] = float(x[icolumn])
-            elif iline == 3:
-                x = x.split()
-                for icolumn in range(ncolumn):
-                    redmas[ichunk*5+icolumn] = float(x[icolumn])
-            elif iline >= 6:
-                if iline < nnuc+6:
-                    x = x.split()
-                    for icolumn in range(ncolumn):
-                        L[ichunk*5+icolumn, iline-6] = float(x[icolumn])
-    f.close()
-    print(L)
-    # Convert frq & red. mass into atomic unit
-    for i in range(nnuc):
-        frq[i] *= 2.0*pi * clight*100 * autime2s * frq_scale
-        redmas[i] *= amu2au
-    
-    # Redefine L so that the row of L, for example L(1,:),  
-    # is (dx1/dq1, dx1/dq2, ..., dx1/dq3N)
-    L = L.T
-    
-    # Define a unitary matrix U based on L
+    # -------------------------------------------------
+    # 6. U matrix (mass-weighted eigenmodes)
+    # -------------------------------------------------
+    # U contains sqrt(mass)-weighted EV as rows. It has no units
+    # U is defined in a transposed way compared to L, i.e.,
+    # U[0,:] contains the first sqrt(mass)-weighted eigenvector.
     U = np.zeros((nnuc,nnuc))
-    U = np.matmul(L.T, amu_mat**0.5)
-    # Have to normalize 'U'. 
-    # Although it is supposed to be orthonormal already (otherwise not unitary), 
-    # it is NOT apparently :(
-    for i in range(nnuc):
-        norm = sum(U[:,i]**2)
-        new = U[:,i]/np.sqrt(norm)
-        U = np.delete(U, i, axis=1)
-        U = np.insert(U, i, new, axis=1)
+    U = np.matmul(L.T,amu_mat**0.5) 
+
+    # U is a unitary matrix and normalization is not necessary. 
+    # If one still wants to do it, outcomment the following lines
+    # imo, you would need to rescale the rows.
+    #for i in range(7,nnuc):
+    #    norm = sum(U[i,:]**2)
+    #    U[i,:] = U[i,:]/np.sqrt(norm)
+
+    # COM is already substracted in Geometry.Frequencies.dat but better save than sorry
+    # compute center of mass and remove from geometry
+    amu = np.array(amu)
+    xyz_shaped = xyz_ang.reshape((-1, 3))
+    com = np.average(xyz_shaped, axis=0, weights=amu)
+    xyz_ang = (xyz_shaped - com).flatten()
     
-    return(amu_mat, xyz_ang, frq, redmas, L, U)
+    return(amu_mat, xyz_ang, frq, redmas, L, U, com)
 
 
 def get_geo_hess_gamess():
@@ -180,12 +224,16 @@ def get_geo_hess_gamess():
         for j in range(3):
             xyz_ang[3*i+j] = float(x[2+j])
     
-    # Form a diagonal matrix for atomic mass in amu
+    # Form a diagonal matrix for atomic masses in amu
+    # WARNING by tom: presumably buggy
+    # Afaik: The first column of geo_gamess contains 
+    # the atomic charge, NOT the mass
     for i in range(natom):
         for j in range(3):
-            amu_mat[3*i+j,3*i+j] = amu[i]
+            amu_mat[3*i+j,3*i+j] = amu[i] 
     f.close()
     
+    print(xyz_ang)
     # Read hessian from hess_gamess
     frq, redmas = np.zeros(nnuc), np.zeros(nnuc)
     L, U = np.zeros((nnuc,nnuc)), np.zeros((nnuc,nnuc))
@@ -233,15 +281,17 @@ def get_geo_hess_gamess():
     # Define a unitary matrix U based on L
     U = np.zeros((nnuc,nnuc))
     U = np.matmul(L.T, amu_mat**0.5)
+
     # Have to normalize 'U'. 
     # Although it is supposed to be orthonormal already (otherwise not unitary), 
     # it is NOT apparently :(
+    # Comment by tom: this is because the masses are read wrongly
     for i in range(nnuc):
         norm = sum(U[:,i]**2)
         new = U[:,i]/np.sqrt(norm)
         U = np.delete(U, i, axis=1)
         U = np.insert(U, i, new, axis=1)
-
+   
     #   compute center of mass and remove from geometry
     amu = np.array(amu)
     xyz_shaped = xyz_ang.reshape((-1, 3))
@@ -1500,6 +1550,8 @@ def rk4(initq,initp,tStop,H,restart,amu_mat,U, com_ang):
         qC, pC  = rotate_norm_to_cart(qN, pN, U, amu_mat) # collections of nuclear variables in Cartesian coordinate
         q[nel:], p[nel:] = qC, pC
         y = np.concatenate((q, p))
+        nac0 = np.zeros(len(q0),len(q0))
+        nac_dot_hist = np.zeros(len(q0),len(q0),3)        # nonadiabatic coupling scalaproduct with the nac at time 0 for time steps in the past, t=2 is the most recent, t=0 is the oldest
 
         # Get atom labels
         atoms = get_atom_label()
@@ -1530,6 +1582,10 @@ def rk4(initq,initp,tStop,H,restart,amu_mat,U, com_ang):
         init_energy = get_energy(au_mas, q, p, elecE)
         with open(os.path.join(__location__, 'energy.out'), 'a') as g:
             g.write(total_format.format(t, init_energy, *elecE))
+        # Create history for nac_dot_hist
+        nac0 = nac
+        for i in range(0,3):
+            nac_dot_hist(:,:,i) = np.sum(nac0*nac0,axis=2)
    
     elif restart == 1:
         opt['guess'] = 'moread'
@@ -1631,6 +1687,8 @@ def rk4(initq,initp,tStop,H,restart,amu_mat,U, com_ang):
             else:
                 job_results = tc_runner.run_TC_new_geom(qC/ang2bohr)
                 elecE, grad, nac = format_output_LSCIVR(len(q0), job_results)
+            #correct nac sign
+            correct_nac_sign(nac,nac0,nac_dot_hist)
 
         if proceed:
             # Compute energy
@@ -1754,5 +1812,38 @@ def compute_CF(X, Y):
                  f.write(total_format.format(X[t], sum(pop[:,t]), *pop[:,t]))
 
    return()
+
+'''
+Check which sign for the nac is expected and correct artificial sign flips
+'''
+def correct_nac_sign(nac,nac0,nac_dot_hist):
+    # Calculate d(t)*d(0)
+    nac_dot = np.zeros(len(q0),len(q0))
+    nac_dot = np.sum(nac*nac0,axis=2)
+
+    # Predict d(t)*d(0) with parabolic extrapolation of last 3 time steps
+    # The parabola throught the points (-2,k),(-1,l),(0,m)
+    # is p(x) = (k/2+m/2-l)x**2 + (k/2-2l+3/2m)x + m
+    # Extrapolation to the next time step yields
+    # p(1) = k - 3l + 3m
+    nac_dot_expol = np.zeros(len(q0),len(q0))
+    nac_dot_expol = 1.0*nac_dot_hist(:,:,0) - 3.0*nac_dot_hist(:,:,1) + 3.0*nac_dot_hist(:,:,2)
+
+    for i in range(0,len(q0)):
+        for j in range(0,len(q0)):
+            if(np.sign(nac_dot(i,j)!=nac_dot_expol(i,j))):
+                nac(i,j,:) = -1.0*nac(i,j,:)
+
+    # rotate history
+    np.roll(nac_dot_expol,-1,axis=2)
+    # update newest entry
+    nac_dot_expol(:,:,2) = nac_dot
+    
+
+
+
+
+
+
 
 '''End of file'''
