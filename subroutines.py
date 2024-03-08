@@ -1410,7 +1410,7 @@ def rk4(initq,initp,tStop,H,restart,amu_mat,U, com_ang):
             if not proceed:
                 sys.exit("Electronic structure calculation failed at initial time. Exitting.")
         else:
-            tc_runner = TCRunner(tcr_host, tcr_port, atoms, tcr_job_options, run_options=tcr_state_options, start_new=False)
+            tc_runner = TCRunner(tcr_host, tcr_port, atoms, tcr_job_options, tcr_server_root, run_options=tcr_state_options, start_new=False)
             job_results = tc_runner.run_TC_new_geom(qC/ang2bohr)
             elecE, grad, nac = format_output_LSCIVR(len(q0), job_results)
             # exit()
@@ -1450,11 +1450,8 @@ def rk4(initq,initp,tStop,H,restart,amu_mat,U, com_ang):
 
         # write_restart('restart_init.json', [y[:ndof], y[ndof:]], init_energy, t, nel, 'rk4')
 
-
         if QC_RUNNER == 'gamess':
             # Call GAMESS to compute E, dE/dR, and NAC
-            print("QC: ", qC/ang2bohr)
-            print("QC: ", qC/ang2bohr)
             run_gms_cas(input_name, opt, atoms, amu_mat, qC, sub_script)
             elecE, grad, nac, flag_grad, flag_nac = read_gms_out(input_name)
             if any([el == 1  for el in flag_grad]) or flag_nac == 1:
@@ -1465,7 +1462,7 @@ def rk4(initq,initp,tStop,H,restart,amu_mat,U, com_ang):
             if not proceed:
                 sys.exit("Electronic structure calculation failed at initial time. Exitting.")
         else:
-            tc_runner = TCRunner(tcr_host, tcr_port, atoms, tcr_job_options, run_options=tcr_state_options)
+            tc_runner = TCRunner(tcr_host, tcr_port, atoms, tcr_job_options, tcr_server_root, run_options=tcr_state_options)
             job_results = tc_runner.run_TC_new_geom(qC/ang2bohr)
             # import json
             # json.dump(tc_runner.cleanup_multiple_jobs(job_results), open('tmp.json', 'w'), indent=4)

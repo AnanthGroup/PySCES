@@ -9,9 +9,10 @@ import warnings
 import shutil
 import socket
 import subprocess
-import multiprocessing
 import time
 import psutil
+import concurrent.futures
+
 
 _server_processes = {}
 
@@ -21,7 +22,7 @@ class TCServerStallError(Exception):
         super().__init__(message)
 
 
-def _print_times(times: dict):
+def _print_times(times: dict, wall_time = None):
     total = 0.0
     print()
     print("Timings")
@@ -31,6 +32,8 @@ def _print_times(times: dict):
         total += value
     print()
     print(f'{"total":20s} {total:10.3f}')
+    if wall_time is not None:
+        print(f'{"total wall":20s} {wall_time:10.3f}')
     print("-------------------------------")
 
 def _val_or_iter(x):
@@ -141,23 +144,40 @@ def _start_TC_server(port: int):
 
 class TCRunner():
     def __init__(self, 
-                 host: str, 
-                 port: int, 
+                 hosts: str, 
+                 ports: int,
                  atoms: list,
                  tc_options: dict,
+                 server_roots = '.',
                  start_new:  bool=False,
                  run_options: dict={}, 
                  max_wait=20, 
-                 dipole_deriv = False) -> None:
+                 dipole_deriv = False,
+                 ) -> None:
 
-        #   set up the server
+        if isinstance(hosts, str):
+            hosts = [hosts]
+        if isinstance(ports, int):
+            ports = [ports]
+        if isinstance(server_roots, str):
+            server_roots = [server_roots]
+
+        #   set up the servers
         if start_new:
-            host = start_TC_server(port)
+            hosts = start_TC_server(ports)
 
-        self._client = TCPBClient(host=host, port=port)
-        self.wait_until_available(self._client, max_wait=max_wait)
-        self._host = host
-        self._port = port
+        self._host_list = hosts
+        self._port_list = ports
+        self._server_root_list = server_roots
+        self._client_list = []
+        for h, p in zip(hosts, ports):
+            client = TCPBClient(host=h, port=p)
+            self.wait_until_available(client, max_wait=max_wait)
+            self._client_list.append(client)
+
+        self._client = self._client_list[0]
+        self._host = hosts[0]
+        self._port = ports[0]
 
         self._atoms = np.copy(atoms)
         self._base_options = tc_options.copy()
@@ -413,7 +433,7 @@ class TCRunner():
         base_options['atoms'] = atoms
 
 
-        n_clients = 1
+        n_clients = len(self._client_list)
         jobs_to_run = [{} for i in range(n_clients)]
         job_num = 0
 
@@ -431,7 +451,6 @@ class TCRunner():
         #   create gradient job properties
         #   gradient computations have to be separated from NACs
         for job_i, state in enumerate(grads):
-            print("Grad ", job_i+1)
             name = f'gradient_{state}'
             job_opts = base_options.copy()
 
@@ -456,7 +475,6 @@ class TCRunner():
 
         #   create NAC job properties
         for job_i, (nac1, nac2) in enumerate(NACs):
-            print("NAC ", job_i+1)
             name = f'nac_{nac1}_{nac2}'
             job_opts = base_options.copy()
             job_opts.update(excited_options)
@@ -481,54 +499,28 @@ class TCRunner():
                 }
             job_num += 1
 
-        #   run all the jobs
-        for i in range(n_clients):
-            jobs = jobs_to_run[i]
-            batch_results, batch_times = _run_jobs(self._client, jobs, geom, excited_type=excited_type)
-            times.update(batch_times)
-            all_results += batch_results
+        start = time.time()
+        with concurrent.futures.ThreadPoolExecutor() as executor:
+            futures = []
+            for i in range(n_clients):
+                jobs = jobs_to_run[i]
+                args = (self._client_list[i], jobs, geom, excited_type, self._server_root_list[i], i)
+                future = executor.submit(_run_jobs, *args)
+                futures.append(future)
+            for f in futures:
+                batch_results, batch_times = f.result()
+                all_results += batch_results
+                times.update(batch_times)
+        end = time.time()
 
-
-        _print_times(times)
+        _print_times(times, end - start)
         self.set_avg_max_times(times)
         return all_results
     
     def _set_guess(self, job_opts: dict, excited_type: str, all_results: list[dict], state):
         return _set_guess(job_opts, excited_type, all_results, state)
 
-    
-def _set_guess(job_opts: dict, excited_type: str, all_results: list[dict], state):
-
-    cas_guess = None
-    scf_guess = None
-    ci_guess = None
-    if state > 0:
-        if excited_type == 'cas':
-            for prev_job in reversed(all_results):
-                if prev_job.get('castarget', 0) >= 1:
-                    prev_orb_file = prev_job['orbfile']
-                    if prev_orb_file[-6:] == 'casscf':
-                        cas_guess = prev_orb_file
-                        break
-
-    for prev_job in reversed(all_results):
-        if 'orbfile' in prev_job:
-            scf_guess = prev_job['orbfile']
-            #   This is to fix a bug in terachem that still sets the c0.casscf file as the
-            #   previous job's orbital file
-            if scf_guess[-6:] == 'casscf':
-                scf_guess = scf_guess[0:-7]
-            break
-
-
-    if os.path.isfile(str(cas_guess)):
-        job_opts['casguess'] = cas_guess
-    if os.path.isfile(str(scf_guess)):
-        job_opts['guess'] = scf_guess
-    if os.path.isfile(str(ci_guess)):
-        job_opts['cisrestart'] = ci_guess
-
-def _run_jobs(client, jobs, geom, excited_type):
+def _run_jobs(client: TCPBClient, jobs, geom, excited_type, server_root, client_ID=0):
     times = {}
     all_results = []
     for job_name, job_props in jobs.items():
@@ -536,8 +528,8 @@ def _run_jobs(client, jobs, geom, excited_type):
         job_type = job_props['type']
         job_state = job_props['state']
 
-        _set_guess(job_opts, excited_type, all_results, job_state)
-        print("Running ", job_name, job_type)
+        _set_guess(job_opts, excited_type, all_results, job_state, server_root)
+        print("\nRunning ", job_name, job_type, client_ID)
 
         start = time.time()
         results = client.compute_job_sync(job_type, geom, 'angstrom', **job_opts)
@@ -548,7 +540,33 @@ def _run_jobs(client, jobs, geom, excited_type):
 
     return all_results, times
 
-    
+def _set_guess(job_opts: dict, excited_type: str, all_results: list[dict], state: int, server_root='.'):
+    import json
+    cas_guess = None
+    scf_guess = None
+    if state > 0:
+        if excited_type == 'cas':
+            for prev_job in reversed(all_results):
+                if prev_job.get('castarget', 0) >= 1:
+                    prev_orb_file = prev_job['orbfile']
+                    if prev_orb_file[-6:] == 'casscf':
+                        cas_guess = os.path.join(server_root, prev_orb_file)
+                        break
+        #   we do not consider cis file because it is not stored in each job dorectory; we set it ourselves
+
+    for prev_job in reversed(all_results):
+        if 'orbfile' in prev_job:
+            scf_guess = os.path.join(server_root, prev_job['orbfile'])
+            #   This is to fix a bug in terachem that still sets the c0.casscf file as the
+            #   previous job's orbital file
+            if scf_guess[-6:] == 'casscf':
+                scf_guess = scf_guess[0:-7]
+            break
+
+    if os.path.isfile(str(cas_guess)):
+        job_opts['casguess'] = cas_guess
+    if os.path.isfile(str(scf_guess)):
+        job_opts['guess'] = scf_guess
 
 def format_output_LSCIVR(n_elec, job_data: list[dict]):
     atoms = job_data[0]['atoms']

@@ -64,6 +64,7 @@ QC_RUNNER = 'gamess'
 #   TeraChem runner options
 tcr_host = '10.1.1.154'
 tcr_port = 9876
+tcr_server_root = '.'
 tcr_job_options = {}
 tcr_state_options = {}
 
