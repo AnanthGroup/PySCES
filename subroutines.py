@@ -1410,7 +1410,7 @@ def rk4(initq,initp,tStop,H,restart,amu_mat,U, com_ang):
             if not proceed:
                 sys.exit("Electronic structure calculation failed at initial time. Exitting.")
         else:
-            tc_runner = TCRunner(tcr_host, tcr_port, atoms, tcr_job_options, run_options=tcr_state_options, start_new=True)
+            tc_runner = TCRunner(tcr_host, tcr_port, atoms, tcr_job_options, run_options=tcr_state_options, start_new=False)
             job_results = tc_runner.run_TC_new_geom(qC/ang2bohr)
             elecE, grad, nac = format_output_LSCIVR(len(q0), job_results)
             # exit()

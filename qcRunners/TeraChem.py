@@ -428,6 +428,7 @@ class TCRunner():
             results.update(job_opts)
             all_results.append(results)
 
+        #   create gradient job properties
         #   gradient computations have to be separated from NACs
         for job_i, state in enumerate(grads):
             print("Grad ", job_i+1)
@@ -452,15 +453,8 @@ class TCRunner():
                 }
             job_num += 1
 
-            # start = time.time()
-            # results = self.compute_job_sync('gradient', geom, 'angstrom', **job_opts)
-            # times[name] = time.time() - start
-            # results['run'] = 'gradient'
-            # results.update(job_opts)
-            # all_results.append(results)
 
-
-        #   run NAC jobs
+        #   create NAC job properties
         for job_i, (nac1, nac2) in enumerate(NACs):
             print("NAC ", job_i+1)
             name = f'nac_{nac1}_{nac2}'
@@ -479,28 +473,16 @@ class TCRunner():
 
             if dipole_deriv:
                 pass
-                # job_opts['cistransdipolederiv'] = 'yes'
-            # if job_i > 0:
-            #     job_opts['guess'] = all_results[-1]['orbfile']
-
-            self._set_guess(job_opts, excited_type, all_results, )
 
             jobs_to_run[job_num % n_clients][name] = {
                 'opts': job_opts.copy(),
-                'type': 'gradient',
+                'type': 'coupling',
                 'state': max(nac1, nac2)
                 }
             job_num += 1
 
-            # start = time.time()
-            # results = self.compute_job_sync('coupling', geom, 'angstrom', **job_opts)
-            # times[name] = time.time() - start
-            # results['run'] = 'coupling'
-            # results.update(job_opts)
-            # all_results.append(results)
-
-
-        for i in range(1):
+        #   run all the jobs
+        for i in range(n_clients):
             jobs = jobs_to_run[i]
             batch_results, batch_times = _run_jobs(self._client, jobs, geom, excited_type=excited_type)
             times.update(batch_times)
@@ -555,11 +537,11 @@ def _run_jobs(client, jobs, geom, excited_type):
         job_state = job_props['state']
 
         _set_guess(job_opts, excited_type, all_results, job_state)
-        print("Running ", job_name)
+        print("Running ", job_name, job_type)
 
         start = time.time()
         results = client.compute_job_sync(job_type, geom, 'angstrom', **job_opts)
-        times[job_type] = time.time() - start
+        times[job_name] = time.time() - start
         results['run'] = job_type
         results.update(job_opts)
         all_results.append(results)
