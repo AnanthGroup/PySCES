@@ -449,6 +449,7 @@ class TCRunner():
             results.update(job_opts)
             all_results.append(results)
 
+
         #   run NAC jobs
         for job_i, (nac1, nac2) in enumerate(NACs):
             print("NAC ", job_i+1)
@@ -473,6 +474,8 @@ class TCRunner():
 
             self._set_guess(job_opts, excited_type, all_results, max(nac1, nac2))
 
+            self._set_guess(job_opts, excited_type, all_results, max(nac1, nac2))
+
             start = time.time()
             results = self.compute_job_sync('coupling', geom, 'angstrom', **job_opts)
             times[f'nac_{nac1}_{nac2}'] = time.time() - start
@@ -484,6 +487,35 @@ class TCRunner():
         _print_times(times)
         self.set_avg_max_times(times)
         return all_results
+    
+    def _set_guess(self, job_opts: dict, excited_type: str, all_results: list[dict], state):
+
+        if state > 0:
+            if excited_type == 'cas':
+                for prev_job in reversed(all_results):
+                    if prev_job.get('castarget', 0) >= 1:
+                        prev_orb_file = prev_job['orbfile']
+                        if prev_orb_file[-6:] == 'casscf':
+                            self._cas_guess = prev_orb_file
+                            break
+
+        for prev_job in reversed(all_results):
+            if 'orbfile' in prev_job:
+                self._scf_guess = prev_job['orbfile']
+                #   This is to fix a bug in terachem that still sets the c0.casscf file as the
+                #   previous job's orbital file
+                if self._scf_guess[-6:] == 'casscf':
+                    self._scf_guess = self._scf_guess[0:-7]
+                break
+
+
+        if os.path.isfile(str(self._cas_guess)):
+            job_opts['casguess'] = self._cas_guess
+        if os.path.isfile(str(self._scf_guess)):
+            job_opts['guess'] = self._scf_guess
+        if os.path.isfile(str(self._ci_guess)):
+            job_opts['cisrestart'] = self._ci_guess
+
     
     def _set_guess(self, job_opts: dict, excited_type: str, all_results: list[dict], state):
 
