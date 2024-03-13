@@ -23,6 +23,8 @@ from fileIO import SimulationLogger, write_restart, read_restart
 # __location__ = os.path.realpath(os.path.join(os.getcwd(), os.path.dirname(__file__)))
 __location__ = ''
 
+random.seed(1)
+np.random.seed(1)
 #   temporary work around for using local settings
 try:
     sys.path.append(os.path.abspath(os.path.curdir))
@@ -1548,8 +1550,8 @@ def rk4(initq,initp,tStop,H,restart,amu_mat,U, com_ang):
         qC, pC  = rotate_norm_to_cart(qN, pN, U, amu_mat) # collections of nuclear variables in Cartesian coordinate
         q[nel:], p[nel:] = qC, pC
         y = np.concatenate((q, p))
-        nac0 = np.zeros(len(q0),len(q0))
-        nac_dot_hist = np.zeros(len(q0),len(q0),3)        # nonadiabatic coupling scalaproduct with the nac at time 0 for time steps in the past, t=2 is the most recent, t=0 is the oldest
+        nac0 = np.zeros((len(q0),len(q0)))
+        nac_dot_hist = np.zeros((len(q0),len(q0),3))        # nonadiabatic coupling scalaproduct with the nac at time 0 for time steps in the past, t=2 is the most recent, t=0 is the oldest
 
         # Get atom labels
         atoms = get_atom_label()
@@ -1583,7 +1585,7 @@ def rk4(initq,initp,tStop,H,restart,amu_mat,U, com_ang):
         # Create history for nac_dot_hist
         nac0 = nac
         for i in range(0,3):
-            nac_dot_hist(:,:,i) = np.sum(nac0*nac0,axis=2)
+            nac_dot_hist[:,:,i] = np.sum(nac0*nac0,axis=2)
    
     elif restart == 1:
         opt['guess'] = 'moread'
@@ -1687,7 +1689,7 @@ def rk4(initq,initp,tStop,H,restart,amu_mat,U, com_ang):
                 job_results = tc_runner.run_TC_new_geom(qC/ang2bohr)
                 elecE, grad, nac = format_output_LSCIVR(len(q0), job_results)
             #correct nac sign
-            correct_nac_sign(nac,nac0,nac_dot_hist)
+            nac, nac_dot_hist = correct_nac_sign(nac,nac0,nac_dot_hist)
 
         if proceed:
             # Compute energy
@@ -1817,27 +1819,55 @@ Check which sign for the nac is expected and correct artificial sign flips
 '''
 def correct_nac_sign(nac,nac0,nac_dot_hist):
     # Calculate d(t)*d(0)
-    nac_dot = np.zeros(len(q0),len(q0))
+    nac_dot = np.zeros((len(q0),len(q0)))
     nac_dot = np.sum(nac*nac0,axis=2)
+    print("gamess nac_dot[0,1]",nac_dot[0,1])
 
     # Predict d(t)*d(0) with parabolic extrapolation of last 3 time steps
     # The parabola throught the points (-2,k),(-1,l),(0,m)
     # is p(x) = (k/2+m/2-l)x**2 + (k/2-2l+3/2m)x + m
     # Extrapolation to the next time step yields
     # p(1) = k - 3l + 3m
-    nac_dot_expol = np.zeros(len(q0),len(q0))
-    nac_dot_expol = 1.0*nac_dot_hist(:,:,0) - 3.0*nac_dot_hist(:,:,1) + 3.0*nac_dot_hist(:,:,2)
+    nac_dot_expol = np.zeros((len(q0),len(q0)))
+    nac_dot_expol = 1.0*nac_dot_hist[:,:,0] - 3.0*nac_dot_hist[:,:,1] + 3.0*nac_dot_hist[:,:,2]
+    print("estimated nac_dot[0,1]",nac_dot_expol[0,1])
 
     for i in range(0,len(q0)):
         for j in range(0,len(q0)):
-            if(np.sign(nac_dot(i,j)!=nac_dot_expol(i,j))):
-                nac(i,j,:) = -1.0*nac(i,j,:)
+            #print("i",i)
+            #print("j",j)
+            #print("np.sign(nac_dot[i,j])",np.sign(nac_dot[i,j]))
+            #print("np.sign(nac_dot_expol[i,j])",np.sign(nac_dot_expol[i,j]))
+            if(np.sign(nac_dot[i,j])!=np.sign(nac_dot_expol[i,j])):
+                nac[i,j,:] = -1.0*nac[i,j,:]
+                if(i==0 and j==1):
+                    print("0,1 signflip removed")
 
     # rotate history
-    np.roll(nac_dot_expol,-1,axis=2)
-    # update newest entry
-    nac_dot_expol(:,:,2) = nac_dot
+    print("nac_dot_hist vor roll: ")
+    print("ndh[:,:,0]")
+    print(nac_dot_hist[:,:,0])
+    print("ndh[:,:,1]")
+    print(nac_dot_hist[:,:,1])
+    print("ndh[:,:,2]")
+    print(nac_dot_hist[:,:,2])
+    nac_dot_hist = np.roll(nac_dot_hist,-1,axis=2)
+    print("nac_dot_hist nach roll: ")
+    print("ndh[:,:,0]")
+    print(nac_dot_hist[:,:,0])
+    print("ndh[:,:,1]")
+    print(nac_dot_hist[:,:,1])
+    print("ndh[:,:,2]")
+    print(nac_dot_hist[:,:,2])
     
+    print("nac_dot[0,1] history post roll:",nac_dot_hist[0,1,0],nac_dot_hist[0,1,1],nac_dot_hist[0,1,2])
+    # update newest entry
+    nac_dot = np.sum(nac*nac0,axis=2)
+    nac_dot_hist[:,:,2] = nac_dot
+   
+    print("nac_dot[0,1] history: post upda",nac_dot_hist[0,1,0],nac_dot_hist[0,1,1],nac_dot_hist[0,1,2])
+
+    return (nac,nac_dot_hist)
 
 
 

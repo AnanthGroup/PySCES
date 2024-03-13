@@ -12,11 +12,13 @@ Main code to run LSC-IVR dynamics
 
 import os
 import numpy as np
+np.random.seed(1)
 import pandas
 from input_gamess import * 
 from subroutines import *
 # __location__ = os.path.realpath(os.path.join(os.getcwd(), os.path.dirname(__file__)))
 __location__ = ''
+
 
 #   temporary work around for using local settings
 try:
@@ -43,7 +45,7 @@ if restart == 0: # If this is not a restart run
     print("U U.T:\n",pandas.DataFrame(np.matmul(U,U.T)))
     print("amu_mat:\n",pandas.DataFrame(amu_mat))
     print("normal coords:\n",normal_geo)  
-    exit()
+    #exit()
     # Sample initial phase space configuration
     if sampling == 'conventional':
         coord = sample_conventionalLSC(normal_geo, frq)
