@@ -69,6 +69,7 @@ tcr_job_options = {}
 tcr_state_options = {}
 
 # Terachem files
+fname_tc_xyz      = "tmp/tc_hf/hf.spherical.freq/Geometry.xyz"
 fname_tc_geo_freq = "tmp/tc_hf/hf.spherical.freq/Geometry.frequencies.dat"
 fname_tc_redmas   = "tmp/tc_hf/hf.spherical.freq/Reduced.mass.dat"
 fname_tc_freq     = "tmp/tc_hf/hf.spherical.freq/Frequencies.dat"

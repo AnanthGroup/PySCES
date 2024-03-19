@@ -23,8 +23,10 @@ from fileIO import SimulationLogger, write_restart, read_restart
 # __location__ = os.path.realpath(os.path.join(os.getcwd(), os.path.dirname(__file__)))
 __location__ = ''
 
+# TODO tom: remove after debugging
 random.seed(1)
 np.random.seed(1)
+# end TODO
 #   temporary work around for using local settings
 try:
     sys.path.append(os.path.abspath(os.path.curdir))
@@ -74,31 +76,6 @@ def get_geo_hess_terachem():
     ## 1 & 2 Read Cartesian coordinate of initial geometry
     ##--------------------------------------------------
     
-    ## LEGACY ##
-    ## Open terachem output file
-    #f = open(os.path.join(__location__,fname_tc_out))
-    #f_lines = f.readlines()
-    ## Search output file for Reference Geometry entry
-    #ref_geo_index = -1
-    #for i, line in enumerate(f_lines):
-    #    if "*** Reference Geometry ***" in line:
-    #        ref_geo_index = i 
-    #        break
-
-    #if ref_geo_index != -1:
-    #    # Coordinates start 2 lines below "Reference Geometry"
-    #    print(f_lines[ref_geo_index+2].split())
-    #    for i in range(0,natom):
-    #        current_line = f_lines[ref_geo_index+2+i].split()
-    #        for j in range(0,3):
-    #            # xyz entries in TC output file are in a.u.
-    #            xyz_ang[3*i+j] = 1.0/ang2bohr * float(current_line[j+1])
-    #else:
-    #    print("Reference Geometry entry not found")
-    #f.close()
-    #exit()
-    ## END LEGACY ##
-
     # initialize arrays
     amu = []
     xyz_ang = np.zeros(nnuc)
@@ -109,6 +86,7 @@ def get_geo_hess_terachem():
     # Open TeraChem Geometry.frequencies.dat file from scratch dir
     # This file contains the geometry in bohr after removing the center of mass
     # Note: if a different file is used for coords, check whether COM is removed
+    # Note: The xyz file is not used for this part of the code. It is only used for the labels
     with open(os.path.join(__location__,fname_tc_geo_freq)) as f:
         f_lines = f.readlines()
     
@@ -176,7 +154,7 @@ def get_geo_hess_terachem():
             L[3*ia+1,ivm+6] = float(f_lines[lbegin+ia*3+1].split()[lcolumn+0])
             L[3*ia+2,ivm+6] = float(f_lines[lbegin+ia*3+2].split()[lcolumn+0])
 
-    #TODO begin debugging test
+    #TODO tom: remove the following begin debugging test
     #test_vec = L[:,6] #first EV
     #print(test_vec)
     #for i in range(0,nnuc):
@@ -185,7 +163,7 @@ def get_geo_hess_terachem():
     #    print("L2-norm testvec",np.dot(test_vec,test_vec))
     #    print("tv*m(au)*tv",np.dot(test_vec,amu2au*np.matmul(amu_mat,test_vec)))
     #exit()
-    # end debugging test
+    # end TODO debugging test
     
     # -------------------------------------------------
     # 6. U matrix (mass-weighted eigenmodes)
@@ -428,8 +406,13 @@ def sample_spinLSC(qN0, frq):
 ####################################
 def get_atom_label():
     atoms = []
-    f = open(os.path.join(__location__,'geo_gamess'), 'r')
-    f.readline()
+    if(QC_RUNNER == "gamess"):
+      f = open(os.path.join(__location__,'geo_gamess'), 'r')
+      f.readline()
+    elif(QC_RUNNER == "terachem"):
+      f = open(os.path.join(__location__,fname_tc_xyz), 'r')
+      f.readline()
+      f.readline()
     for i in range(natom):
         x = f.readline().split()
         atoms.append(x[0])
@@ -1550,8 +1533,11 @@ def rk4(initq,initp,tStop,H,restart,amu_mat,U, com_ang):
         qC, pC  = rotate_norm_to_cart(qN, pN, U, amu_mat) # collections of nuclear variables in Cartesian coordinate
         q[nel:], p[nel:] = qC, pC
         y = np.concatenate((q, p))
-        nac0 = np.zeros((len(q0),len(q0)))
-        nac_dot_hist = np.zeros((len(q0),len(q0),3))        # nonadiabatic coupling scalaproduct with the nac at time 0 for time steps in the past, t=2 is the most recent, t=0 is the oldest
+
+        hist_length = 4 #this is the only implemented length
+        nac_hist = np.zeros((len(q0),len(q0),nnuc,hist_length))
+        #nac0 = np.zeros((len(q0),len(q0)))
+        #nac_dot_hist = np.zeros((len(q0),len(q0),3))        # nonadiabatic coupling scalaproduct with the nac at time 0 for time steps in the past, t=2 is the most recent, t=0 is the oldest
 
         # Get atom labels
         atoms = get_atom_label()
@@ -1582,10 +1568,9 @@ def rk4(initq,initp,tStop,H,restart,amu_mat,U, com_ang):
         init_energy = get_energy(au_mas, q, p, elecE)
         with open(os.path.join(__location__, 'energy.out'), 'a') as g:
             g.write(total_format.format(t, init_energy, *elecE))
-        # Create history for nac_dot_hist
-        nac0 = nac
-        for i in range(0,3):
-            nac_dot_hist[:,:,i] = np.sum(nac0*nac0,axis=2)
+        # Create nac history for sign-flip extrapolation
+        for it in range(0,hist_length):
+            nac_hist[:,:,:,it] = nac
    
     elif restart == 1:
         opt['guess'] = 'moread'
@@ -1689,7 +1674,7 @@ def rk4(initq,initp,tStop,H,restart,amu_mat,U, com_ang):
                 job_results = tc_runner.run_TC_new_geom(qC/ang2bohr)
                 elecE, grad, nac = format_output_LSCIVR(len(q0), job_results)
             #correct nac sign
-            nac, nac_dot_hist = correct_nac_sign(nac,nac0,nac_dot_hist)
+            nac, nac_hist = correct_nac_sign(nac,hist_length,nac_hist)
 
         if proceed:
             # Compute energy
@@ -1817,10 +1802,18 @@ def compute_CF(X, Y):
 '''
 Check which sign for the nac is expected and correct artificial sign flips
 '''
-def correct_nac_sign(nac,nac0,nac_dot_hist):
-    # Calculate d(t)*d(0)
-    nac_dot = np.zeros((len(q0),len(q0)))
-    nac_dot = np.sum(nac*nac0,axis=2)
+def correct_nac_sign(nac,hist_length,nac_hist):
+    # TODO tom: remove print commands
+    # Calculate d(t-2)*d(t-3),d(t-1)*d(t-2),d(t)*d(t-1)
+    nac_dot_hist = np.zeros((len(q0),len(q0),hist_length-1))
+    # d(t+1)*d(t)
+    nac_dot      = np.zeros((len(q0),len(q0)))
+
+    for it in range(0,hist_length-1):
+      nac_dot_hist[:,:,it] = np.sum(nac_hist[:,:,:,it]*nac_hist[:,:,:,it+1],axis=2)
+
+    nac_dot = np.sum(nac_hist[:,:,:,hist]*nac[:,:,:],axis=2)
+
     print("gamess nac_dot[0,1]",nac_dot[0,1])
 
     # Predict d(t)*d(0) with parabolic extrapolation of last 3 time steps
@@ -1844,30 +1837,30 @@ def correct_nac_sign(nac,nac0,nac_dot_hist):
                     print("0,1 signflip removed")
 
     # rotate history
-    print("nac_dot_hist vor roll: ")
-    print("ndh[:,:,0]")
-    print(nac_dot_hist[:,:,0])
-    print("ndh[:,:,1]")
-    print(nac_dot_hist[:,:,1])
-    print("ndh[:,:,2]")
-    print(nac_dot_hist[:,:,2])
-    nac_dot_hist = np.roll(nac_dot_hist,-1,axis=2)
-    print("nac_dot_hist nach roll: ")
-    print("ndh[:,:,0]")
-    print(nac_dot_hist[:,:,0])
-    print("ndh[:,:,1]")
-    print(nac_dot_hist[:,:,1])
-    print("ndh[:,:,2]")
-    print(nac_dot_hist[:,:,2])
+    print("nac_hist vor roll: ")
+    print("nh[:,:,0]")
+    print(nac_hist[:,:,:,0])
+    print("nh[:,:,1]")
+    print(nac_hist[:,:,:,1])
+    print("nh[:,:,2]")
+    print(nac_hist[:,:,:,2])
+    nac_hist = np.roll(nac_hist,-1,axis=3)
+    print("nac_hist nach roll: ")
+    print("nh[:,:,0]")
+    print(nac_hist[:,:,:,0])
+    print("nh[:,:,1]")
+    print(nac_hist[:,:,:,1])
+    print("nh[:,:,2]")
     
     print("nac_dot[0,1] history post roll:",nac_dot_hist[0,1,0],nac_dot_hist[0,1,1],nac_dot_hist[0,1,2])
+    
     # update newest entry
-    nac_dot = np.sum(nac*nac0,axis=2)
-    nac_dot_hist[:,:,2] = nac_dot
+    nac_hist[:,:,:,2] = nac
    
     print("nac_dot[0,1] history: post upda",nac_dot_hist[0,1,0],nac_dot_hist[0,1,1],nac_dot_hist[0,1,2])
+    # test some git utilities
 
-    return (nac,nac_dot_hist)
+    return (nac,nac_hist)
 
 
 
