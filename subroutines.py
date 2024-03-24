@@ -1535,9 +1535,7 @@ def rk4(initq,initp,tStop,H,restart,amu_mat,U, com_ang):
         y = np.concatenate((q, p))
 
         hist_length = 4 #this is the only implemented length
-        nac_hist = np.zeros((len(q0),len(q0),nnuc,hist_length))
-        #nac0 = np.zeros((len(q0),len(q0)))
-        #nac_dot_hist = np.zeros((len(q0),len(q0),3))        # nonadiabatic coupling scalaproduct with the nac at time 0 for time steps in the past, t=2 is the most recent, t=0 is the oldest
+        nac_hist = np.zeros((len(q0),len(q0),nnuc,hist_length)) # history of nonadiabatic coupling vectors for extrapolation in nac sign flip correction
 
         # Get atom labels
         atoms = get_atom_label()
@@ -1560,7 +1558,7 @@ def rk4(initq,initp,tStop,H,restart,amu_mat,U, com_ang):
             if not proceed:
                 sys.exit("Electronic structure calculation failed at initial time. Exitting.")
         else:
-            tc_runner = TCRunner(tcr_host, tcr_port, atoms, tcr_job_options, run_options=tcr_state_options, start_new=True)
+            tc_runner = TCRunner(tcr_host, tcr_port, atoms, tcr_job_options, run_options=tcr_state_options, start_new=False)
             job_results = tc_runner.run_TC_new_geom(qC/ang2bohr)
             elecE, grad, nac = format_output_LSCIVR(len(q0), job_results)
             # exit()
@@ -1575,24 +1573,32 @@ def rk4(initq,initp,tStop,H,restart,amu_mat,U, com_ang):
     elif restart == 1:
         opt['guess'] = 'moread'
 
-        # q, p, init_energy, initial_time = read_restart('restart.json', ndof=ndof)
-        # t = initial_time
+        q, p, nac_hist, init_energy, initial_time = read_restart('restart.json', ndof=ndof)
+        hist_length = nac_hist.shape[3]
+        print("hist_length",hist_length)
+        t = initial_time
 
-        # Read the restart file
-        q, p = np.zeros(ndof), np.zeros(ndof)
-        F = np.zeros((2,ndof))
-        with open(os.path.join(__location__, 'restart.out'), 'r') as ff:
-                ff.readline() 
-                for i in range(ndof):
-                    x = ff.readline().split()
-                    q[i], p[i] = float(x[0]), float(x[1]) # Mapping variables already in Cartesian coordinate
-                [ff.readline() for i in range(2)]
+        ## Read the restart file
+        #q, p = np.zeros(ndof), np.zeros(ndof)
+        #F = np.zeros((2,ndof))
+        #with open(os.path.join(__location__, 'restart.out'), 'r') as ff:
+        #        ff.readline() 
+        #        for i in range(ndof):
+        #            x = ff.readline().split()
+        #            q[i], p[i] = float(x[0]), float(x[1]) # Mapping variables already in Cartesian coordinate
+        #        [ff.readline() for i in range(2)]
 
-                init_energy = float(ff.readline()) # Total energy
-                [ff.readline() for i in range(2)]
+        #        init_energy = float(ff.readline()) # Total energy
+        #        [ff.readline() for i in range(2)]
 
-                initial_time = float(ff.readline()) # Total simulation time at the beginning of restart run
-                t = initial_time   
+        #        initial_time = float(ff.readline()) # Total simulation time at the beginning of restart run
+        #        t = initial_time   
+        #        [ff.readline() for i in range(2)]
+
+        #        nac_hist_shape = tuple(map(int, ff.readline().strip().split()))  
+        #        flat_nac_hist = [float(num) for num in ff.readline().strip().split()]  
+        #        nac_hist = np.array(flat_nac_hist).reshape(nac_hist_shape)  
+        #        print("nac_hist",nac_hist)
                 
     
         qC, pC = q[nel:], p[nel:]
@@ -1623,6 +1629,8 @@ def rk4(initq,initp,tStop,H,restart,amu_mat,U, com_ang):
             # import json
             # json.dump(tc_runner.cleanup_multiple_jobs(job_results), open('tmp.json', 'w'), indent=4)
             elecE, grad, nac = format_output_LSCIVR(len(q0), job_results)
+       
+        nac, nac_hist = correct_nac_sign(nac,hist_length,nac_hist)
 
     pops = compute_CF_single(q[0:nel], p[0:nel])
     logger.write(t,init_energy, elecE,  grad, nac, pops)
@@ -1702,7 +1710,7 @@ def rk4(initq,initp,tStop,H,restart,amu_mat,U, com_ang):
             #   New logging information
             pops = compute_CF_single(y[0:nel], y[ndof:ndof+nel])
             logger.write(t, total_E=new_energy, elec_E=elecE,  grads=grad, NACs=nac, pops=pops)
-            write_restart('restart.json', [Y[-1][:ndof], Y[-1][ndof:]], new_energy, t, nel, 'rk4')
+            write_restart('restart.json', [Y[-1][:ndof], Y[-1][ndof:]], nac_hist, new_energy, t, nel, 'rk4')
 
             if t == tStop:
                 with open(os.path.join(__location__, 'progress.out'), 'a') as f:
@@ -1750,6 +1758,11 @@ def rk4(initq,initp,tStop,H,restart,amu_mat,U, com_ang):
         gg.write('Total time in a.u. \n')
         gg.write('{:>16.10f} \n'.format(t))
         gg.write('\n')
+
+        gg.write('NAC History:\n')
+        gg.write(' '.join(map(str, nac_hist.shape)) + '\n')
+        gg.write(np.array2string(nac_hist, separator=',').replace('[', '').replace(']', '') + '\n')
+        print("nac_hist",nac_hist)
 
     return(np.array(X), coord, initial_time)
 
@@ -1806,13 +1819,14 @@ def correct_nac_sign(nac,hist_length,nac_hist):
     # TODO tom: remove print commands
     # Calculate d(t-2)*d(t-3),d(t-1)*d(t-2),d(t)*d(t-1)
     nac_dot_hist = np.zeros((len(q0),len(q0),hist_length-1))
+    # nac_dot_hist: last index from 0 to hist_length-2
     # d(t+1)*d(t)
     nac_dot      = np.zeros((len(q0),len(q0)))
 
     for it in range(0,hist_length-1):
       nac_dot_hist[:,:,it] = np.sum(nac_hist[:,:,:,it]*nac_hist[:,:,:,it+1],axis=2)
 
-    nac_dot = np.sum(nac_hist[:,:,:,hist]*nac[:,:,:],axis=2)
+    nac_dot = np.sum(nac_hist[:,:,:,hist_length-1]*nac[:,:,:],axis=2)
 
     print("gamess nac_dot[0,1]",nac_dot[0,1])
 
@@ -1855,7 +1869,7 @@ def correct_nac_sign(nac,hist_length,nac_hist):
     print("nac_dot[0,1] history post roll:",nac_dot_hist[0,1,0],nac_dot_hist[0,1,1],nac_dot_hist[0,1,2])
     
     # update newest entry
-    nac_hist[:,:,:,2] = nac
+    nac_hist[:,:,:,hist_length-1] = nac
    
     print("nac_dot[0,1] history: post upda",nac_dot_hist[0,1,0],nac_dot_hist[0,1,1],nac_dot_hist[0,1,2])
     # test some git utilities
