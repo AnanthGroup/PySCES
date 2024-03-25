@@ -23,15 +23,36 @@ class TCServerStallError(Exception):
 
 def _print_times(times: dict):
     total = 0.0
-    print()
-    print("Timings")
-    print("-------------------------------")
     for key, value in times.items():
-        print(f'{key:20s} {value:10.3f}')
         total += value
-    print()
-    print(f'{"total":20s} {total:10.3f}')
-    print("-------------------------------")
+
+    times_fname = 'timings.out'
+    times_file_exist = os.path.isfile(times_fname)
+
+    with open (times_fname, 'a') as times_f:
+        # Write header
+        if not times_file_exist:
+            times_f.write(f'{"total":12s}')
+            for key, value in times.items():
+                times_f.write(f'{key:12s}')
+            times_f.write('\n')
+        
+        # Write timings
+        times_f.write(f'{total:12.3f}')
+        for key, value in times.items():
+            times_f.write(f'{value:12.3f}')
+        times_f.write('\n')
+
+
+    #print()
+    #print("Timings")
+    #print("-------------------------------")
+    #for key, value in times.items():
+    #    print(f'{key:20s} {value:10.3f}')
+    #    total += value
+    #print()
+    #print(f'{"total":20s} {total:10.3f}')
+    #print("-------------------------------")
 
 def _val_or_iter(x):
     try:

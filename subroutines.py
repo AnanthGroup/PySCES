@@ -23,11 +23,6 @@ from fileIO import SimulationLogger, write_restart, read_restart
 # __location__ = os.path.realpath(os.path.join(os.getcwd(), os.path.dirname(__file__)))
 __location__ = ''
 
-# TODO tom: remove after debugging
-random.seed(1)
-np.random.seed(1)
-# end TODO
-#   temporary work around for using local settings
 try:
     sys.path.append(os.path.abspath(os.path.curdir))
     from input_simulation_local import * 
@@ -50,6 +45,9 @@ ang2bohr = 1.8897259886         # angstroms to bohr
 k2autmp  = kb/eh2j              # Kelvin to atomic unit temperature
 beta     = 1.0/(temp * k2autmp) # inverse temperature in atomic unit
 
+# Set random seed from input file
+random.seed(input_seed)
+np.random.seed(input_seed)
 
 #####################################################
 ### Read geometry & hessian file, returns 
@@ -309,10 +307,14 @@ def get_normal_geo(U, xyz_ang, amu_mat):
 ############################################################
 '''Nuclear phase space variables in harmonic approximation'''
 def sample_nuclear(qcenter, frq):
-    # position
-    Q = np.random.normal(loc=qcenter, scale=np.sqrt(1.0/(2.0*frq*np.tanh(beta*frq/2.0))))
-    # momentum
-    P = np.random.normal(loc=pN0, scale=np.sqrt(frq/(2.0*np.tanh(beta*frq/2.0))))
+    if(frq >= 0):
+        # position
+        Q = np.random.normal(loc=qcenter, scale=np.sqrt(1.0/(2.0*frq*np.tanh(beta*frq/2.0))))
+        # momentum
+        P = np.random.normal(loc=pN0, scale=np.sqrt(frq/(2.0*np.tanh(beta*frq/2.0))))
+    else:
+        Q = qcenter
+        P = pN0
     return(Q, P)
 
 '''Conventional LSC-IVR'''

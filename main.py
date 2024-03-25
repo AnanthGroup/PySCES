@@ -12,7 +12,6 @@ Main code to run LSC-IVR dynamics
 
 import os
 import numpy as np
-np.random.seed(1)
 import pandas
 from input_gamess import * 
 from subroutines import *
@@ -29,6 +28,8 @@ except Exception as e:
     print("Importing global settings: ", e)
     from input_simulation import * 
 
+# Set random seed
+np.random.seed(input_seed)
 
 ###################################
 ### Propagation of a trajectory ###
