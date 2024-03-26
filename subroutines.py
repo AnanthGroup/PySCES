@@ -134,6 +134,8 @@ def get_geo_hess_terachem():
         # and convert to a.u. and scale by frq_scale
         frq[ivm+6] = f_lines[lbegin-2].split()[lcolumn]
         frq[ivm+6] = frq[ivm+6] * 2.0*pi*clight*100*autime2s*frq_scale
+        # Write a warning if the frequency is negative
+        if(frq[ivm+6] < 0.0): print(f"Warning: Vibrational normal mode {ivm} has a negative frequency - its initial momentum is set to 0.")
         # Get eigenvectors
         # For the x direction we need one more column, because this line also contains the atom number
         # (skip 6 indices in L for the trans+rot modes)
