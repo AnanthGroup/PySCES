@@ -9,9 +9,10 @@ import warnings
 import shutil
 import socket
 import subprocess
-import multiprocessing
 import time
 import psutil
+import concurrent.futures
+
 
 _server_processes = {}
 
@@ -21,10 +22,11 @@ class TCServerStallError(Exception):
         super().__init__(message)
 
 
-def _print_times(times: dict):
+def _print_times(times: dict, wall_time = None):
     total = 0.0
     for key, value in times.items():
         total += value
+<<<<<<< HEAD
 
     times_fname = 'timings.out'
     times_file_exist = os.path.isfile(times_fname)
@@ -53,6 +55,13 @@ def _print_times(times: dict):
     #print()
     #print(f'{"total":20s} {total:10.3f}')
     #print("-------------------------------")
+=======
+    print()
+    print(f'{"total":20s} {total:10.3f}')
+    if wall_time is not None:
+        print(f'{"total wall":20s} {wall_time:10.3f}')
+    print("-------------------------------")
+>>>>>>> parallel_tc
 
 def _val_or_iter(x):
     try:
@@ -162,23 +171,40 @@ def _start_TC_server(port: int):
 
 class TCRunner():
     def __init__(self, 
-                 host: str, 
-                 port: int, 
+                 hosts: str, 
+                 ports: int,
                  atoms: list,
                  tc_options: dict,
+                 server_roots = '.',
                  start_new:  bool=False,
                  run_options: dict={}, 
                  max_wait=20, 
-                 dipole_deriv = False) -> None:
+                 dipole_deriv = False,
+                 ) -> None:
 
-        #   set up the server
+        if isinstance(hosts, str):
+            hosts = [hosts]
+        if isinstance(ports, int):
+            ports = [ports]
+        if isinstance(server_roots, str):
+            server_roots = [server_roots]
+
+        #   set up the servers
         if start_new:
-            host = start_TC_server(port)
+            hosts = start_TC_server(ports)
 
-        self._client = TCPBClient(host=host, port=port)
-        self.wait_until_available(self._client, max_wait=max_wait)
-        self._host = host
-        self._port = port
+        self._host_list = hosts
+        self._port_list = ports
+        self._server_root_list = server_roots
+        self._client_list = []
+        for h, p in zip(hosts, ports):
+            client = TCPBClient(host=h, port=p)
+            self.wait_until_available(client, max_wait=max_wait)
+            self._client_list.append(client)
+
+        self._client = self._client_list[0]
+        self._host = hosts[0]
+        self._port = ports[0]
 
         self._atoms = np.copy(atoms)
         self._base_options = tc_options.copy()
@@ -433,6 +459,11 @@ class TCRunner():
         base_options['purify'] = False
         base_options['atoms'] = atoms
 
+
+        n_clients = len(self._client_list)
+        jobs_to_run = [{} for i in range(n_clients)]
+        job_num = 0
+
         #   run energy only if gradients and NACs are not requested
         all_results = []
         if len(grads) == 0 and len(NACs) == 0:
@@ -444,9 +475,10 @@ class TCRunner():
             results.update(job_opts)
             all_results.append(results)
 
+        #   create gradient job properties
         #   gradient computations have to be separated from NACs
         for job_i, state in enumerate(grads):
-            print("Grad ", job_i+1)
+            name = f'gradient_{state}'
             job_opts = base_options.copy()
 
             if excited_type == 'cas':
@@ -458,22 +490,19 @@ class TCRunner():
                     job_opts.update(excited_options)
                     job_opts['cistarget'] = state
                     
+            # self._set_guess(job_opts, excited_type, all_results, state)
 
-            self._set_guess(job_opts, excited_type, all_results, state)
-
-            start = time.time()
-
-            results = self.compute_job_sync('gradient', geom, 'angstrom', **job_opts)
-
-            times[f'gradient_{state}'] = time.time() - start
-            results['run'] = 'gradient'
-            results.update(job_opts)
-            all_results.append(results)
+            jobs_to_run[job_num % n_clients][name] = {
+                'opts': job_opts.copy(), 
+                'type': 'gradient', 
+                'state': state
+                }
+            job_num += 1
 
 
-        #   run NAC jobs
+        #   create NAC job properties
         for job_i, (nac1, nac2) in enumerate(NACs):
-            print("NAC ", job_i+1)
+            name = f'nac_{nac1}_{nac2}'
             job_opts = base_options.copy()
             job_opts.update(excited_options)
 
@@ -489,54 +518,53 @@ class TCRunner():
 
             if dipole_deriv:
                 pass
-                # job_opts['cistransdipolederiv'] = 'yes'
-            if job_i > 0:
-                job_opts['guess'] = all_results[-1]['orbfile']
 
-            self._set_guess(job_opts, excited_type, all_results, max(nac1, nac2))
+            jobs_to_run[job_num % n_clients][name] = {
+                'opts': job_opts.copy(),
+                'type': 'coupling',
+                'state': max(nac1, nac2)
+                }
+            job_num += 1
 
-            self._set_guess(job_opts, excited_type, all_results, max(nac1, nac2))
 
+        #   if only one client is being used, don't open up threads, easier to debug
+        if n_clients == 1:
             start = time.time()
-            results = self.compute_job_sync('coupling', geom, 'angstrom', **job_opts)
-            times[f'nac_{nac1}_{nac2}'] = time.time() - start
-            results['run'] = 'coupling'
-            results.update(job_opts)
-            all_results.append(results)
+            results, times = _run_jobs(self._client_list[0], jobs_to_run[0], geom, excited_type, self._server_root_list[0], 0)
+            all_results += results
+            end = time.time()
 
+        else:
+            start = time.time()
+            with concurrent.futures.ThreadPoolExecutor() as executor:
+                futures = []
+                for i in range(n_clients):
+                    jobs = jobs_to_run[i]
+                    args = (self._client_list[i], jobs, geom, excited_type, self._server_root_list[i], i)
+                    future = executor.submit(_run_jobs, *args)
+                    futures.append(future)
+                for f in futures:
+                    batch_results, batch_times = f.result()
+                    all_results += batch_results
+                    times.update(batch_times)
+            end = time.time()
 
-        _print_times(times)
+        _print_times(times, end - start)
         self.set_avg_max_times(times)
         return all_results
     
     def _set_guess(self, job_opts: dict, excited_type: str, all_results: list[dict], state):
+        return _set_guess(job_opts, excited_type, all_results, state)
 
-        if state > 0:
-            if excited_type == 'cas':
-                for prev_job in reversed(all_results):
-                    if prev_job.get('castarget', 0) >= 1:
-                        prev_orb_file = prev_job['orbfile']
-                        if prev_orb_file[-6:] == 'casscf':
-                            self._cas_guess = prev_orb_file
-                            break
+def _run_jobs(client: TCPBClient, jobs, geom, excited_type, server_root, client_ID=0):
+    times = {}
+    all_results = []
+    for job_name, job_props in jobs.items():
+        job_opts = job_props['opts']
+        job_type = job_props['type']
+        job_state = job_props['state']
 
-        for prev_job in reversed(all_results):
-            if 'orbfile' in prev_job:
-                self._scf_guess = prev_job['orbfile']
-                #   This is to fix a bug in terachem that still sets the c0.casscf file as the
-                #   previous job's orbital file
-                if self._scf_guess[-6:] == 'casscf':
-                    self._scf_guess = self._scf_guess[0:-7]
-                break
-
-
-        if os.path.isfile(str(self._cas_guess)):
-            job_opts['casguess'] = self._cas_guess
-        if os.path.isfile(str(self._scf_guess)):
-            job_opts['guess'] = self._scf_guess
-        if os.path.isfile(str(self._ci_guess)):
-            job_opts['cisrestart'] = self._ci_guess
-
+<<<<<<< HEAD
     
     @staticmethod
     def run_TC_all_states(client: TCPBClient, geom, atoms: list[str], opts: dict, dipole_deriv=False,
@@ -634,6 +662,47 @@ class TCRunner():
         _print_times(times)
         return all_results
     
+=======
+        _set_guess(job_opts, excited_type, all_results, job_state, server_root)
+        print(f"\nRunning {job_name} on client ID {client_ID}")
+
+        start = time.time()
+        results = client.compute_job_sync(job_type, geom, 'angstrom', **job_opts)
+        times[job_name] = time.time() - start
+        results['run'] = job_type
+        results.update(job_opts)
+        all_results.append(results)
+
+    return all_results, times
+
+def _set_guess(job_opts: dict, excited_type: str, all_results: list[dict], state: int, server_root='.'):
+    import json
+    cas_guess = None
+    scf_guess = None
+    if state > 0:
+        if excited_type == 'cas':
+            for prev_job in reversed(all_results):
+                if prev_job.get('castarget', 0) >= 1:
+                    prev_orb_file = prev_job['orbfile']
+                    if prev_orb_file[-6:] == 'casscf':
+                        cas_guess = os.path.join(server_root, prev_orb_file)
+                        break
+        #   we do not consider cis file because it is not stored in each job dorectory; we set it ourselves
+
+    for prev_job in reversed(all_results):
+        if 'orbfile' in prev_job:
+            scf_guess = os.path.join(server_root, prev_job['orbfile'])
+            #   This is to fix a bug in terachem that still sets the c0.casscf file as the
+            #   previous job's orbital file
+            if scf_guess[-6:] == 'casscf':
+                scf_guess = scf_guess[0:-7]
+            break
+
+    if os.path.isfile(str(cas_guess)):
+        job_opts['casguess'] = cas_guess
+    if os.path.isfile(str(scf_guess)):
+        job_opts['guess'] = scf_guess
+>>>>>>> parallel_tc
 
 def format_output_LSCIVR(n_elec, job_data: list[dict]):
     atoms = job_data[0]['atoms']
