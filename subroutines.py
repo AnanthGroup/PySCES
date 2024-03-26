@@ -23,14 +23,8 @@ from fileIO import SimulationLogger, write_restart, read_restart
 # __location__ = os.path.realpath(os.path.join(os.getcwd(), os.path.dirname(__file__)))
 __location__ = ''
 
-try:
-    sys.path.append(os.path.abspath(os.path.curdir))
-    from input_simulation_local import * 
-except:
-    from input_simulation import * 
+from input_simulation import * 
     
-
-
 # Physical constants and unit conversion factors
 pi       = np.pi
 hplanck  = 6.62607015*10**-34   # Planck's constant in SI
@@ -45,10 +39,6 @@ ang2bohr = 1.8897259886         # angstroms to bohr
 k2autmp  = kb/eh2j              # Kelvin to atomic unit temperature
 beta     = 1.0/(temp * k2autmp) # inverse temperature in atomic unit
 
-# Set random seed from input file
-random.seed(input_seed)
-np.random.seed(input_seed)
-
 #####################################################
 ### Read geometry & hessian file, returns 
 ### 1. AMU matrix
@@ -60,12 +50,12 @@ np.random.seed(input_seed)
 ### 7. center of mass vector
 ####################################################
 def get_geo_hess():
-    if QC_RUNNER == "terachem":
+    if mol_input_format == "terachem":
         amu_mat, xyz_ang, frq, redmas, L, U, com_ang = get_geo_hess_terachem()
-    elif QC_RUNNER == "gamess":
+    elif mol_input_format == "gamess":
         amu_mat, xyz_ang, frq, redmas, L, U, com_ang = get_geo_hess_gamess()
     else:
-        print("Error: get_geo_hess ran in undefined QC_RUNNER case")        
+        print("Error: get_geo_hess ran in undefined 'mol_input_format' case")        
         exit()
     return(amu_mat, xyz_ang, frq, redmas, L, U, com_ang)
 
@@ -408,10 +398,10 @@ def sample_spinLSC(qN0, frq):
 ####################################
 def get_atom_label():
     atoms = []
-    if(QC_RUNNER == "gamess"):
+    if(mol_input_format == "gamess"):
       f = open(os.path.join(__location__,'geo_gamess'), 'r')
       f.readline()
-    elif(QC_RUNNER == "terachem"):
+    elif(mol_input_format == "terachem"):
       f = open(os.path.join(__location__,fname_tc_xyz), 'r')
       f.readline()
       f.readline()

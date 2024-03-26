@@ -9,6 +9,11 @@ Created on Wed May  3 19:05:28 2023
 """
 Repository of simulation variables
 """
+import sys, os
+import input_simulation as opts
+
+
+########## DEFAULT SETTINGS ##########
 
 nel, natom = 3, 6 # number of electronic states, number of atoms in the molecule
 nnuc = 3*natom # number of nuclear DOFs
@@ -77,3 +82,40 @@ fname_tc_freq     = "tmp/tc_hf/hf.spherical.freq/Frequencies.dat"
 
 #   GAMESS submission script name
 sub_script = None
+
+mol_input_format = ''
+
+
+########## END DEFAULT SETTINGS ##########
+
+
+
+
+#   TODO: check that there are no conflicting settings
+def _check_settings():
+    if opts.mol_input_format == '':
+        opts.mol_input_format = opts.QC_RUNNER
+    
+
+def _set_seed():
+    '''
+        set the random number generator seed
+    '''
+    if 'input_seed' in opts.__dict__:
+        import numpy as np
+        import random
+        input_seed = opts.__dict__['input_seed']
+        random.seed(input_seed)
+        np.random.seed(input_seed)
+
+#   load in local settings, which will overwrite the default ones above
+try:
+    sys.path.append(os.path.abspath(os.path.curdir))
+    print("Importing local settings")
+    from input_simulation_local import * 
+except Exception as e:
+    print("Using default settings: ", e)
+    from input_simulation import * 
+
+_check_settings()
+_set_seed()

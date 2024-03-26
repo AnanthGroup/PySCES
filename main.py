@@ -18,18 +18,7 @@ from subroutines import *
 # __location__ = os.path.realpath(os.path.join(os.getcwd(), os.path.dirname(__file__)))
 __location__ = ''
 
-
-#   temporary work around for using local settings
-try:
-    sys.path.append(os.path.abspath(os.path.curdir))
-    from input_simulation_local import * 
-    print("Importing local settings")
-except Exception as e:
-    print("Importing global settings: ", e)
-    from input_simulation import * 
-
-# Set random seed
-np.random.seed(input_seed)
+from input_simulation import * 
 
 ###################################
 ### Propagation of a trajectory ###
