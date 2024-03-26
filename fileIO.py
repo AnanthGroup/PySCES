@@ -2,7 +2,7 @@ import os
 import json
 import numpy as np
 
-def read_restart(file_loc: str, ndof: int, integrator: str='RK4') -> tuple[np.ndarray, np.ndarray, np.ndarray, float, float]:
+def read_restart(file_loc: str='restart.out', ndof: int=0, integrator: str='RK4') -> tuple[np.ndarray, np.ndarray, np.ndarray, float, float]:
     '''
         Reads in a restart file and extracts it's data
         Parameters
@@ -31,6 +31,8 @@ def read_restart(file_loc: str, ndof: int, integrator: str='RK4') -> tuple[np.nd
     if integrator.lower() == 'rk4':
         extension = os.path.splitext(file_loc)[-1]
         if extension == '.out':
+            if ndof <= 0:
+                raise ValueError('`ndof` must be supplied when using .out restart files')
             #   original output file data
             q, p = np.zeros(ndof), np.zeros(ndof)
             with open(file_loc, 'r') as ff:
@@ -45,7 +47,7 @@ def read_restart(file_loc: str, ndof: int, integrator: str='RK4') -> tuple[np.nd
 
                 initial_time = float(ff.readline()) # Total simulation time at the beginning of restart run
                 t = initial_time  
-            return q, p, init_energy, t
+            return q, p, np.array([]), init_energy, t
 
         elif extension == '.json':
             #  json data format

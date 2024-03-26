@@ -60,9 +60,9 @@ np.random.seed(input_seed)
 ### 7. center of mass vector
 ####################################################
 def get_geo_hess():
-    if(QC_RUNNER == "terachem"):
+    if QC_RUNNER == "terachem":
         amu_mat, xyz_ang, frq, redmas, L, U, com_ang = get_geo_hess_terachem()
-    elif(QC_RUNNER == "gamess"):
+    elif QC_RUNNER == "gamess":
         amu_mat, xyz_ang, frq, redmas, L, U, com_ang = get_geo_hess_gamess()
     else:
         print("Error: get_geo_hess ran in undefined QC_RUNNER case")        
@@ -1575,9 +1575,7 @@ def rk4(initq,initp,tStop,H,restart,amu_mat,U, com_ang):
     elif restart == 1:
         opt['guess'] = 'moread'
 
-        q, p, nac_hist, init_energy, initial_time = read_restart('restart.json', ndof=ndof)
-        hist_length = nac_hist.shape[3]
-        print("hist_length",hist_length)
+        q, p, nac_hist, init_energy, initial_time = read_restart(ndof=ndof)
         t = initial_time
 
         ## Read the restart file
@@ -1629,7 +1627,7 @@ def rk4(initq,initp,tStop,H,restart,amu_mat,U, com_ang):
             # json.dump(tc_runner.cleanup_multiple_jobs(job_results), open('tmp.json', 'w'), indent=4)
             elecE, grad, nac = format_output_LSCIVR(len(q0), job_results)
        
-        nac, nac_hist = correct_nac_sign(nac,hist_length,nac_hist)
+        nac, nac_hist = correct_nac_sign(nac,nac_hist)
 
     pops = compute_CF_single(q[0:nel], p[0:nel])
     logger.write(t,init_energy, elecE,  grad, nac, pops)
@@ -1681,7 +1679,7 @@ def rk4(initq,initp,tStop,H,restart,amu_mat,U, com_ang):
                 job_results = tc_runner.run_TC_new_geom(qC/ang2bohr)
                 elecE, grad, nac = format_output_LSCIVR(len(q0), job_results)
             #correct nac sign
-            nac, nac_hist = correct_nac_sign(nac,hist_length,nac_hist)
+            nac, nac_hist = correct_nac_sign(nac,nac_hist)
 
         if proceed:
             # Compute energy
@@ -1758,10 +1756,11 @@ def rk4(initq,initp,tStop,H,restart,amu_mat,U, com_ang):
         gg.write('{:>16.10f} \n'.format(t))
         gg.write('\n')
 
-        gg.write('NAC History:\n')
-        gg.write(' '.join(map(str, nac_hist.shape)) + '\n')
-        gg.write(np.array2string(nac_hist, separator=',').replace('[', '').replace(']', '') + '\n')
-        print("nac_hist",nac_hist)
+        if len(nac_hist) > 0:
+            gg.write('NAC History:\n')
+            gg.write(' '.join(map(str, nac_hist.shape)) + '\n')
+            gg.write(np.array2string(nac_hist, separator=',').replace('[', '').replace(']', '') + '\n')
+            print("nac_hist",nac_hist)
 
     return(np.array(X), coord, initial_time)
 
@@ -1814,7 +1813,15 @@ def compute_CF(X, Y):
 '''
 Check which sign for the nac is expected and correct artificial sign flips
 '''
-def correct_nac_sign(nac,hist_length,nac_hist):
+def correct_nac_sign(nac, nac_hist, hist_length=None):
+
+    #   original games restart files do not use nac_hist
+    if len(nac_hist) == 0:
+        return nac, []
+
+    if hist_length is None:
+        hist_length = nac_hist.shape[3]
+
     # TODO tom: remove print commands
     # Calculate d(t-2)*d(t-3),d(t-1)*d(t-2),d(t)*d(t-1)
     nac_dot_hist = np.zeros((len(q0),len(q0),hist_length-1))
