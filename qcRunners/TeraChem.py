@@ -499,19 +499,28 @@ class TCRunner():
                 }
             job_num += 1
 
-        start = time.time()
-        with concurrent.futures.ThreadPoolExecutor() as executor:
-            futures = []
-            for i in range(n_clients):
-                jobs = jobs_to_run[i]
-                args = (self._client_list[i], jobs, geom, excited_type, self._server_root_list[i], i)
-                future = executor.submit(_run_jobs, *args)
-                futures.append(future)
-            for f in futures:
-                batch_results, batch_times = f.result()
-                all_results += batch_results
-                times.update(batch_times)
-        end = time.time()
+
+        #   if only one client is being used, don't open up threads, easier to debug
+        if n_clients == 1:
+            start = time.time()
+            results, times = _run_jobs(self._client_list[0], jobs_to_run[0], geom, excited_type, self._server_root_list[0], 0)
+            all_results += results
+            end = time.time()
+
+        else:
+            start = time.time()
+            with concurrent.futures.ThreadPoolExecutor() as executor:
+                futures = []
+                for i in range(n_clients):
+                    jobs = jobs_to_run[i]
+                    args = (self._client_list[i], jobs, geom, excited_type, self._server_root_list[i], i)
+                    future = executor.submit(_run_jobs, *args)
+                    futures.append(future)
+                for f in futures:
+                    batch_results, batch_times = f.result()
+                    all_results += batch_results
+                    times.update(batch_times)
+            end = time.time()
 
         _print_times(times, end - start)
         self.set_avg_max_times(times)
@@ -529,7 +538,7 @@ def _run_jobs(client: TCPBClient, jobs, geom, excited_type, server_root, client_
         job_state = job_props['state']
 
         _set_guess(job_opts, excited_type, all_results, job_state, server_root)
-        print("\nRunning ", job_name, job_type, client_ID)
+        print(f"\nRunning {job_name} on client ID {client_ID}")
 
         start = time.time()
         results = client.compute_job_sync(job_type, geom, 'angstrom', **job_opts)
