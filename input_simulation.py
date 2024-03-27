@@ -10,6 +10,7 @@ Created on Wed May  3 19:05:28 2023
 Repository of simulation variables
 """
 import sys, os
+import shutil
 import input_simulation as opts
 
 
@@ -83,7 +84,12 @@ fname_tc_freq     = "tmp/tc_hf/hf.spherical.freq/Frequencies.dat"
 #   GAMESS submission script name
 sub_script = None
 
+#   type of QC interface to use for inputs (masses, hessian, etc.)
+#   either 'gamess' or 'terachem'
 mol_input_format = ''
+
+#   logging directory
+logging_dir = 'logs'
 
 
 ########## END DEFAULT SETTINGS ##########
@@ -93,8 +99,27 @@ mol_input_format = ''
 
 #   TODO: check that there are no conflicting settings
 def _check_settings():
+    #   set input format to the same type of QC runner
     if opts.mol_input_format == '':
         opts.mol_input_format = opts.QC_RUNNER
+
+    #   logging directory
+    opts.logging_dir = os.path.abspath(opts.logging_dir)
+    if os.path.isdir(opts.logging_dir):
+        #   logging dir alreayd exists (from a previous job)
+        #   so we'll copy it to a new directory
+        coppied = False
+        count = 1
+        while not coppied and count < 100:
+            new_dir = f'{opts.logging_dir}.{count}'
+            if os.path.isdir(new_dir):
+                count += 1
+            else:
+                shutil.move(opts.logging_dir, new_dir, shutil.copytree)
+                coppied = True
+        if count == 100:
+            raise RecursionError('logging dir already eists, cou not copy to new numbered dir')
+    os.makedirs(opts.logging_dir)
     
 
 def _set_seed():

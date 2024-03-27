@@ -21,40 +21,6 @@ class TCServerStallError(Exception):
         # Call the base class constructor with the parameters it needs
         super().__init__(message)
 
-
-def _print_times(times: dict, wall_time = None):
-    total = 0.0
-    for key, value in times.items():
-        total += value
-
-    times_fname = 'timings.out'
-    times_file_exist = os.path.isfile(times_fname)
-
-    with open (times_fname, 'a') as times_f:
-        # Write header
-        if not times_file_exist:
-            times_f.write(f'{"total":12s}')
-            for key, value in times.items():
-                times_f.write(f'{key:12s}')
-            times_f.write('\n')
-        
-        # Write timings
-        times_f.write(f'{total:12.3f}')
-        for key, value in times.items():
-            times_f.write(f'{value:12.3f}')
-        times_f.write('\n')
-
-
-    #print()
-    #print("Timings")
-    #print("-------------------------------")
-    #for key, value in times.items():
-    #    print(f'{key:20s} {value:10.3f}')
-    #    total += value
-    #print()
-    #print(f'{"total":20s} {total:10.3f}')
-    #print("-------------------------------")
-
 def _val_or_iter(x):
     try:
         iter(x)
@@ -429,7 +395,12 @@ class TCRunner():
         grads = []
         NACs = []
         if gradients:
-            grads = list(range(max_state+1))
+            if gradients == 'all':
+                grads = list(range(max_state+1))
+            elif isinstance(gradients):
+                grads = gradients
+            else:
+                raise ValueError('invallid format for gradients in TCRunner; must be "all" or list[int]')
         if couplings:
             NACs = []
             for i in range(max_state+1):
@@ -541,9 +512,10 @@ class TCRunner():
                     times.update(batch_times)
             end = time.time()
 
-        _print_times(times, end - start)
+        # times['total'] = end - start
+        # _print_times(times, end - start)
         self.set_avg_max_times(times)
-        return all_results
+        return all_results, times
     
     def _set_guess(self, job_opts: dict, excited_type: str, all_results: list[dict], state):
         return _set_guess(job_opts, excited_type, all_results, state)

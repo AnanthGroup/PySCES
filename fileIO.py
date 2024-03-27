@@ -133,13 +133,14 @@ def write_restart(file_loc: str, coord: list | np.ndarray, nac_hist: np.ndarray,
         exit(f'ERROR: only RK4 is implimented fileIO')
 
 class SimulationLogger():
-    def __init__(self, n_states, save_energy=False, save_grad=True, save_nac=True, save_corr=True, dir=None) -> None:
+    def __init__(self, n_states, save_energy=True, save_grad=True, save_nac=True, save_corr=True, save_timigs=True, dir=None) -> None:
         if dir is None:
             dir = os.path.abspath(os.path.curdir)
         self._energy_logger = None
         self._grad_logger = None
         self._nac_logger = None
         self._corr_logger = None
+        self._timmings_logger = None
         if save_energy:
             self._energy_logger = EnergyLogger(os.path.join(dir, 'energy.txt'), n_states)
         if save_grad:
@@ -147,9 +148,11 @@ class SimulationLogger():
         if save_nac:
             self._nac_logger = NACLogger(os.path.join(dir, 'nac.txt'), n_states)
         if save_corr:
-            self._corr_logger = CorrelationLogger(os.path.join(dir, 'corr.out'), n_states)
+            self._corr_logger = CorrelationLogger(os.path.join(dir, 'corr.txt'), n_states)
+        if save_timigs:
+            self._timmings_logger = TimingsLogger(os.path.join(dir, 'timings.txt'))
 
-    def write(self, time, total_E=None, elec_E=None, grads=None, NACs=None, pops=None):
+    def write(self, time, total_E=None, elec_E=None, grads=None, NACs=None, pops=None, timings=None):
         if self._energy_logger is not None:
             self._energy_logger.write(time, total_E, elec_E)
         if self._grad_logger is not None:
@@ -158,7 +161,40 @@ class SimulationLogger():
             self._nac_logger.write(time, NACs)
         if self._corr_logger is not None:
             self._corr_logger.write(time, pops)
+        if self._timmings_logger is not None:
+            self._timmings_logger.write(time, timings)
+
         
+        
+class TimingsLogger():
+    def __init__(self, file_loc: str) -> None:
+        self._file = open(file_loc, 'w')
+        self._write_header = True
+
+    def __del__(self):
+        self._file.close()
+
+    def write(self, time: float, times: dict):
+        if self._write_header:
+            #   write file header
+            self._file.write(f'{"Total":>12s}')
+            for key, value in times.items():
+                self._file.write(f'{key:>12s}')
+            self._file.write('\n')
+            self._write_header = False
+
+        #   compute total
+        total = 0.0
+        for key, value in times.items():
+            total += value
+
+        # Write timings
+        self._file.write(f'{total:12.3f}')
+        for key, value in times.items():
+            self._file.write(f'{value:12.3f}')
+        self._file.write('\n')
+        self._file.flush()
+
 class CorrelationLogger():
     def __init__(self, file_loc: str, n_states: int) -> None:
         self._total_format = '{:>12.4f}'
@@ -212,7 +248,6 @@ class EnergyLogger():
 
         self._file.flush()
     
-
 class GradientLogger():
     def __init__(self, file_loc: str, n_states: int) -> None:
         self._file = open(file_loc, 'w')
@@ -221,7 +256,7 @@ class GradientLogger():
 
         # self._file.write('%16s' % 'Time')
         for i in range(n_states):
-            self._file.write('%16s' % f'S{i}')
+            self._file.write('%16s' % f'S{i} ')
         self._file.write('\n')
 
     def __del__(self):
@@ -245,7 +280,7 @@ class NACLogger():
             labels = []
             for i in range(n_NACs):
                 for j in range(i+1, n_NACs):
-                    labels.append(f'S{i}_S{j}')
+                    labels.append(f'S{i}_S{j} ')
 
         # self._file.write('%16s' % 'Time')
         for label in labels:
@@ -261,7 +296,7 @@ class NACLogger():
         for i in range(self._n_states):
             for j in range(i+1, self._n_states):
                 out_data.append(NACs[i, j])
-        np.savetxt(self._file, np.transpose(out_data), fmt='%16.10f', 
+        np.savetxt(self._file, np.transpose(out_data), fmt='%15.10f', 
             header=f'time_step {self._total_writes}\ntime {time}')
         self._file.flush()
         self._total_writes += 1
