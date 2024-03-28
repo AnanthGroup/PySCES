@@ -21,40 +21,6 @@ class TCServerStallError(Exception):
         # Call the base class constructor with the parameters it needs
         super().__init__(message)
 
-
-def _print_times(times: dict, wall_time = None):
-    total = 0.0
-    for key, value in times.items():
-        total += value
-
-    times_fname = 'timings.out'
-    times_file_exist = os.path.isfile(times_fname)
-
-    with open (times_fname, 'a') as times_f:
-        # Write header
-        if not times_file_exist:
-            times_f.write(f'{"total":12s}')
-            for key, value in times.items():
-                times_f.write(f'{key:12s}')
-            times_f.write('\n')
-        
-        # Write timings
-        times_f.write(f'{total:12.3f}')
-        for key, value in times.items():
-            times_f.write(f'{value:12.3f}')
-        times_f.write('\n')
-
-
-    #print()
-    #print("Timings")
-    #print("-------------------------------")
-    #for key, value in times.items():
-    #    print(f'{key:20s} {value:10.3f}')
-    #    total += value
-    #print()
-    #print(f'{"total":20s} {total:10.3f}')
-    #print("-------------------------------")
-
 def _val_or_iter(x):
     try:
         iter(x)
@@ -200,9 +166,6 @@ class TCRunner():
 
         self._atoms = np.copy(atoms)
         self._base_options = tc_options.copy()
-        self._max_state = run_options.get('max_state', 0)
-        self._grads = run_options.get('grads', False)
-        self._NACs = run_options.pop('NACs', False)
         self._dipole_deriv = dipole_deriv
 
         self._cas_guess = None
@@ -214,6 +177,20 @@ class TCRunner():
         self._max_time = None
         self._restart_on_stall = True
         self._n_calls = 0
+
+        #   state options
+        if run_options.get('grads', False):
+            self._grads = run_options['grads']
+            self._max_state = max(self._grads)
+        elif run_options.get('max_state', False):
+            self._max_state = run_options['max_state']
+            self._grads = list(range(self._max_state + 1))
+        else:
+            raise ValueError('either "max_state" or a list of "grads" must be specified')
+        # self._max_state = run_options.get('max_state', 0)
+        # self._grads = run_options.get('grads', False)
+        self._NACs = run_options.pop('nacs', False)
+        
 
     @staticmethod
     def wait_until_available(client: TCPBClient, max_wait=10.0, time_btw_check=1.0):
@@ -429,12 +406,23 @@ class TCRunner():
         grads = []
         NACs = []
         if gradients:
-            grads = list(range(max_state+1))
+            if gradients == 'all':
+                grads = list(range(max_state+1))
+            else: grads = gradients
+
         if couplings:
-            NACs = []
-            for i in range(max_state+1):
-                for j in range(i+1, max_state+1):
-                    NACs.append((i, j))
+            if couplings == 'all':
+                for i in sorted(grads):
+                    for j in sorted(grads):
+                        if j <= i:
+                            continue
+                        NACs.append((i, j))
+
+        # if couplings:
+        #     NACs = []
+        #     for i in range(max_state+1):
+        #         for j in range(i+1, max_state+1):
+        #             NACs.append((i, j))
 
         #   make sure we are computing enough states
         if excited_type == 'cis':
@@ -541,9 +529,10 @@ class TCRunner():
                     times.update(batch_times)
             end = time.time()
 
-        _print_times(times, end - start)
+        # times['total'] = end - start
+        # _print_times(times, end - start)
         self.set_avg_max_times(times)
-        return all_results
+        return all_results, times
     
     def _set_guess(self, job_opts: dict, excited_type: str, all_results: list[dict], state):
         return _set_guess(job_opts, excited_type, all_results, state)
@@ -599,10 +588,13 @@ def _set_guess(job_opts: dict, excited_type: str, all_results: list[dict], state
 def format_output_LSCIVR(n_elec, job_data: list[dict]):
     atoms = job_data[0]['atoms']
     n_atoms = len(atoms)
-    energies = np.zeros(n_elec)
-    grads = np.zeros((n_elec, n_atoms*3))
-    nacs = np.zeros((n_elec, n_elec, n_atoms*3))
-    
+    # energies = np.zeros(n_elec)
+    # grads = np.zeros((n_elec, n_atoms*3))
+    # nacs = np.zeros((n_elec, n_elec, n_atoms*3))
+    energies = {}
+    grads = {}
+    nacs = {}
+
     for job in job_data:
         if job['run'] == 'gradient':
             state = job.get('cistarget', job.get('castarget', 0))
@@ -614,7 +606,44 @@ def format_output_LSCIVR(n_elec, job_data: list[dict]):
         elif job['run'] == 'coupling':
             state_1 = job['nacstate1']
             state_2 = job['nacstate2']
-            nacs[state_1, state_2] = np.array(job['nacme']).flatten()
-            nacs[state_2, state_1] = - nacs[state_1, state_2]
+            nacs[(state_1, state_2)] = np.array(job['nacme']).flatten()
+            nacs[(state_2, state_1)] = - nacs[state_1, state_2]
 
-    return energies, grads, nacs
+    #   make sure there are the correct number of gradients and NACs
+    N = len(grads)
+    if N*(N-1) != len(nacs):
+        raise RuntimeError('LSC-IVR requires a NAC vector for each gradient pair')
+    
+    #   make sure each grad pair has a NAC vector
+    for grad_i in grads:
+        for grad_j in grads:
+            if grad_i == grad_j:
+                continue
+            if (grad_i, grad_j) not in nacs:
+                raise RuntimeError('LSC-IVR requires a NAC vector for each gradient pair')
+
+    #   print mapping
+    ivr_energies = np.zeros(N)
+    ivr_grads = np.zeros((N, n_atoms*3))
+    ivr_nacs  = np.zeros((N, N, n_atoms*3))
+    print(" --------------------------------")
+    print(" LSC-IVR to quantum chemistry")
+    print(" state number mapping")
+    print(" ---------------------------------")
+    print(" LSC-IVR -->   QC  ")
+    grads_in_order = sorted(list(grads.keys()))
+    for i in range(N):
+        qc_i = grads_in_order[i]
+        print(f"   {i:2d}    -->  {qc_i:2d}")
+        ivr_grads[i] = grads[qc_i]
+        ivr_energies[i] = energies[qc_i]
+        for j in range(N):
+            if i <= j:
+                continue
+            qc_idx_j = grads_in_order[j]
+            ivr_nacs[i, j] = nacs[(qc_i, qc_idx_j)]
+            ivr_nacs[j, i] = nacs[(qc_idx_j, qc_i)]
+    print(" ---------------------------------")
+
+    return ivr_energies, ivr_grads, ivr_nacs
+    # return energies, grads, nacs

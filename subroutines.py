@@ -436,7 +436,9 @@ def rotate_norm_to_cart(qN, pN, U, amu_mat):
 #####################################################
 ### Record the nuclear geometry at each time step ###
 #####################################################
-def record_nuc_geo(restart, total_time, atoms, qCart, com_ang=None):
+def record_nuc_geo(restart, total_time, atoms, qCart, com_ang=None, logger:SimulationLogger=None):
+    if logger is not None:
+        return logger._nuc_geo_logger.write(total_time, atoms, qCart/ang2bohr, com_ang)
     f = open(os.path.join(__location__, 'nuc_geo.xyz'), 'a')
     
     if com_ang is None:
@@ -1500,8 +1502,10 @@ def rk4(initq,initp,tStop,H,restart,amu_mat,U, com_ang):
     if QC_RUNNER == 'terachem':
         from qcRunners.TeraChem import TCRunner, format_output_LSCIVR
 
-    logger = SimulationLogger(nel)
+    #   logging
+    logger = SimulationLogger(nel, dir=logging_dir)
 
+    qc_timings = {}
     proceed      = True
     input_name   = 'cas'
     au_mas = np.diag(amu_mat) * amu2au # masses of atoms in atomic unit (vector)
@@ -1535,7 +1539,7 @@ def rk4(initq,initp,tStop,H,restart,amu_mat,U, com_ang):
         atoms = get_atom_label()
 
         # Write initial nuclear geometry in the output file
-        record_nuc_geo(restart, t, atoms, qC, com_ang)
+        record_nuc_geo(restart, t, atoms, qC, com_ang, logger)
 
         if QC_RUNNER == 'gamess':
             # Update geo_gamess with qC
@@ -1553,13 +1557,18 @@ def rk4(initq,initp,tStop,H,restart,amu_mat,U, com_ang):
                 sys.exit("Electronic structure calculation failed at initial time. Exitting.")
         else:
             tc_runner = TCRunner(tcr_host, tcr_port, atoms, tcr_job_options, tcr_server_root, run_options=tcr_state_options, start_new=False)
-            job_results = tc_runner.run_TC_new_geom(qC/ang2bohr)
+            job_results, qc_timings = tc_runner.run_TC_new_geom(qC/ang2bohr)
+            # import pickle
+            # pickle.dump([job_results, qc_timings], open('_tmp.pkl', 'wb'))
+            # job_results, qc_timings = pickle.load( open('_tmp.pkl', 'rb'))
             elecE, grad, nac = format_output_LSCIVR(len(q0), job_results)
-            # exit()
+
+
         # Total initial energy at t=0
         init_energy = get_energy(au_mas, q, p, elecE)
-        with open(os.path.join(__location__, 'energy.out'), 'a') as g:
-            g.write(total_format.format(t, init_energy, *elecE))
+        # with open(os.path.join(__location__, 'energy.out'), 'a') as g:
+        #     g.write(total_format.format(t, init_energy, *elecE))
+
         # Create nac history for sign-flip extrapolation
         for it in range(0,hist_length):
             nac_hist[:,:,:,it] = nac
@@ -1567,7 +1576,7 @@ def rk4(initq,initp,tStop,H,restart,amu_mat,U, com_ang):
     elif restart == 1:
         opt['guess'] = 'moread'
 
-        q, p, nac_hist, init_energy, initial_time = read_restart(ndof=ndof)
+        q, p, nac_hist, init_energy, initial_time = read_restart(file_loc=restart_file_in, ndof=ndof)
         t = initial_time
 
         ## Read the restart file
@@ -1614,7 +1623,7 @@ def rk4(initq,initp,tStop,H,restart,amu_mat,U, com_ang):
                 sys.exit("Electronic structure calculation failed at initial time. Exitting.")
         else:
             tc_runner = TCRunner(tcr_host, tcr_port, atoms, tcr_job_options, tcr_server_root, run_options=tcr_state_options)
-            job_results = tc_runner.run_TC_new_geom(qC/ang2bohr)
+            job_results, qc_timings = tc_runner.run_TC_new_geom(qC/ang2bohr)
             # import json
             # json.dump(tc_runner.cleanup_multiple_jobs(job_results), open('tmp.json', 'w'), indent=4)
             elecE, grad, nac = format_output_LSCIVR(len(q0), job_results)
@@ -1622,7 +1631,7 @@ def rk4(initq,initp,tStop,H,restart,amu_mat,U, com_ang):
         nac, nac_hist = correct_nac_sign(nac,nac_hist)
 
     pops = compute_CF_single(q[0:nel], p[0:nel])
-    logger.write(t,init_energy, elecE,  grad, nac, pops)
+    logger.write(t,init_energy, elecE,  grad, nac, pops, qc_timings)
 
     opt['guess'] = 'moread'
     X,Y = [],[]
@@ -1668,7 +1677,7 @@ def rk4(initq,initp,tStop,H,restart,amu_mat,U, com_ang):
                 if flag_orb == 1:
                     proceed = False
             else:
-                job_results = tc_runner.run_TC_new_geom(qC/ang2bohr)
+                job_results, qc_timings = tc_runner.run_TC_new_geom(qC/ang2bohr)
                 elecE, grad, nac = format_output_LSCIVR(len(q0), job_results)
             #correct nac sign
             nac, nac_hist = correct_nac_sign(nac,nac_hist)
@@ -1690,15 +1699,15 @@ def rk4(initq,initp,tStop,H,restart,amu_mat,U, com_ang):
             energy.append(new_energy)
 
             # Record nuclear geometry in angstrom
-            record_nuc_geo(restart, t, atoms, qC, com_ang)
+            record_nuc_geo(restart, t, atoms, qC, com_ang, logger)
 
             # Record the electronic state energies
-            with open(os.path.join(__location__, 'energy.out'), 'a') as g:
-                g.write(total_format.format(t, new_energy, *elecE))
+            # with open(os.path.join(__location__, 'energy.out'), 'a') as g:
+            #     g.write(total_format.format(t, new_energy, *elecE))
 
             #   New logging information
             pops = compute_CF_single(y[0:nel], y[ndof:ndof+nel])
-            logger.write(t, total_E=new_energy, elec_E=elecE,  grads=grad, NACs=nac, pops=pops)
+            logger.write(t, total_E=new_energy, elec_E=elecE,  grads=grad, NACs=nac, pops=pops, timings=qc_timings)
             write_restart('restart.json', [Y[-1][:ndof], Y[-1][ndof:]], nac_hist, new_energy, t, nel, 'rk4')
 
             if t == tStop:
