@@ -434,7 +434,9 @@ def rotate_norm_to_cart(qN, pN, U, amu_mat):
 #####################################################
 ### Record the nuclear geometry at each time step ###
 #####################################################
-def record_nuc_geo(restart, total_time, atoms, qCart, com_ang=None):
+def record_nuc_geo(restart, total_time, atoms, qCart, com_ang=None, logger:SimulationLogger=None):
+    if logger is not None:
+        return logger._nuc_geo_logger.write(total_time, atoms, qCart/ang2bohr, com_ang)
     f = open(os.path.join(__location__, 'nuc_geo.xyz'), 'a')
     
     if com_ang is None:
@@ -1535,7 +1537,7 @@ def rk4(initq,initp,tStop,H,restart,amu_mat,U, com_ang):
         atoms = get_atom_label()
 
         # Write initial nuclear geometry in the output file
-        record_nuc_geo(restart, t, atoms, qC, com_ang)
+        record_nuc_geo(restart, t, atoms, qC, com_ang, logger)
 
         if QC_RUNNER == 'gamess':
             # Update geo_gamess with qC
@@ -1695,7 +1697,7 @@ def rk4(initq,initp,tStop,H,restart,amu_mat,U, com_ang):
             energy.append(new_energy)
 
             # Record nuclear geometry in angstrom
-            record_nuc_geo(restart, t, atoms, qC, com_ang)
+            record_nuc_geo(restart, t, atoms, qC, com_ang, logger)
 
             # Record the electronic state energies
             # with open(os.path.join(__location__, 'energy.out'), 'a') as g:

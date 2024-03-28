@@ -133,7 +133,7 @@ def write_restart(file_loc: str, coord: list | np.ndarray, nac_hist: np.ndarray,
         exit(f'ERROR: only RK4 is implimented fileIO')
 
 class SimulationLogger():
-    def __init__(self, n_states, save_energy=True, save_grad=True, save_nac=True, save_corr=True, save_timigs=True, dir=None) -> None:
+    def __init__(self, n_states, save_energy=True, save_grad=True, save_nac=True, save_corr=True, save_timigs=True, dir=None, save_geo=True) -> None:
         if dir is None:
             dir = os.path.abspath(os.path.curdir)
         self._energy_logger = None
@@ -141,6 +141,7 @@ class SimulationLogger():
         self._nac_logger = None
         self._corr_logger = None
         self._timmings_logger = None
+        self._nuc_geo_logger = None
         if save_energy:
             self._energy_logger = EnergyLogger(os.path.join(dir, 'energy.txt'), n_states)
         if save_grad:
@@ -151,6 +152,9 @@ class SimulationLogger():
             self._corr_logger = CorrelationLogger(os.path.join(dir, 'corr.txt'), n_states)
         if save_timigs:
             self._timmings_logger = TimingsLogger(os.path.join(dir, 'timings.txt'))
+        if save_geo:
+            self._nuc_geo_logger = NucGeoLogger(os.path.join(dir, 'nuc_geo.xyz'))
+
 
     def write(self, time, total_E=None, elec_E=None, grads=None, NACs=None, pops=None, timings=None):
         if self._energy_logger is not None:
@@ -163,8 +167,29 @@ class SimulationLogger():
             self._corr_logger.write(time, pops)
         if self._timmings_logger is not None:
             self._timmings_logger.write(time, timings)
+        #TODO: add nuc_geo logging here
 
-        
+class NucGeoLogger():
+    def __init__(self, file_loc: str) -> None:
+        self._file = open(file_loc, 'w')
+
+    def __del__(self):
+        self._file.close()
+
+    def write(self, total_time: float, atoms, qCart_ang, com_ang=None):
+        if com_ang is None:
+            com_ang = np.zeros(3)
+
+        natom = len(atoms)
+        self._file.write('%d \n' %natom)
+        self._file.write('%f \n' %total_time)
+        for i in range(natom):
+            self._file.write('{:<5s}{:>12.6f}{:>12.6f}{:>12.6f} \n'.format(
+                atoms[i],
+                qCart_ang[3*i+0] + com_ang[0],
+                qCart_ang[3*i+1] + com_ang[1],
+                qCart_ang[3*i+2] + com_ang[2]))
+        self._file.flush()
         
 class TimingsLogger():
     def __init__(self, file_loc: str) -> None:

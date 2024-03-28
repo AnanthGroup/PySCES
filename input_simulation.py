@@ -73,7 +73,9 @@ tcr_host = '10.1.1.154'
 tcr_port = 9876
 tcr_server_root = '.'
 tcr_job_options = {}
-tcr_state_options = {}
+tcr_state_options = {
+    'max_state': nel-1, 'grads': 'all', 'NACs': 'all'
+}
 
 # Terachem files
 fname_tc_xyz      = "tmp/tc_hf/hf.spherical.freq/Geometry.xyz"
@@ -91,13 +93,10 @@ mol_input_format = ''
 #   logging directory
 logging_dir = 'logs'
 
-
 ########## END DEFAULT SETTINGS ##########
 
 
 
-
-#   TODO: check that there are no conflicting settings
 def _check_settings():
     #   set input format to the same type of QC runner
     if opts.mol_input_format == '':
@@ -120,8 +119,33 @@ def _check_settings():
         if count == 100:
             raise RecursionError('logging dir already eists, cou not copy to new numbered dir')
     os.makedirs(opts.logging_dir)
-    
 
+    #   TeraChem settings
+    if opts.QC_RUNNER == 'terachem':
+        max_state = opts.tcr_state_options.get('max_state', False)
+        grads = opts.tcr_state_options.get('grads', False)
+        if max_state and not grads:
+            grads = list(range(max_state + 1))
+            opts.tcr_state_options['grads'] = grads
+        elif grads and not max_state:
+            max_state = max(grads)
+            opts.tcr_state_options['max_state'] = max_state
+        elif grads and max_state:
+            if max_state != max(grads):
+                raise ValueError('"max_state" and highest "grads" index in "tcr_run_options" do not match')
+        if 'nacs' not in opts.tcr_state_options:
+            opts.tcr_state_options['nacs'] = 'all'
+
+        opts.nel = len(grads)
+        if nel != len(opts.q0) or nel != len(opts.p0):
+            print(f"WARNING: Number of initial electronic coherent states (q0 and p0)")
+            print(f"         match the number of TeraChem states ({opts.nel}): ")
+            print(f"         Resetting q0 and p0 to all zeros")
+            opts.q0 = [0.0]*opts.nel
+            opts.p0 = [0.0]*opts.nel
+     
+    opts.ndof = opts.nel + opts.nnuc 
+       
 def _set_seed():
     '''
         set the random number generator seed
