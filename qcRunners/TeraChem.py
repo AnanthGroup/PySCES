@@ -179,12 +179,12 @@ class TCRunner():
         self._n_calls = 0
 
         #   state options
-        if run_options.get('max_state', False):
-            self._max_state = run_options['max_state']
-            self._grads = list(range(self._max_state + 1))
-        elif run_options.get('grads', False):
+        if run_options.get('grads', False):
             self._grads = run_options['grads']
             self._max_state = max(self._grads)
+        elif run_options.get('max_state', False):
+            self._max_state = run_options['max_state']
+            self._grads = list(range(self._max_state + 1))
         else:
             raise ValueError('either "max_state" or a list of "grads" must be specified')
         # self._max_state = run_options.get('max_state', 0)
