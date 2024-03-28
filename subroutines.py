@@ -1528,7 +1528,7 @@ def rk4(initq,initp,tStop,H,restart,amu_mat,U, com_ang):
         q[nel:], p[nel:] = qC, pC
         y = np.concatenate((q, p))
 
-        hist_length = 4 #this is the only implemented length
+        hist_length = 2 #this is the only implemented length
         nac_hist = np.zeros((len(q0),len(q0),nnuc,hist_length)) # history of nonadiabatic coupling vectors for extrapolation in nac sign flip correction
 
         # Get atom labels
@@ -1806,70 +1806,73 @@ def compute_CF(X, Y):
 Check which sign for the nac is expected and correct artificial sign flips
 '''
 def correct_nac_sign(nac, nac_hist, hist_length=None):
+    # Predict d(t) from d(t-1),d(t-2) with a linear extrapolation 
+    #   The line through the points (-2,k),(-1,l)
+    #   is p(x) = (l-k)*x + 2*l - k
+    #   Extrapolation to the next time step yields
+    #   p(0) = 2*l - k
+    # Do that for all NACs and all vector components
+    # One can also do a higher degree polynomial or choose more points, which uses numpy polyfit then.
+    # Right now, the degree is hard coded to 1 with 2 history points
 
-    #   original games restart files do not use nac_hist
+    # If there is not history, do not correct artificial sign flips
     if len(nac_hist) == 0:
         return nac, []
 
     if hist_length is None:
         hist_length = nac_hist.shape[3]
 
-    # TODO tom: remove print commands
-    # Calculate d(t-2)*d(t-3),d(t-1)*d(t-2),d(t)*d(t-1)
-    nac_dot_hist = np.zeros((len(q0),len(q0),hist_length-1))
-    # nac_dot_hist: last index from 0 to hist_length-2
-    # d(t+1)*d(t)
-    nac_dot      = np.zeros((len(q0),len(q0)))
+    # Allocate array for extrapolated vector
+    nac_expol = np.empty_like(nac)
 
-    for it in range(0,hist_length-1):
-      nac_dot_hist[:,:,it] = np.sum(nac_hist[:,:,:,it]*nac_hist[:,:,:,it+1],axis=2)
+    polynom_degree = 1 # 1 is usually sufficient. 2 is better with TDDFT, but should NOT be used with CASSCF
 
-    nac_dot = np.sum(nac_hist[:,:,:,hist_length-1]*nac[:,:,:],axis=2)
+    if (polynom_degree == 1):
+        # default
+        # uses only the last 2 points
+        nac_expol = 2.0*nac_hist[:,:,:,-1] - 1.0*nac_hist[:,:,:,-2]
+    else
+        # for scientific purposes only
+        # uses the whole history
+        timesteps = np.arange(hist_length)
+        for i in range(0,len(q0)):
+            for j in range(0,len(q0)):
+                for ix in range(0,nac.shape[2]):
+                    coefficients = np.polyfit(timesteps,nac_hist[i,j,ix,:], polynom_degree)
+                    nac_expol[i,j,ix] = np.polyval(coefficients,hist_length)
 
-    print("gamess nac_dot[0,1]",nac_dot[0,1])
 
-    # Predict d(t)*d(0) with parabolic extrapolation of last 3 time steps
-    # The parabola throught the points (-2,k),(-1,l),(0,m)
-    # is p(x) = (k/2+m/2-l)x**2 + (k/2-2l+3/2m)x + m
-    # Extrapolation to the next time step yields
-    # p(1) = k - 3l + 3m
-    nac_dot_expol = np.zeros((len(q0),len(q0)))
-    nac_dot_expol = 1.0*nac_dot_hist[:,:,0] - 3.0*nac_dot_hist[:,:,1] + 3.0*nac_dot_hist[:,:,2]
-    print("estimated nac_dot[0,1]",nac_dot_expol[0,1])
-
+    # check whether the TC/GAMESS vector goes in the same or opposite direction
+    # (means an angle with more than 90 degree) as the estimation
+    # if the angle is < 90 degree -> np.sign(dot_product)== 1 -> no flip
+    # if the angle is > 90 degree -> np.sign(dot_product)==-1 -> flip
     for i in range(0,len(q0)):
         for j in range(0,len(q0)):
-            #print("i",i)
-            #print("j",j)
-            #print("np.sign(nac_dot[i,j])",np.sign(nac_dot[i,j]))
-            #print("np.sign(nac_dot_expol[i,j])",np.sign(nac_dot_expol[i,j]))
-            if(np.sign(nac_dot[i,j])!=np.sign(nac_dot_expol[i,j])):
-                nac[i,j,:] = -1.0*nac[i,j,:]
-                if(i==0 and j==1):
-                    print("0,1 signflip removed")
+            dot_product = np.dot(nac[i,j,:],nac_expol[i,j,:])
+            nac[i,j,:] = np.sign(dot_product)*nac[i,j,:]
 
     # rotate history
-    print("nac_hist vor roll: ")
-    print("nh[:,:,0]")
-    print(nac_hist[:,:,:,0])
-    print("nh[:,:,1]")
-    print(nac_hist[:,:,:,1])
-    print("nh[:,:,2]")
-    print(nac_hist[:,:,:,2])
+    #print("nac_hist vor roll: ")
+    #print("nh[:,:,0]")
+    #print(nac_hist[:,:,:,0])
+    #print("nh[:,:,1]")
+    #print(nac_hist[:,:,:,1])
+    #print("nh[:,:,2]")
+    #print(nac_hist[:,:,:,2])
     nac_hist = np.roll(nac_hist,-1,axis=3)
-    print("nac_hist nach roll: ")
-    print("nh[:,:,0]")
-    print(nac_hist[:,:,:,0])
-    print("nh[:,:,1]")
-    print(nac_hist[:,:,:,1])
-    print("nh[:,:,2]")
+    #print("nac_hist nach roll: ")
+    #print("nh[:,:,0]")
+    #print(nac_hist[:,:,:,0])
+    #print("nh[:,:,1]")
+    #print(nac_hist[:,:,:,1])
+    #print("nh[:,:,2]")
     
-    print("nac_dot[0,1] history post roll:",nac_dot_hist[0,1,0],nac_dot_hist[0,1,1],nac_dot_hist[0,1,2])
+    #print("nac_dot[0,1] history post roll:",nac_dot_hist[0,1,0],nac_dot_hist[0,1,1],nac_dot_hist[0,1,2])
     
     # update newest entry
     nac_hist[:,:,:,hist_length-1] = nac
    
-    print("nac_dot[0,1] history: post upda",nac_dot_hist[0,1,0],nac_dot_hist[0,1,1],nac_dot_hist[0,1,2])
+    #print("nac_dot[0,1] history: post upda",nac_dot_hist[0,1,0],nac_dot_hist[0,1,1],nac_dot_hist[0,1,2])
     # test some git utilities
 
     return (nac,nac_hist)
