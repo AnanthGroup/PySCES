@@ -1574,7 +1574,7 @@ def rk4(initq,initp,tStop,H,restart,amu_mat,U, com_ang):
     elif restart == 1:
         opt['guess'] = 'moread'
 
-        q, p, nac_hist, init_energy, initial_time = read_restart(ndof=ndof)
+        q, p, nac_hist, init_energy, initial_time = read_restart(file_loc=restart_file_in, ndof=ndof)
         t = initial_time
 
         ## Read the restart file

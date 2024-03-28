@@ -63,6 +63,7 @@ init_state = 2
 
 # Restart request: 0 = no restart, 1 = restart
 restart = 0
+restart_file_in = 'restart.out'
 
 #   type of QC runner, either 'gamess' or 'terachem'
 QC_RUNNER = 'gamess'
