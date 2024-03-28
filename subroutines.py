@@ -1831,7 +1831,7 @@ def correct_nac_sign(nac, nac_hist, hist_length=None):
         # default
         # uses only the last 2 points
         nac_expol = 2.0*nac_hist[:,:,:,-1] - 1.0*nac_hist[:,:,:,-2]
-    else
+    else:
         # for scientific purposes only
         # uses the whole history
         timesteps = np.arange(hist_length)
