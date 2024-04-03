@@ -1812,7 +1812,7 @@ def compute_CF(X, Y):
 '''
 Check which sign for the nac is expected and correct artificial sign flips
 '''
-def correct_nac_sign(nac, nac_hist, hist_length=None):
+def correct_nac_sign(nac, nac_hist, hist_length=None, debug=False):
 
     #   original games restart files do not use nac_hist
     if len(nac_hist) == 0:
@@ -1833,7 +1833,7 @@ def correct_nac_sign(nac, nac_hist, hist_length=None):
 
     nac_dot = np.sum(nac_hist[:,:,:,hist_length-1]*nac[:,:,:],axis=2)
 
-    print("gamess nac_dot[0,1]",nac_dot[0,1])
+    if debug: print("gamess nac_dot[0,1]",nac_dot[0,1])
 
     # Predict d(t)*d(0) with parabolic extrapolation of last 3 time steps
     # The parabola throught the points (-2,k),(-1,l),(0,m)
@@ -1842,7 +1842,7 @@ def correct_nac_sign(nac, nac_hist, hist_length=None):
     # p(1) = k - 3l + 3m
     nac_dot_expol = np.zeros((len(q0),len(q0)))
     nac_dot_expol = 1.0*nac_dot_hist[:,:,0] - 3.0*nac_dot_hist[:,:,1] + 3.0*nac_dot_hist[:,:,2]
-    print("estimated nac_dot[0,1]",nac_dot_expol[0,1])
+    if debug: print("estimated nac_dot[0,1]",nac_dot_expol[0,1])
 
     for i in range(0,len(q0)):
         for j in range(0,len(q0)):
@@ -1853,30 +1853,31 @@ def correct_nac_sign(nac, nac_hist, hist_length=None):
             if(np.sign(nac_dot[i,j])!=np.sign(nac_dot_expol[i,j])):
                 nac[i,j,:] = -1.0*nac[i,j,:]
                 if(i==0 and j==1):
-                    print("0,1 signflip removed")
+                    if debug: print("0,1 signflip removed")
 
     # rotate history
-    print("nac_hist vor roll: ")
-    print("nh[:,:,0]")
-    print(nac_hist[:,:,:,0])
-    print("nh[:,:,1]")
-    print(nac_hist[:,:,:,1])
-    print("nh[:,:,2]")
-    print(nac_hist[:,:,:,2])
-    nac_hist = np.roll(nac_hist,-1,axis=3)
-    print("nac_hist nach roll: ")
-    print("nh[:,:,0]")
-    print(nac_hist[:,:,:,0])
-    print("nh[:,:,1]")
-    print(nac_hist[:,:,:,1])
-    print("nh[:,:,2]")
-    
-    print("nac_dot[0,1] history post roll:",nac_dot_hist[0,1,0],nac_dot_hist[0,1,1],nac_dot_hist[0,1,2])
-    
+    if debug:
+        print("nac_hist vor roll: ")
+        print("nh[:,:,0]")
+        print(nac_hist[:,:,:,0])
+        print("nh[:,:,1]")
+        print(nac_hist[:,:,:,1])
+        print("nh[:,:,2]")
+        print(nac_hist[:,:,:,2])
+        nac_hist = np.roll(nac_hist,-1,axis=3)
+        print("nac_hist nach roll: ")
+        print("nh[:,:,0]")
+        print(nac_hist[:,:,:,0])
+        print("nh[:,:,1]")
+        print(nac_hist[:,:,:,1])
+        print("nh[:,:,2]")
+        
+        print("nac_dot[0,1] history post roll:",nac_dot_hist[0,1,0],nac_dot_hist[0,1,1],nac_dot_hist[0,1,2])
+        
     # update newest entry
     nac_hist[:,:,:,hist_length-1] = nac
    
-    print("nac_dot[0,1] history: post upda",nac_dot_hist[0,1,0],nac_dot_hist[0,1,1],nac_dot_hist[0,1,2])
+    if debug: print("nac_dot[0,1] history: post upda",nac_dot_hist[0,1,0],nac_dot_hist[0,1,1],nac_dot_hist[0,1,2])
     # test some git utilities
 
     return (nac,nac_hist)
