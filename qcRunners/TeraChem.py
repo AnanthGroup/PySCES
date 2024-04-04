@@ -348,7 +348,6 @@ class TCRunner():
         return result
     
     def set_avg_max_times(self, times: dict):
-        print(f'{times=}')
         max_time = np.max(list(times.values()))
         self._max_time_list.append(max_time)
         self._max_time = np.mean(self._max_time_list)*5

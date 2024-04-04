@@ -132,41 +132,54 @@ def write_restart(file_loc: str, coord: list | np.ndarray, nac_hist: np.ndarray,
     else:
         exit(f'ERROR: only RK4 is implimented fileIO')
 
+class LoggerData():
+    def __init__(self, time, atoms=None, total_E=None, elec_E=None, grads=None, NACs=None, timings=None, elec_p=None, elec_q=None, nuc_p=None, nuc_q=None) -> None:
+        self.time = time
+        self.atoms = atoms
+        self.total_E = total_E
+        self.elec_E = elec_E
+        self.grads = grads
+        self.NACs = NACs
+        self.timings = timings
+        self.elec_p = elec_p
+        self.elec_q = elec_q
+        self.nuc_p = nuc_p
+        self.nuc_q = nuc_q
+
 class SimulationLogger():
-    def __init__(self, n_states, save_energy=True, save_grad=True, save_nac=True, save_corr=True, save_timigs=True, dir=None, save_geo=True) -> None:
+    def __init__(self, n_states, save_energy=True, save_grad=True, save_nac=True, save_corr=True, save_timigs=True, dir=None, save_geo=True, save_elec=True, save_p=True, atoms=None) -> None:
         if dir is None:
             dir = os.path.abspath(os.path.curdir)
-        self._energy_logger = None
-        self._grad_logger = None
-        self._nac_logger = None
-        self._corr_logger = None
-        self._timmings_logger = None
-        self._nuc_geo_logger = None
+        self.atoms = atoms
+
+
+        self._loggers = []
         if save_energy:
-            self._energy_logger = EnergyLogger(os.path.join(dir, 'energy.txt'), n_states)
+            self._loggers.append(EnergyLogger(os.path.join(dir, 'energy.txt')))
         if save_grad:
-            self._grad_logger = GradientLogger(os.path.join(dir, 'grad.txt'), n_states)
+            self._loggers.append(GradientLogger(os.path.join(dir, 'grad.txt')))
         if save_nac:
-            self._nac_logger = NACLogger(os.path.join(dir, 'nac.txt'), n_states)
+            self._loggers.append(NACLogger(os.path.join(dir, 'nac.txt')))
         if save_corr:
-            self._corr_logger = CorrelationLogger(os.path.join(dir, 'corr.txt'), n_states)
+            self._loggers.append(CorrelationLogger(os.path.join(dir, 'corr.txt')))
         if save_timigs:
-            self._timmings_logger = TimingsLogger(os.path.join(dir, 'timings.txt'))
+            self._loggers.append(TimingsLogger(os.path.join(dir, 'timings.txt')))
+        if save_elec:
+            self._loggers.append(ElectricPQLogger(os.path.join(dir, 'electric_pq.txt')))
+        if save_p:
+            self._loggers.append(NuclearPLogger(os.path.join(dir, 'nuclear_P.txt')))
+
+        self._nuc_geo_logger = None
         if save_geo:
+        #     self._loggers.append(NucGeoLogger(os.path.join(dir, 'nuc_geo.xyz')))
             self._nuc_geo_logger = NucGeoLogger(os.path.join(dir, 'nuc_geo.xyz'))
 
 
-    def write(self, time, total_E=None, elec_E=None, grads=None, NACs=None, pops=None, timings=None):
-        if self._energy_logger is not None:
-            self._energy_logger.write(time, total_E, elec_E)
-        if self._grad_logger is not None:
-            self._grad_logger.write(time, grads)
-        if self._nac_logger is not None:
-            self._nac_logger.write(time, NACs)
-        if self._corr_logger is not None:
-            self._corr_logger.write(time, pops)
-        if self._timmings_logger is not None:
-            self._timmings_logger.write(time, timings)
+    def write(self, time, total_E=None, elec_E=None, grads=None, NACs=None, timings=None, elec_p=None, elec_q=None, nuc_p=None, nuc_q=None):
+        data = LoggerData(time, self.atoms, total_E, elec_E, grads, NACs, timings, elec_p, elec_q, nuc_p)
+        for logger in self._loggers:
+            logger.write(data)
+
         #TODO: add nuc_geo logging here
 
 class NucGeoLogger():
@@ -191,6 +204,55 @@ class NucGeoLogger():
                 qCart_ang[3*i+2] + com_ang[2]))
         self._file.flush()
         
+class ElectricPQLogger():
+    def __init__(self, file_loc: str) -> None:
+        self._file = open(file_loc, 'w')
+        self._write_header = True
+
+    def __del__(self):
+        self._file.close()
+
+    def _write_header_to_file(self, n_states):
+        #   write file header
+        self._file.write('%12s ' % 'Time')
+        for i in range(n_states):
+            self._file.write(' %16s' % f'p{i}')
+            self._file.write(' %16s' % f'q{i}')
+        self._file.write('\n')
+        self._write_header = False
+
+    def write(self, data: LoggerData):
+        time = data.time
+        if self._write_header:
+            self._write_header_to_file(len(data.elec_p))
+        out_str = f'{time:12.6f} '
+        for i in range(len(data.elec_p)):
+            out_str += f' {data.elec_p[i]:16.10f}'
+            out_str += f' {data.elec_q[i]:16.10f}'
+        self._file.write(f'{out_str}\n')
+        self._file.flush()
+
+class NuclearPLogger():
+    def __init__(self, file_loc: str) -> None:
+        self._file = open(file_loc, 'w')
+        self._write_header = True
+
+    def __del__(self):
+        self._file.close()
+
+    def write(self, data: LoggerData):
+        atoms = data.atoms
+        natom = len(atoms)
+        self._file.write('%d \n' %natom)
+        self._file.write('%f \n' %data.time)
+        for i in range(natom):
+            self._file.write('{:<5s}{:>12.6f}{:>12.6f}{:>12.6f} \n'.format(
+                atoms[i],
+                data.nuc_p[3*i+0],
+                data.nuc_p[3*i+1],
+                data.nuc_p[3*i+2]))
+        self._file.flush()
+
 class TimingsLogger():
     def __init__(self, file_loc: str) -> None:
         self._file = open(file_loc, 'w')
@@ -199,7 +261,8 @@ class TimingsLogger():
     def __del__(self):
         self._file.close()
 
-    def write(self, time: float, times: dict):
+    def write(self, data: LoggerData):
+        times = data.timings
         if self._write_header:
             #   write file header
             self._file.write(f'{"Total":>12s}')
@@ -221,14 +284,16 @@ class TimingsLogger():
         self._file.flush()
 
 class CorrelationLogger():
-    def __init__(self, file_loc: str, n_states: int) -> None:
-        self._total_format = '{:>12.4f}'
-        for i in range(n_states + 1):
-            self._total_format += '{:>16.10f}'
-        self._total_format += '\n'
+    def __init__(self, file_loc: str) -> None:
+        # self._total_format = '{:>12.4f}'
+        # for i in range(n_states + 1):
+        #     self._total_format += '{:>16.10f}'
+        # self._total_format += '\n'
 
         self._file = open(file_loc, 'w')
-        
+        self._write_header = True
+    
+    def _write_header_to_file(self, n_states):
         #   write file header
         self._file.write('%12s' % 'Time')
         self._file.write(' %16s' % 'Total')
@@ -240,7 +305,19 @@ class CorrelationLogger():
     def __del__(self):
         self._file.close()
 
-    def write(self, time: float, pops):
+    def write(self, data: LoggerData):
+        p, q = data.elec_p, data.elec_q
+        time = data.time
+        if self._write_header:
+            self._write_header_to_file(len(p))
+        ### Compute the estimator of electronic state population ###
+        nel = len(q)
+        pops = np.zeros(nel)
+        common_TCF = 2**(nel+1) * np.exp(-np.dot(q, q) - np.dot(p, p))
+        for i in range(nel):
+                final_state_TCF = q[i]**2 + p[i]**2 - 0.5
+                pops[i] = common_TCF * final_state_TCF
+    
         total = np.sum(pops)
         out_str = f'{time:12.6f} {total:16.10f}'
         for i in range(len(pops)):
@@ -248,47 +325,55 @@ class CorrelationLogger():
         self._file.write(f'{out_str}\n')
         self._file.flush()
 
+
 class EnergyLogger():
-    def __init__(self, file_loc: str, n_states: int) -> None:
+    def __init__(self, file_loc: str) -> None:
         self._file = open(file_loc, 'w')
-        # self._write_header = True
+        self._write_header = True
         self._total_writes = 0
 
-        #   write file header
+    def __del__(self):
+        self._file.close()
+
+    def _write_header_to_file(self):
         self._file.write('%12s' % 'Time')
         self._file.write(' %16s' % 'Total')
-        for i in range(n_states):
+        for i in range(self._n_states):
             self._file.write(' %16s' % f'S{i}')
         self._file.write('\n')
         self._write_header = False
 
+    def write(self, data: LoggerData):
+        self._n_states = len(data.elec_E)
+        if self._write_header:
+            self._write_header_to_file()
+        out_str = f'{data.time:12.6f} {data.total_E:16.10f}'
+        for i in range(len(data.elec_E)):
+            out_str += f' {data.elec_E[i]:16.10f}'
+        self._file.write(f'{out_str}\n')
+        self._file.flush()
+
+    
+class GradientLogger():
+    def __init__(self, file_loc: str) -> None:
+        self._file = open(file_loc, 'w')
+        self._total_writes = 0
+        self._write_header = True
+        
     def __del__(self):
         self._file.close()
 
-    def write(self, time: float, total: float, elec: list | np.ndarray):
-        out_str = f'{time:12.6f} {total:16.10f}'
-        for i in range(len(elec)):
-            out_str += f' {elec[i]:16.10f}'
-        self._file.write(f'{out_str}\n')
-
-        self._file.flush()
-    
-class GradientLogger():
-    def __init__(self, file_loc: str, n_states: int) -> None:
-        self._file = open(file_loc, 'w')
-        self._n_states = n_states
-        self._total_writes = 0
-
-        # self._file.write('%16s' % 'Time')
-        for i in range(n_states):
+    def _write_header_to_file(self):
+        for i in range(self._n_states):
             self._file.write('%16s' % f'S{i} ')
         self._file.write('\n')
 
-    def __del__(self):
-        self._file.close()
-
-    def write(self, time, grads):
-
+    def write(self, data: LoggerData):
+        grads = data.grads
+        time = data.time
+        self._n_states = len(grads)
+        if self._write_header:
+            self._write_header_to_file()
         np.savetxt(self._file, np.transpose(grads), fmt='%16.10f', 
             header=f'time_step {self._total_writes}\ntime {time}')
         self._file.flush()
@@ -296,12 +381,18 @@ class GradientLogger():
 
 
 class NACLogger():
-    def __init__(self, file_loc: str, n_NACs: int, labels: list[str] = None) -> None:
+    def __init__(self, file_loc: str, labels: list[str] = None) -> None:
         self._file = open(file_loc, 'w')
-        self._n_states = n_NACs
+        self._write_header = True
         self._total_writes = 0
+        self._labels = labels
 
-        if labels is None:
+    def __del__(self):
+        self._file.close()
+
+    def _write_header_to_file(self):
+        n_NACs = self._n_states
+        if self._labels is None:
             labels = []
             for i in range(n_NACs):
                 for j in range(i+1, n_NACs):
@@ -311,11 +402,14 @@ class NACLogger():
         for label in labels:
             self._file.write('%16s' % label)
         self._file.write('\n')
+        self._write_header = False
 
-    def __del__(self):
-        self._file.close()
-
-    def write(self, time: float, NACs: np.ndarray):
+    def write(self, data: LoggerData):
+        NACs = data.NACs
+        time = data.time
+        self._n_states = len(NACs)
+        if self._write_header:
+            self._write_header_to_file()
         out_data = []
         print("N STATES: ", self._n_states)
         for i in range(self._n_states):
