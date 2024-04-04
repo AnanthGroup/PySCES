@@ -31,11 +31,7 @@ amu_mat, xyz_ang, frq, redmas, L, U, com_ang = get_geo_hess()
 if restart == 0: # If this is not a restart run
     # Rotate Cartesian coordinate into normal coordinate (normal_geo is in A.U.)
     normal_geo = get_normal_geo(U, xyz_ang, amu_mat)
-    print("U:\n",pandas.DataFrame(U))
-    print("U U.T:\n",pandas.DataFrame(np.matmul(U,U.T)))
-    print("amu_mat:\n",pandas.DataFrame(amu_mat))
-    print("normal coords:\n",normal_geo)  
-    #exit()
+
     # Sample initial phase space configuration
     if sampling == 'conventional':
         coord = sample_conventionalLSC(normal_geo, frq)

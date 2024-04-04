@@ -17,6 +17,7 @@ import os
 import sys
 import subprocess as sp
 import random
+import pandas
 from input_simulation import * 
 from input_gamess import nacme_option as opt 
 from fileIO import SimulationLogger, write_restart, read_restart
@@ -87,7 +88,6 @@ def get_geo_hess_terachem():
             amu_mat[3*ia+ja,3*ia+ja] = float(current_line[0])
             # xyz entries in TC geometry file are in a.u.
             xyz_ang[3*ia+ja] = 1.0/ang2bohr * float(current_line[ja+1])
-    print(xyz_ang)
 
     ##--------------------------------------------------
     ## 4. Read in reduced mass
@@ -275,7 +275,7 @@ def get_geo_hess_gamess():
 ### Read the initial geometry in xyz and rotate it into normal coordinates 
 ### to define the initial phase space displacement
 ##############################################################################
-def get_normal_geo(U, xyz_ang, amu_mat):
+def get_normal_geo(U, xyz_ang, amu_mat, debug=False):
     # Define amu2au conversion factor as a matrix
     amu2au_mat = np.zeros((nnuc,nnuc))
     for i in range(nnuc):
@@ -290,6 +290,14 @@ def get_normal_geo(U, xyz_ang, amu_mat):
     # matrix. 
     # NOTE: The row of L.T as well as U is reading the GAMESS hessian matrix VERTICALLY.  
     normal_geo = np.matmul(U[6:,:], np.matmul(np.matmul(amu_mat, amu2au_mat)**0.5, xyz_bohr))
+
+    if debug:
+        print("U:\n",pandas.DataFrame(U))
+        print("U U.T:\n",pandas.DataFrame(np.matmul(U,U.T)))
+        print("amu_mat:\n",pandas.DataFrame(amu_mat))
+        print("normal coords:\n",normal_geo)  
+
+
     return(normal_geo)
         
         
@@ -1499,12 +1507,12 @@ def scipy_rk4(elecE, grad, nac, yvar, dt, au_mas):
 Main driver of RK4 and electronic structure 
 '''
 def rk4(initq,initp,tStop,H,restart,amu_mat,U, com_ang):
-    if QC_RUNNER == 'terachem':
-        from qcRunners.TeraChem import TCRunner, format_output_LSCIVR
-
-    #   logging
     logger = SimulationLogger(nel, dir=logging_dir)
 
+    if QC_RUNNER == 'terachem':
+        from qcRunners.TeraChem import TCRunner, format_output_LSCIVR
+        logger.state_labels = [f'S{x}' for x in tcr_state_options['grads']]
+    
     qc_timings = {}
     proceed      = True
     input_name   = 'cas'
@@ -1630,8 +1638,9 @@ def rk4(initq,initp,tStop,H,restart,amu_mat,U, com_ang):
        
         nac, nac_hist = correct_nac_sign(nac,nac_hist)
 
-    pops = compute_CF_single(q[0:nel], p[0:nel])
-    logger.write(t,init_energy, elecE,  grad, nac, pops, qc_timings)
+    # pops = compute_CF_single(q[0:nel], p[0:nel])
+    logger.atoms = atoms
+    logger.write(t, init_energy, elecE,  grad, nac, qc_timings, elec_p=p[0:nel], elec_q=q[0:nel], nuc_p=p[nel:])
 
     opt['guess'] = 'moread'
     X,Y = [],[]
@@ -1706,8 +1715,8 @@ def rk4(initq,initp,tStop,H,restart,amu_mat,U, com_ang):
             #     g.write(total_format.format(t, new_energy, *elecE))
 
             #   New logging information
-            pops = compute_CF_single(y[0:nel], y[ndof:ndof+nel])
-            logger.write(t, total_E=new_energy, elec_E=elecE,  grads=grad, NACs=nac, pops=pops, timings=qc_timings)
+            # pops = compute_CF_single(y[0:nel], y[ndof:ndof+nel])
+            logger.write(t, total_E=new_energy, elec_E=elecE,  grads=grad, NACs=nac, timings=qc_timings, elec_p=y[0:nel], elec_q=y[ndof:ndof+nel], nuc_p=y[-natom*3:])
             write_restart('restart.json', [Y[-1][:ndof], Y[-1][ndof:]], nac_hist, new_energy, t, nel, 'rk4')
 
             if t == tStop:
@@ -1761,7 +1770,6 @@ def rk4(initq,initp,tStop,H,restart,amu_mat,U, com_ang):
             gg.write('NAC History:\n')
             gg.write(' '.join(map(str, nac_hist.shape)) + '\n')
             gg.write(np.array2string(nac_hist, separator=',').replace('[', '').replace(']', '') + '\n')
-            print("nac_hist",nac_hist)
 
     return(np.array(X), coord, initial_time)
 
@@ -1814,7 +1822,7 @@ def compute_CF(X, Y):
 '''
 Check which sign for the nac is expected and correct artificial sign flips
 '''
-def correct_nac_sign(nac, nac_hist, hist_length=None):
+def correct_nac_sign(nac, nac_hist, hist_length=None, debug=False):
     # Predict d(t) from d(t-1),d(t-2) with a linear extrapolation 
     #   The line through the points (-2,k),(-1,l)
     #   is p(x) = (l-k)*x + 2*l - k
@@ -1850,39 +1858,41 @@ def correct_nac_sign(nac, nac_hist, hist_length=None):
                     coefficients = np.polyfit(timesteps,nac_hist[i,j,ix,:], polynom_degree)
                     nac_expol[i,j,ix] = np.polyval(coefficients,hist_length)
 
-
     # check whether the TC/GAMESS vector goes in the same or opposite direction
     # (means an angle with more than 90 degree) as the estimation
     # if the angle is < 90 degree -> np.sign(dot_product)== 1 -> no flip
     # if the angle is > 90 degree -> np.sign(dot_product)==-1 -> flip
     for i in range(0,len(q0)):
         for j in range(0,len(q0)):
-            dot_product = np.dot(nac[i,j,:],nac_expol[i,j,:])
-            nac[i,j,:] = np.sign(dot_product)*nac[i,j,:]
+            if(np.sign(nac_dot[i,j])!=np.sign(nac_dot_expol[i,j])):
+                nac[i,j,:] = -1.0*nac[i,j,:]
+                if(i==0 and j==1):
+                    if debug: print("0,1 signflip removed")
 
-    # rotate history
-    #print("nac_hist vor roll: ")
-    #print("nh[:,:,0]")
-    #print(nac_hist[:,:,:,0])
-    #print("nh[:,:,1]")
-    #print(nac_hist[:,:,:,1])
-    #print("nh[:,:,2]")
-    #print(nac_hist[:,:,:,2])
+    if debug:
+        print("nac_hist vor roll: ")
+        print("nh[:,:,0]")
+        print(nac_hist[:,:,:,0])
+        print("nh[:,:,1]")
+        print(nac_hist[:,:,:,1])
+        print("nh[:,:,2]")
+        print(nac_hist[:,:,:,2])
+
     nac_hist = np.roll(nac_hist,-1,axis=3)
-    #print("nac_hist nach roll: ")
-    #print("nh[:,:,0]")
-    #print(nac_hist[:,:,:,0])
-    #print("nh[:,:,1]")
-    #print(nac_hist[:,:,:,1])
-    #print("nh[:,:,2]")
-    
-    #print("nac_dot[0,1] history post roll:",nac_dot_hist[0,1,0],nac_dot_hist[0,1,1],nac_dot_hist[0,1,2])
-    
+
+    if debug:
+        print("nac_hist nach roll: ")
+        print("nh[:,:,0]")
+        print(nac_hist[:,:,:,0])
+        print("nh[:,:,1]")
+        print(nac_hist[:,:,:,1])
+        print("nh[:,:,2]")
+        print("nac_dot[0,1] history post roll:",nac_dot_hist[0,1,0],nac_dot_hist[0,1,1],nac_dot_hist[0,1,2])
+        
     # update newest entry
     nac_hist[:,:,:,hist_length-1] = nac
    
-    #print("nac_dot[0,1] history: post upda",nac_dot_hist[0,1,0],nac_dot_hist[0,1,1],nac_dot_hist[0,1,2])
-    # test some git utilities
+    if debug: print("nac_dot[0,1] history: post upda",nac_dot_hist[0,1,0],nac_dot_hist[0,1,1],nac_dot_hist[0,1,2])
 
     return (nac,nac_hist)
 
