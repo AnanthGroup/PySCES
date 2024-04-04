@@ -1505,11 +1505,12 @@ def scipy_rk4(elecE, grad, nac, yvar, dt, au_mas):
 Main driver of RK4 and electronic structure 
 '''
 def rk4(initq,initp,tStop,H,restart,amu_mat,U, com_ang):
-    if QC_RUNNER == 'terachem':
-        from qcRunners.TeraChem import TCRunner, format_output_LSCIVR
-    #   logging
     logger = SimulationLogger(nel, dir=logging_dir)
 
+    if QC_RUNNER == 'terachem':
+        from qcRunners.TeraChem import TCRunner, format_output_LSCIVR
+        logger.state_labels = [f'S{x}' for x in tcr_state_options['grads']]
+    
     qc_timings = {}
     proceed      = True
     input_name   = 'cas'
@@ -1637,7 +1638,7 @@ def rk4(initq,initp,tStop,H,restart,amu_mat,U, com_ang):
 
     # pops = compute_CF_single(q[0:nel], p[0:nel])
     logger.atoms = atoms
-    logger.write(t,init_energy, elecE,  grad, nac, qc_timings, elec_p=p[0:nel], elec_q=q[0:nel], nuc_p=p[nel:])
+    logger.write(t, init_energy, elecE,  grad, nac, qc_timings, elec_p=p[0:nel], elec_q=q[0:nel], nuc_p=p[nel:])
 
     opt['guess'] = 'moread'
     X,Y = [],[]

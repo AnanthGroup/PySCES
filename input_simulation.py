@@ -140,7 +140,7 @@ def _check_settings():
         opts.nel = len(grads)
         if nel != len(opts.q0) or nel != len(opts.p0):
             print(f"WARNING: Number of initial electronic coherent states (q0 and p0)")
-            print(f"         match the number of TeraChem states ({opts.nel}): ")
+            print(f"         does not match the number of TeraChem states ({opts.nel}): ")
             print(f"         Resetting q0 and p0 to all zeros")
             opts.q0 = [0.0]*opts.nel
             opts.p0 = [0.0]*opts.nel

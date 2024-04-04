@@ -572,6 +572,10 @@ class TCRunner():
         # times['total'] = end - start
         # _print_times(times, end - start)
         self.set_avg_max_times(times)
+
+        # cleaned = self.cleanup_multiple_jobs(all_results)
+        # import json
+        # json.dump(cleaned, open('results.json', 'w'), indent=4)
         return all_results, times
     
     def _set_guess(self, job_opts: dict, excited_type: str, all_results: list[dict], state):
