@@ -4,6 +4,7 @@ import os
 import numpy as np
 from tcpb import TCProtobufClient as TCPBClient
 from tcpb.exceptions import ServerError
+from tcpb import terachem_server_pb2 as pb
 import time
 import warnings
 import shutil
@@ -126,6 +127,46 @@ def _start_TC_server(port: int):
         return None
     
     return ip
+
+def compute_job_sync(client: TCPBClient, jobType="energy", geom=None, unitType="bohr", **kwargs):
+    """Wrapper for send_job_async() and recv_job_async(), using check_job_complete() to poll the server.
+    Main funcitonality is coppied from TCProtobufClient.send_job_async() and
+    TCProtobufClient.check_job_complete(). This is mostly to change the time in which the server is pinged. 
+    
+    Args:
+        jobType:    Job type key, as defined in the pb.JobInput.RunType enum (defaults to 'energy')
+        geom:       Cartesian geometry of the new point
+        unitType:   Unit type key, as defined in the pb.Mol.UnitType enum (defaults to 'bohr')
+        **kwargs:   Additional TeraChem keywords, check _process_kwargs for behaviour
+
+    Returns:
+        dict: Results mirroring recv_job_async
+    """
+
+    print("Submitting Job...")
+    accepted = client.send_job_async(jobType, geom, unitType, **kwargs)
+    while accepted is False:
+        time.sleep(0.1)
+        accepted = client.send_job_async(jobType, geom, unitType, **kwargs)
+
+    completed = client.check_job_complete()
+    while completed is False:
+        time.sleep(0.1)
+        client._send_msg(pb.STATUS, None)
+        status = client._recv_msg(pb.STATUS)
+
+        if status.WhichOneof("job_status") == "completed":
+            completed = True
+        elif status.WhichOneof("job_status") == "working":
+            completed = False
+        else:
+            raise ServerError(
+                "Invalid or no job status received, either no job submitted before check_job_complete() or major server issue",
+                client,
+            )
+    return client.recv_job_async()
+
+
 
 class TCRunner():
     def __init__(self, 
@@ -277,7 +318,7 @@ class TCRunner():
 
         return results
     
-    def compute_job_sync(self, jobType="energy", geom=None, unitType="bohr", **kwargs):
+    def compute_job_sync_with_restart(self, jobType="energy", geom=None, unitType="bohr", **kwargs):
         """Wrapper for send_job_async() and recv_job_async(), using check_job_complete() to poll the server.
            Main funcitonality is coppied from TCProtobufClient.send_job_async()
 
@@ -448,7 +489,7 @@ class TCRunner():
         if len(grads) == 0 and len(NACs) == 0:
             job_opts = base_options.copy()
             start = time.time()
-            results = self.compute_job_sync('energy', geom, 'angstrom', **job_opts)
+            results = self.compute_job_sync_with_restart('energy', geom, 'angstrom', **job_opts)
             times[f'energy'] = time.time() - start
             results['run'] = 'energy'
             results.update(job_opts)
@@ -548,7 +589,8 @@ def _run_jobs(client: TCPBClient, jobs, geom, excited_type, server_root, client_
         print(f"\nRunning {job_name} on client ID {client_ID}")
 
         start = time.time()
-        results = client.compute_job_sync(job_type, geom, 'angstrom', **job_opts)
+        # results = client.compute_job_sync(job_type, geom, 'angstrom', **job_opts)
+        results = compute_job_sync(client, job_type, geom, 'angstrom', **job_opts)
         times[job_name] = time.time() - start
         results['run'] = job_type
         results.update(job_opts)
