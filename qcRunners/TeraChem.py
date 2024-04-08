@@ -630,16 +630,17 @@ def _set_guess(job_opts: dict, excited_type: str, all_results: list[dict], state
     if os.path.isfile(str(scf_guess)):
         job_opts['guess'] = scf_guess
 
-def format_output_LSCIVR(n_elec, job_data: list[dict]):
+def format_output_LSCIVR(job_data: list[dict]):
     atoms = job_data[0]['atoms']
     n_atoms = len(atoms)
+    
     # energies = np.zeros(n_elec)
     # grads = np.zeros((n_elec, n_atoms*3))
     # nacs = np.zeros((n_elec, n_elec, n_atoms*3))
     energies = {}
     grads = {}
     nacs = {}
-
+    trans_dips = {}
     for job in job_data:
         if job['run'] == 'gradient':
             state = job.get('cistarget', job.get('castarget', 0))
@@ -654,9 +655,20 @@ def format_output_LSCIVR(n_elec, job_data: list[dict]):
             nacs[(state_1, state_2)] = np.array(job['nacme']).flatten()
             nacs[(state_2, state_1)] = - nacs[state_1, state_2]
 
+            x = len(job['cis_transition_dipoles'])
+            N = int((1 + int(np.sqrt(1+8*x)))/2) - 1
+            count = 0
+            for i in range(0, N):
+                for j in range(i+1, N+1):
+                    if (i, j) == (state_1, state_2):
+                        trans_dips[(state_1, state_2)] = job['cis_transition_dipoles'][count]
+                        trans_dips[(state_2, state_1)] = job['cis_transition_dipoles'][count]
+                    count += 1
+
+
     #   make sure there are the correct number of gradients and NACs
-    N = len(grads)
-    if N*(N-1) != len(nacs):
+    n_states = len(grads)
+    if n_states*(n_states-1) != len(nacs):
         raise RuntimeError('LSC-IVR requires a NAC vector for each gradient pair')
     
     #   make sure each grad pair has a NAC vector
@@ -668,27 +680,31 @@ def format_output_LSCIVR(n_elec, job_data: list[dict]):
                 raise RuntimeError('LSC-IVR requires a NAC vector for each gradient pair')
 
     #   print mapping
-    ivr_energies = np.zeros(N)
-    ivr_grads = np.zeros((N, n_atoms*3))
-    ivr_nacs  = np.zeros((N, N, n_atoms*3))
+    ivr_energies = np.zeros(n_states)
+    ivr_grads = np.zeros((n_states, n_atoms*3))
+    ivr_nacs  = np.zeros((n_states, n_states, n_atoms*3))
+    ivr_trans_dips = np.zeros((n_states, n_states, 3))
     print(" --------------------------------")
     print(" LSC-IVR to quantum chemistry")
     print(" state number mapping")
     print(" ---------------------------------")
     print(" LSC-IVR -->   QC  ")
     grads_in_order = sorted(list(grads.keys()))
-    for i in range(N):
+    for i in range(n_states):
         qc_i = grads_in_order[i]
         print(f"   {i:2d}    -->  {qc_i:2d}")
         ivr_grads[i] = grads[qc_i]
         ivr_energies[i] = energies[qc_i]
-        for j in range(N):
+        for j in range(n_states):
             if i <= j:
                 continue
             qc_idx_j = grads_in_order[j]
             ivr_nacs[i, j] = nacs[(qc_i, qc_idx_j)]
             ivr_nacs[j, i] = nacs[(qc_idx_j, qc_i)]
+
+            ivr_trans_dips[i, j] = trans_dips[(qc_i, qc_idx_j)]
+            ivr_trans_dips[j, i] = trans_dips[(qc_idx_j, qc_i)]
     print(" ---------------------------------")
 
-    return ivr_energies, ivr_grads, ivr_nacs
+    return ivr_energies, ivr_grads, ivr_nacs, trans_dips
     # return energies, grads, nacs

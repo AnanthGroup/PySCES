@@ -1511,6 +1511,7 @@ def rk4(initq,initp,tStop,H,restart,amu_mat,U, com_ang):
         from qcRunners.TeraChem import TCRunner, format_output_LSCIVR
         logger.state_labels = [f'S{x}' for x in tcr_state_options['grads']]
     
+    trans_dips = None
     qc_timings = {}
     proceed      = True
     input_name   = 'cas'
@@ -1567,7 +1568,7 @@ def rk4(initq,initp,tStop,H,restart,amu_mat,U, com_ang):
             # import pickle
             # pickle.dump([job_results, qc_timings], open('_tmp.pkl', 'wb'))
             # job_results, qc_timings = pickle.load( open('_tmp.pkl', 'rb'))
-            elecE, grad, nac = format_output_LSCIVR(len(q0), job_results)
+            elecE, grad, nac, trans_dips = format_output_LSCIVR(job_results)
 
 
         # Total initial energy at t=0
@@ -1632,7 +1633,7 @@ def rk4(initq,initp,tStop,H,restart,amu_mat,U, com_ang):
             job_results, qc_timings = tc_runner.run_TC_new_geom(qC/ang2bohr)
             # import json
             # json.dump(tc_runner.cleanup_multiple_jobs(job_results), open('tmp.json', 'w'), indent=4)
-            elecE, grad, nac = format_output_LSCIVR(len(q0), job_results)
+            elecE, grad, nac, trans_dips  = format_output_LSCIVR(job_results)
        
         nac, nac_hist = correct_nac_sign(nac,nac_hist)
 
@@ -1685,7 +1686,7 @@ def rk4(initq,initp,tStop,H,restart,amu_mat,U, com_ang):
                     proceed = False
             else:
                 job_results, qc_timings = tc_runner.run_TC_new_geom(qC/ang2bohr)
-                elecE, grad, nac = format_output_LSCIVR(len(q0), job_results)
+                elecE, grad, nac, trans_dips  = format_output_LSCIVR(job_results)
             #correct nac sign
             nac, nac_hist = correct_nac_sign(nac,nac_hist)
 
