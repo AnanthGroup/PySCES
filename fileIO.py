@@ -328,7 +328,7 @@ class CorrelationLogger():
         self._file.write('%12s' % 'Time')
         self._file.write(' %16s' % 'Total')
         if labels is None:
-            labels = [f'S{i}' for i in range(self._n_states)]
+            labels = [f'S{i}' for i in range(n_states)]
         for i in range(n_states):
             self._file.write(' %16s' % labels[i])
         self._file.write('\n')
@@ -362,6 +362,7 @@ class EnergyLogger():
         self._file = open(file_loc, 'w')
         self._write_header = True
         self._total_writes = 0
+        self._n_states = 0
 
     def __del__(self):
         self._file.close()
@@ -391,6 +392,7 @@ class GradientLogger():
         self._file = open(file_loc, 'w')
         self._total_writes = 0
         self._write_header = True
+        self._n_states = 0
         
     def __del__(self):
         self._file.close()
@@ -419,6 +421,7 @@ class NACLogger():
         self._write_header = True
         self._total_writes = 0
         self._labels = labels
+        self._n_states = 0
 
     def __del__(self):
         self._file.close()
