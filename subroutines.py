@@ -1529,6 +1529,9 @@ def rk4(initq,initp,tStop,H,restart,amu_mat,U, com_ang):
     #   very first step does not need a GAMESS guess
     opt['guess'] = ''
 
+    # History length for nonadiabatic coupling vector and transition dipole moments
+    hist_length = 2 #this is the only implemented length
+
     ### Initial-time property calculation ###
     with open(os.path.join(__location__, 'progress.out'), 'a') as f:
         f.write("Initial property evaluation started.\n")
@@ -1542,8 +1545,9 @@ def rk4(initq,initp,tStop,H,restart,amu_mat,U, com_ang):
         q[nel:], p[nel:] = qC, pC
         y = np.concatenate((q, p))
 
-        hist_length = 2 #this is the only implemented length
+        # Arrays for history of nonadiabatic coupling vectors (nac) and transition dipole moments (tdm)
         nac_hist = np.zeros((len(q0),len(q0),nnuc,hist_length)) # history of nonadiabatic coupling vectors for extrapolation in nac sign flip correction
+        tdm_hist = np.zeros((len(q0),len(q0),3,hist_length)) # history of transition dipole moments for extrapolation in nac sign flip correction
 
         # Get atom labels
         atoms = get_atom_label()
@@ -1582,6 +1586,8 @@ def rk4(initq,initp,tStop,H,restart,amu_mat,U, com_ang):
         # Create nac history for sign-flip extrapolation
         for it in range(0,hist_length):
             nac_hist[:,:,:,it] = nac
+            if trans_dips is not None:
+                tdm_hist[:,:,:,it] = trans_dips
    
     elif restart == 1:
         opt['guess'] = 'moread'
@@ -1637,7 +1643,13 @@ def rk4(initq,initp,tStop,H,restart,amu_mat,U, com_ang):
             # import json
             # json.dump(tc_runner.cleanup_multiple_jobs(job_results), open('tmp.json', 'w'), indent=4)
             elecE, grad, nac, trans_dips  = format_output_LSCIVR(job_results)
-       
+        
+        # If hist_length array does not exist yet, create it
+        if len(nac_hist) == 0:
+            nac_hist = np.zeros((len(q0),len(q0),nnuc,hist_length))
+            for it in range(0,hist_length):
+                nac_hist[:,:,:,it] = nac
+        
         nac, nac_hist = correct_nac_sign(nac,nac_hist)
 
     # pops = compute_CF_single(q[0:nel], p[0:nel])
@@ -1691,7 +1703,7 @@ def rk4(initq,initp,tStop,H,restart,amu_mat,U, com_ang):
                 job_results, qc_timings = tc_runner.run_TC_new_geom(qC/ang2bohr)
                 elecE, grad, nac, trans_dips  = format_output_LSCIVR(job_results)
             #correct nac sign
-            nac, nac_hist = correct_nac_sign(nac,nac_hist)
+            nac, nac_hist = correct_nac_sign(nac,nac_hist,trans_dips,tdm_hist)
 
         if proceed:
             # Compute energy
@@ -1824,19 +1836,22 @@ def compute_CF(X, Y):
 '''
 Check which sign for the nac is expected and correct artificial sign flips
 '''
-def correct_nac_sign(nac, nac_hist, hist_length=None, debug=False):
+def correct_nac_sign(nac, nac_hist, tdm, tdm_hist, hist_length=None, debug=False):
     # Predict d(t) from d(t-1),d(t-2) with a linear extrapolation 
     #   The line through the points (-2,k),(-1,l)
     #   is p(x) = (l-k)*x + 2*l - k
     #   Extrapolation to the next time step yields
     #   p(0) = 2*l - k
     # Do that for all NACs and all vector components
+    # If available, countercheck if transition dipole moment has also flipped sign
     # One can also do a higher degree polynomial or choose more points, which uses numpy polyfit then.
     # Right now, the degree is hard coded to 1 with 2 history points
 
     # If there is not history, do not correct artificial sign flips
-    if len(nac_hist) == 0:
-        return nac, []
+    #if len(nac_hist) == 0:
+    #    return nac, []
+    if tdm is not None:
+        use_tdm = True
 
     if hist_length is None:
         hist_length = nac_hist.shape[3]
@@ -1844,7 +1859,7 @@ def correct_nac_sign(nac, nac_hist, hist_length=None, debug=False):
     # Allocate array for extrapolated vector
     nac_expol = np.empty_like(nac)
 
-    polynom_degree = 1 # 1 is usually sufficient. 2 is better with TDDFT, but should NOT be used with CASSCF
+    polynom_degree = 1 # hardcoded. 1 is usually sufficient. 2 is in principle better but could lead to artificial oscillations
 
     if (polynom_degree == 1):
         # default
@@ -1860,14 +1875,36 @@ def correct_nac_sign(nac, nac_hist, hist_length=None, debug=False):
                     coefficients = np.polyfit(timesteps,nac_hist[i,j,ix,:], polynom_degree)
                     nac_expol[i,j,ix] = np.polyval(coefficients,hist_length)
 
+    # Do similar with transition dipole moment
+    if use_tdm:
+        tdm_expol = np.empty_like(tdm)
+        if (polynom_degree == 1):
+            tdm_expol = 2.0*tdm_hist[:,:,:,-1] - 1.0*tdm_hist[:,:,:,-2]
+        else:
+            timesteps = np.arange(hist_length)
+            for i in range(0,len(q0)):
+                for j in range(0,len(q0)):
+                    for ix in range(0,3):
+                        coefficients = np.polyfit(timesteps,tdm_hist[i,j,ix,:], polynom_degree)
+                        tdm_expol[i,j,ix] = np.polyval(coefficients,hist_length)
+
+
     # check whether the TC/GAMESS vector goes in the same or opposite direction
     # (means an angle with more than 90 degree) as the estimation
     # if the angle is < 90 degree -> np.sign(dot_product)== 1 -> no flip
     # if the angle is > 90 degree -> np.sign(dot_product)==-1 -> flip
     for i in range(0,len(q0)):
         for j in range(0,len(q0)):
-            dot_product = np.dot(nac[i,j,:],nac_expol[i,j,:])
-            nac[i,j,:] = np.sign(dot_product)*nac[i,j,:]
+            nac_dot_product = np.dot(nac[i,j,:],nac_expol[i,j,:])
+            # if tdm is available: check if it also flips sign. if not, no correction
+            # if tdm is not available rely only on nac
+            if use_tdm:
+                tdm_dot_product = np.dot(tdm[i,j,:],tdm_expol[i,j,:])
+                if np.sign(nac_dot_product) == np.sign(tdm_dot_product):
+                    nac[i,j,:] = np.sign(nac_dot_product)*nac[i,j,:]
+            else:
+                nac[i,j,:] = np.sign(nac_dot_product)*nac[i,j,:]
+
 
     if debug:
         print("nac_hist vor roll: ")
