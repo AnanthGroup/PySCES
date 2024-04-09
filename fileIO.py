@@ -211,7 +211,9 @@ class TCJobsLogger():
             for res in results:
                 res = TC.TCRunner.append_output_file(res)
             cleaned = TC.TCRunner.cleanup_multiple_jobs(results, 'orb_energies', 'bond_order', 'orb_occupations', 'spins')
-            yaml.dump(cleaned, self._file, allow_unicode=True)
+
+            out_data = {'time': data.time, 'jobs_data': cleaned}
+            yaml.dump(out_data, self._file, allow_unicode=True, explicit_start=True, default_flow_style=False, sort_keys=False)
             self._file.flush()
 
 class NucGeoLogger():

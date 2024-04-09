@@ -263,8 +263,12 @@ class TCRunner():
     
     @staticmethod
     def append_output_file(results: dict):
-        results_file = os.path.join(results['job_dir'], 'tc.out')
-        results['tc.out'] = open(results_file).readlines()
+        output_file = os.path.join(results['job_dir'], 'tc.out')
+        # results['tc.out'] = open(results_file).readlines()
+        lines = open(output_file).readlines()
+        for n in range(len(lines)):
+            lines[n] = lines[n][0:-1]
+        results['tc.out'] = lines
         return results
     
     @staticmethod
