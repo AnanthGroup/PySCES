@@ -1864,10 +1864,8 @@ def correct_nac_sign(nac, nac_hist, hist_length=None, debug=False):
     # if the angle is > 90 degree -> np.sign(dot_product)==-1 -> flip
     for i in range(0,len(q0)):
         for j in range(0,len(q0)):
-            if(np.sign(nac_dot[i,j])!=np.sign(nac_dot_expol[i,j])):
-                nac[i,j,:] = -1.0*nac[i,j,:]
-                if(i==0 and j==1):
-                    if debug: print("0,1 signflip removed")
+            dot_product = np.dot(nac[i,j,:],nac_expol[i,j,:])
+            nac[i,j,:] = np.sign(dot_product)*nac[i,j,:]
 
     if debug:
         print("nac_hist vor roll: ")

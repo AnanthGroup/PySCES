@@ -20,6 +20,10 @@ __location__ = ''
 
 from input_simulation import * 
 
+# Print git commit
+command_git_tag="git -C "+str(os.path.dirname(os.path.realpath(__file__)))+" describe --tags"
+print("git tag: "+str(os.popen(command_git_tag).readline()))
+
 ###################################
 ### Propagation of a trajectory ###
 ###################################
