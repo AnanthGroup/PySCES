@@ -1505,13 +1505,14 @@ def scipy_rk4(elecE, grad, nac, yvar, dt, au_mas):
 Main driver of RK4 and electronic structure 
 '''
 def rk4(initq,initp,tStop,H,restart,amu_mat,U, com_ang):
-    logger = SimulationLogger(nel, dir=logging_dir)
+    logger = SimulationLogger(nel, dir=logging_dir, save_jobs=tcr_log_jobs)
 
     if QC_RUNNER == 'terachem':
         from qcRunners.TeraChem import TCRunner, format_output_LSCIVR
         logger.state_labels = [f'S{x}' for x in tcr_state_options['grads']]
     
     trans_dips = None
+    job_results = {}
     qc_timings = {}
     proceed      = True
     input_name   = 'cas'
@@ -1639,7 +1640,7 @@ def rk4(initq,initp,tStop,H,restart,amu_mat,U, com_ang):
 
     # pops = compute_CF_single(q[0:nel], p[0:nel])
     logger.atoms = atoms
-    logger.write(t, init_energy, elecE,  grad, nac, qc_timings, elec_p=p[0:nel], elec_q=q[0:nel], nuc_p=p[nel:])
+    logger.write(t, init_energy, elecE,  grad, nac, qc_timings, elec_p=p[0:nel], elec_q=q[0:nel], nuc_p=p[nel:], jobs_data=job_results)
 
     opt['guess'] = 'moread'
     X,Y = [],[]
@@ -1715,7 +1716,7 @@ def rk4(initq,initp,tStop,H,restart,amu_mat,U, com_ang):
 
             #   New logging information
             # pops = compute_CF_single(y[0:nel], y[ndof:ndof+nel])
-            logger.write(t, total_E=new_energy, elec_E=elecE,  grads=grad, NACs=nac, timings=qc_timings, elec_p=y[0:nel], elec_q=y[ndof:ndof+nel], nuc_p=y[-natom*3:])
+            logger.write(t, total_E=new_energy, elec_E=elecE,  grads=grad, NACs=nac, timings=qc_timings, elec_p=y[0:nel], elec_q=y[ndof:ndof+nel], nuc_p=y[-natom*3:], jobs_data=job_results)
             write_restart('restart.json', [Y[-1][:ndof], Y[-1][ndof:]], nac_hist, new_energy, t, nel, 'rk4')
 
             if t == tStop:

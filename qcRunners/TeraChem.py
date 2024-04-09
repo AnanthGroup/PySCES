@@ -38,9 +38,10 @@ def _convert(value):
     elif isinstance(value, bytes):
         return value.decode('utf-8')
     elif isinstance(value, np.ndarray):
-        new = []
-        for i in range(len(value)):
-            new.append(_convert(value[i]))
+        # new = []
+        # for i in range(len(value)):
+        #     new.append(_convert(value[i]))
+        new = value.tolist()
         return new
     elif isinstance(value, dict):
         new = {}
@@ -261,6 +262,12 @@ class TCRunner():
         return results
     
     @staticmethod
+    def append_output_file(results: dict):
+        results_file = os.path.join(results['job_dir'], 'tc.out')
+        results['tc.out'] = open(results_file).readlines()
+        return results
+    
+    @staticmethod
     def remove_previous_job_dir(client: TCPBClient):
         results = client.prev_results
         TCRunner.remove_previous_scr_dir(client)
@@ -291,7 +298,7 @@ class TCRunner():
             if len(remove) == 1 and remove[0] == '':
                 remove = []
         else:
-            remove = ['charges', 'orb_energies']
+            remove = ['orb_energies', 'bond_order', 'orb_occupations', 'spins']
 
         #   remove unwanted entries
         for r in remove:
@@ -571,13 +578,9 @@ class TCRunner():
                     times.update(batch_times)
             end = time.time()
 
-        # times['total'] = end - start
-        # _print_times(times, end - start)
+    
         self.set_avg_max_times(times)
 
-        # cleaned = self.cleanup_multiple_jobs(all_results)
-        # import json
-        # json.dump(cleaned, open('results.json', 'w'), indent=4)
         return all_results, times
     
     def _set_guess(self, job_opts: dict, excited_type: str, all_results: list[dict], state):

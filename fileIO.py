@@ -1,6 +1,8 @@
 import os
 import json
 import numpy as np
+import qcRunners.TeraChem as TC
+from copy import deepcopy
 
 def read_restart(file_loc: str='restart.out', ndof: int=0, integrator: str='RK4') -> tuple[np.ndarray, np.ndarray, np.ndarray, float, float]:
     '''
@@ -133,7 +135,7 @@ def write_restart(file_loc: str, coord: list | np.ndarray, nac_hist: np.ndarray,
         exit(f'ERROR: only RK4 is implimented fileIO')
 
 class LoggerData():
-    def __init__(self, time, atoms=None, total_E=None, elec_E=None, grads=None, NACs=None, timings=None, elec_p=None, elec_q=None, nuc_p=None, nuc_q=None, state_labels=None) -> None:
+    def __init__(self, time, atoms=None, total_E=None, elec_E=None, grads=None, NACs=None, timings=None, elec_p=None, elec_q=None, nuc_p=None, nuc_q=None, state_labels=None, jobs_data=None) -> None:
         self.time = time
         self.atoms = atoms
         self.total_E = total_E
@@ -147,8 +149,11 @@ class LoggerData():
         self.nuc_q = nuc_q
         self.state_labels = state_labels
 
+        #   place holder for all other types of data
+        self.jobs_data = jobs_data
+
 class SimulationLogger():
-    def __init__(self, n_states, save_energy=True, save_grad=True, save_nac=True, save_corr=True, save_timigs=True, dir=None, save_geo=True, save_elec=True, save_p=True, atoms=None) -> None:
+    def __init__(self, n_states, save_energy=True, save_grad=True, save_nac=True, save_corr=True, save_timigs=True, dir=None, save_geo=True, save_elec=True, save_p=True, save_jobs=True, atoms=None) -> None:
         if dir is None:
             dir = os.path.abspath(os.path.curdir)
         self.atoms = atoms
@@ -169,6 +174,8 @@ class SimulationLogger():
             self._loggers.append(ElectricPQLogger(os.path.join(dir, 'electric_pq.txt')))
         if save_p:
             self._loggers.append(NuclearPLogger(os.path.join(dir, 'nuclear_P.txt')))
+        if save_jobs:
+            self._loggers.append(TCJobsLogger(os.path.join(dir, 'jobs_data.yaml')))
 
         self._nuc_geo_logger = None
         if save_geo:
@@ -178,12 +185,34 @@ class SimulationLogger():
         self.state_labels = None
 
 
-    def write(self, time, total_E=None, elec_E=None, grads=None, NACs=None, timings=None, elec_p=None, elec_q=None, nuc_p=None, nuc_q=None):
-        data = LoggerData(time, self.atoms, total_E, elec_E, grads, NACs, timings, elec_p, elec_q, nuc_p, None, self.state_labels)
+    def write(self, time, total_E=None, elec_E=None, grads=None, NACs=None, timings=None, elec_p=None, elec_q=None, nuc_p=None, nuc_q=None, jobs_data=None):
+        data = LoggerData(time, self.atoms, total_E, elec_E, grads, NACs, timings, elec_p, elec_q, nuc_p, None, self.state_labels, jobs_data)
         for logger in self._loggers:
             logger.write(data)
 
         #TODO: add nuc_geo logging here
+
+class TCJobsLogger():
+    def __init__(self, file_loc: str) -> None:
+        self._file_loc = file_loc
+        self._file = None
+        
+    def __del__(self):
+        if self._file is not None:
+            self._file.close()
+
+    def write(self, data: LoggerData):
+        if data.jobs_data is not None:
+            if self._file is None:
+                self._file = open(self._file_loc, 'w')
+                
+            import yaml
+            results = deepcopy(data.jobs_data)
+            for res in results:
+                res = TC.TCRunner.append_output_file(res)
+            cleaned = TC.TCRunner.cleanup_multiple_jobs(results, 'orb_energies', 'bond_order', 'orb_occupations', 'spins')
+            yaml.dump(cleaned, self._file, allow_unicode=True)
+            self._file.flush()
 
 class NucGeoLogger():
     def __init__(self, file_loc: str) -> None:

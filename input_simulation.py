@@ -77,7 +77,10 @@ tcr_job_options = {}
 tcr_state_options = {
     'max_state': nel-1, 'grads': 'all', 'NACs': 'all'
 }
+#   TeraChem runner job specific options
 tcr_spec_job_opts = {}
+#   log TC job results
+tcr_log_jobs = False
 
 # Terachem files
 fname_tc_xyz      = "tmp/tc_hf/hf.spherical.freq/Geometry.xyz"
