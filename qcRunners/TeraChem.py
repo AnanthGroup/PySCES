@@ -174,11 +174,11 @@ class TCRunner():
                  ports: int,
                  atoms: list,
                  tc_options: dict,
+                 tc_spec_job_opts: dict = None,
                  server_roots = '.',
                  start_new:  bool=False,
                  run_options: dict={}, 
-                 max_wait=20, 
-                 dipole_deriv = False,
+                 max_wait=20,
                  ) -> None:
 
         if isinstance(hosts, str):
@@ -207,7 +207,6 @@ class TCRunner():
 
         self._atoms = np.copy(atoms)
         self._base_options = tc_options.copy()
-        self._dipole_deriv = dipole_deriv
 
         self._cas_guess = None
         self._scf_guess = None
@@ -231,6 +230,9 @@ class TCRunner():
         # self._max_state = run_options.get('max_state', 0)
         # self._grads = run_options.get('grads', False)
         self._NACs = run_options.pop('nacs', False)
+
+        #   job options for specific jobs
+        self._spec_job_opts = tc_spec_job_opts
         
 
     @staticmethod
@@ -400,7 +402,6 @@ class TCRunner():
         client = self._client
         atoms = self._atoms
         opts = self._base_options.copy()
-        dipole_deriv = self._dipole_deriv
         max_state = self._max_state
         gradients = self._grads
         couplings = self._NACs
@@ -500,6 +501,8 @@ class TCRunner():
         for job_i, state in enumerate(grads):
             name = f'gradient_{state}'
             job_opts = base_options.copy()
+            if name in self._spec_job_opts:
+                job_opts.update(self._spec_job_opts[name])
 
             if excited_type == 'cas':
                 job_opts.update(excited_options)
@@ -525,6 +528,8 @@ class TCRunner():
             name = f'nac_{nac1}_{nac2}'
             job_opts = base_options.copy()
             job_opts.update(excited_options)
+            if name in self._spec_job_opts:
+                job_opts.update(self._spec_job_opts[name])
 
             if excited_type == 'cis':
                 job_opts.update(excited_options)
@@ -535,9 +540,6 @@ class TCRunner():
 
             job_opts['nacstate1'] = nac1
             job_opts['nacstate2'] = nac2
-
-            if dipole_deriv:
-                pass
 
             jobs_to_run[job_num % n_clients][name] = {
                 'opts': job_opts.copy(),
