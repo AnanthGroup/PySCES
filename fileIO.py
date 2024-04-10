@@ -300,7 +300,7 @@ class TimingsLogger():
         if self._write_header:
             #   write file header
             # self._file.write(f'{"Frame Time":>12s}')
-            self._file.write(f'{"Total":>12s}')
+            self._file.write(f'{"Total QC":>12s}')
             for key, value in times.items():
                 self._file.write(f'{key:>12s}')
             self._file.write('\n')
@@ -309,7 +309,8 @@ class TimingsLogger():
         #   compute total
         total = 0.0
         for key, value in times.items():
-            total += value
+            if 'gradient_' in key or 'nac_' in key or 'energy_' in key:
+                total += value
 
         # Write timings
         self._file.write(f'{total:12.3f}')
