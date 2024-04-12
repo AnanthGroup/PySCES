@@ -1592,7 +1592,7 @@ def rk4(initq,initp,tStop,H,restart,amu_mat,U, com_ang):
     elif restart == 1:
         opt['guess'] = 'moread'
 
-        q, p, nac_hist, init_energy, initial_time = read_restart(file_loc=restart_file_in, ndof=ndof)
+        q, p, nac_hist, tdm_hist, init_energy, initial_time = read_restart(file_loc=restart_file_in, ndof=ndof)
         t = initial_time
 
         ## Read the restart file
@@ -1644,13 +1644,20 @@ def rk4(initq,initp,tStop,H,restart,amu_mat,U, com_ang):
             # json.dump(tc_runner.cleanup_multiple_jobs(job_results), open('tmp.json', 'w'), indent=4)
             elecE, grad, nac, trans_dips  = format_output_LSCIVR(job_results)
         
-        # If hist_length array does not exist yet, create it
-        if len(nac_hist) == 0:
+        # If nac_hist and tdm_hist array does not exist yet, create it as zeros array
+        if nac_hist.size == 0:
             nac_hist = np.zeros((len(q0),len(q0),nnuc,hist_length))
+            # fill array with current nac
             for it in range(0,hist_length):
                 nac_hist[:,:,:,it] = nac
+        if tdm_hist.size == 0:
+            tdm_hist = np.zeros((len(q0),len(q0),3,hist_length))
+            # fill array with current tdm (if available)
+            if trans_dips is not None:
+                for it in range(0,hist_length):
+                    tdm_hist[:,:,:,it] = trans_dips
         
-        nac, nac_hist = correct_nac_sign(nac,nac_hist)
+        nac, nac_hist, tdm_hist = correct_nac_sign(nac,nac_hist,trans_dips,tdm_hist)
 
     # pops = compute_CF_single(q[0:nel], p[0:nel])
     logger.atoms = atoms
@@ -1703,7 +1710,7 @@ def rk4(initq,initp,tStop,H,restart,amu_mat,U, com_ang):
                 job_results, qc_timings = tc_runner.run_TC_new_geom(qC/ang2bohr)
                 elecE, grad, nac, trans_dips  = format_output_LSCIVR(job_results)
             #correct nac sign
-            nac, nac_hist = correct_nac_sign(nac,nac_hist,trans_dips,tdm_hist)
+            nac, nac_hist, tdm_hist = correct_nac_sign(nac,nac_hist,trans_dips,tdm_hist)
 
         if proceed:
             # Compute energy
@@ -1731,7 +1738,7 @@ def rk4(initq,initp,tStop,H,restart,amu_mat,U, com_ang):
             #   New logging information
             # pops = compute_CF_single(y[0:nel], y[ndof:ndof+nel])
             logger.write(t, total_E=new_energy, elec_E=elecE,  grads=grad, NACs=nac, timings=qc_timings, elec_p=y[0:nel], elec_q=y[ndof:ndof+nel], nuc_p=y[-natom*3:], jobs_data=job_results)
-            write_restart('restart.json', [Y[-1][:ndof], Y[-1][ndof:]], nac_hist, new_energy, t, nel, 'rk4')
+            write_restart('restart.json', [Y[-1][:ndof], Y[-1][ndof:]], nac_hist, tdm_hist, new_energy, t, nel, 'rk4')
 
             if t == tStop:
                 with open(os.path.join(__location__, 'progress.out'), 'a') as f:
@@ -1852,15 +1859,16 @@ def correct_nac_sign(nac, nac_hist, tdm, tdm_hist, hist_length=None, debug=False
     #    return nac, []
     if tdm is not None:
         use_tdm = True
+    else:
+        use_tdm = False
 
     if hist_length is None:
         hist_length = nac_hist.shape[3]
 
-    # Allocate array for extrapolated vector
-    nac_expol = np.empty_like(nac)
-
     polynom_degree = 1 # hardcoded. 1 is usually sufficient. 2 is in principle better but could lead to artificial oscillations
 
+    # Allocate array for extrapolated vector
+    nac_expol = np.empty_like(nac)
     if (polynom_degree == 1):
         # default
         # uses only the last 2 points
@@ -1902,6 +1910,7 @@ def correct_nac_sign(nac, nac_hist, tdm, tdm_hist, hist_length=None, debug=False
                 tdm_dot_product = np.dot(tdm[i,j,:],tdm_expol[i,j,:])
                 if np.sign(nac_dot_product) == np.sign(tdm_dot_product):
                     nac[i,j,:] = np.sign(nac_dot_product)*nac[i,j,:]
+                    tdm[i,j,:] = np.sign(tdm_dot_product)*tdm[i,j,:]
             else:
                 nac[i,j,:] = np.sign(nac_dot_product)*nac[i,j,:]
 
@@ -1915,7 +1924,12 @@ def correct_nac_sign(nac, nac_hist, tdm, tdm_hist, hist_length=None, debug=False
         print("nh[:,:,2]")
         print(nac_hist[:,:,:,2])
 
+    # roll array and update newest entry
     nac_hist = np.roll(nac_hist,-1,axis=3)
+    nac_hist[:,:,:,hist_length-1] = nac
+    if use_tdm:
+        tdm_hist = np.roll(tdm_hist,-1,axis=3)
+        tdm_hist[:,:,:,hist_length-1] = tdm
 
     if debug:
         print("nac_hist nach roll: ")
@@ -1926,12 +1940,10 @@ def correct_nac_sign(nac, nac_hist, tdm, tdm_hist, hist_length=None, debug=False
         print("nh[:,:,2]")
         print("nac_dot[0,1] history post roll:",nac_dot_hist[0,1,0],nac_dot_hist[0,1,1],nac_dot_hist[0,1,2])
         
-    # update newest entry
-    nac_hist[:,:,:,hist_length-1] = nac
    
     if debug: print("nac_dot[0,1] history: post upda",nac_dot_hist[0,1,0],nac_dot_hist[0,1,1],nac_dot_hist[0,1,2])
 
-    return (nac,nac_hist)
+    return (nac,nac_hist,tdm_hist)
 
 
 
