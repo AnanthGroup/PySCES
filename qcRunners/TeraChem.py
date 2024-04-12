@@ -13,6 +13,7 @@ import subprocess
 import time
 import psutil
 import concurrent.futures
+import copy
 
 
 _server_processes = {}
@@ -587,19 +588,21 @@ class TCRunner():
 
         return all_results, times
     
-    def _set_guess(self, job_opts: dict, excited_type: str, all_results: list[dict], state):
-        return _set_guess(job_opts, excited_type, all_results, state)
+    # def _set_guess(self, job_opts: dict, excited_type: str, all_results: list[dict], state):
+    #     return _set_guess(job_opts, excited_type, all_results, state)
 
 def _run_jobs(client: TCPBClient, jobs, geom, excited_type, server_root, client_ID=0):
     times = {}
     all_results = []
     for job_name, job_props in jobs.items():
-        job_opts = job_props['opts']
-        job_type = job_props['type']
-        job_state = job_props['state']
+        job_opts =  copy.deepcopy(job_props['opts'])
+        job_type =  copy.deepcopy(job_props['type'])
+        job_state = copy.deepcopy(job_props['state'])
 
-        _set_guess(job_opts, excited_type, all_results, job_state, server_root)
+        _set_guess(job_opts, excited_type, all_results, job_state, client, server_root)
         print(f"\nRunning {job_name} on client ID {client_ID}")
+        if 'cisrestart' in job_opts:
+            job_opts['cisrestart'] = f"{job_opts['cisrestart']}_{client.host}_{client.port}"
 
         start = time.time()
         # results = client.compute_job_sync(job_type, geom, 'angstrom', **job_opts)
@@ -611,7 +614,7 @@ def _run_jobs(client: TCPBClient, jobs, geom, excited_type, server_root, client_
 
     return all_results, times
 
-def _set_guess(job_opts: dict, excited_type: str, all_results: list[dict], state: int, server_root='.'):
+def _set_guess(job_opts: dict, excited_type: str, all_results: list[dict], state: int, client: TCPBClient, server_root='.'):
     import json
     cas_guess = None
     scf_guess = None
