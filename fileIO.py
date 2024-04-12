@@ -4,7 +4,7 @@ import numpy as np
 import qcRunners.TeraChem as TC
 from copy import deepcopy
 
-def read_restart(file_loc: str='restart.out', ndof: int=0, integrator: str='RK4') -> tuple[np.ndarray, np.ndarray, np.ndarray, float, float]:
+def read_restart(file_loc: str='restart.out', ndof: int=0, integrator: str='RK4') -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, float, float]:
     '''
         Reads in a restart file and extracts it's data
         Parameters
@@ -25,6 +25,8 @@ def read_restart(file_loc: str='restart.out', ndof: int=0, integrator: str='RK4'
                 same as p, but with momenta as it's elements
             nac_hist: list[np.ndarray]
                 history of nonadiabatic coupling vectors
+            tdm_hist: list[np.ndarray]
+                history of transition dipole moments
             energy: float
                 Total energy of the system
             time: float
@@ -49,7 +51,8 @@ def read_restart(file_loc: str='restart.out', ndof: int=0, integrator: str='RK4'
 
                 initial_time = float(ff.readline()) # Total simulation time at the beginning of restart run
                 t = initial_time  
-            return q, p, np.array([]), init_energy, t
+
+            return q, p, np.array([]), np.array([]), init_energy, t
 
         elif extension == '.json':
             #  json data format
@@ -68,14 +71,14 @@ def read_restart(file_loc: str='restart.out', ndof: int=0, integrator: str='RK4'
 
             combo_q = np.array(elec_q + nucl_q)
             combo_p = np.array(elec_p + nucl_p)
-            return combo_q, combo_p, nac_hist, energy, time
+            return combo_q, combo_p, nac_hist, tdm_hist, energy, time
 
         else:
             exit(f'ERROR: File extension "{extension}" is not a valid restart file')
     else:
         exit(f'ERROR: only RK4 is implimented fileIO')
 
-def write_restart(file_loc: str, coord: list | np.ndarray, nac_hist: np.ndarray, energy: float, time: float, n_states: int, integrator='rk4'):
+def write_restart(file_loc: str, coord: list | np.ndarray, nac_hist: np.ndarray, tdm_hist: np.ndarray, energy: float, time: float, n_states: int, integrator='rk4'):
     '''
         Writes a restart file for restarting a simulation from the previous conditions
 
@@ -89,6 +92,8 @@ def write_restart(file_loc: str, coord: list | np.ndarray, nac_hist: np.ndarray,
             the electronic DoF and the remaining are the nuclear DoF.
         nac_hist: ndarray
             Contains the nonadiabatic coupling vectors of previous time steps
+        tdm_hist: ndarray
+            Contains the transition dipole moments of previous time steps
         energy: float
             The last total energy of the the system in a.u.
         time: float
@@ -129,6 +134,7 @@ def write_restart(file_loc: str, coord: list | np.ndarray, nac_hist: np.ndarray,
             data['nucl_q'] = coord[0][n_states:]
             data['nucl_p'] = coord[1][n_states:]
             data['nac_hist'] = np.array(nac_hist).tolist()
+            data['tdm_hist'] = np.array(tdm_hist).tolist()
             with open(file_loc, 'w') as file:
                 json.dump(data, file, indent=2)
     else:
