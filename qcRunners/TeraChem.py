@@ -615,7 +615,15 @@ def _run_jobs(client: TCPBClient, jobs, geom, excited_type, server_root, client_
     return all_results, times
 
 def _set_guess(job_opts: dict, excited_type: str, all_results: list[dict], state: int, client: TCPBClient, server_root='.'):
-    import json
+
+    if len(all_results) != 0:
+        prev_job = all_results[-1]
+        job_dir = os.path.join(server_root, prev_job['job_dir'])
+        if not os.path.isdir(job_dir):
+            print("Warning: no job directory found at")
+            print(job_dir)
+            print("Check that 'tcr_server_root' is properly set in order to use previous job guess orbitals")
+
     cas_guess = None
     scf_guess = None
     if state > 0:
