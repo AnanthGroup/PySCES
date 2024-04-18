@@ -722,9 +722,12 @@ def format_output_LSCIVR(job_data: list[dict]):
             ivr_nacs[i, j] = nacs[(qc_i, qc_idx_j)]
             ivr_nacs[j, i] = nacs[(qc_idx_j, qc_i)]
 
-            ivr_trans_dips[i, j] = trans_dips[(qc_i, qc_idx_j)]
-            ivr_trans_dips[j, i] = trans_dips[(qc_idx_j, qc_i)]
+            # ivr_trans_dips[i, j] = trans_dips[(qc_i, qc_idx_j)]
+            # ivr_trans_dips[j, i] = trans_dips[(qc_idx_j, qc_i)]
+
+            ivr_trans_dips[i, j] = trans_dips.get((qc_i, qc_idx_j), None)
+            ivr_trans_dips[j, i] = trans_dips.get((qc_idx_j, qc_i), None)
     print(" ---------------------------------")
 
-    return ivr_energies, ivr_grads, ivr_nacs, trans_dips
+    return ivr_energies, ivr_grads, ivr_nacs, ivr_trans_dips
     # return energies, grads, nacs

@@ -1742,7 +1742,7 @@ def rk4(initq,initp,tStop,H,restart,amu_mat,U, com_ang):
             # pops = compute_CF_single(y[0:nel], y[ndof:ndof+nel])
             end_time = time.time()
             qc_timings['Wall Time'] = end_time - start_time
-            logger.write(t, total_E=new_energy, elec_E=elecE,  grads=grad, NACs=nac, timings=qc_timings, elec_p=y[0:nel], elec_q=y[ndof:ndof+nel], nuc_p=y[-natom*3:], jobs_data=job_results)
+            logger.write(t, total_E=new_energy, elec_E=elecE,  grads=grad, NACs=nac, timings=qc_timings, elec_q=y[0:nel], elec_p=y[ndof:ndof+nel], nuc_p=y[-natom*3:], jobs_data=job_results)
             write_restart('restart.json', [Y[-1][:ndof], Y[-1][ndof:]], nac_hist, tdm_hist, new_energy, t, nel, 'rk4')
 
             if t == tStop:
