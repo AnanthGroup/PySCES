@@ -308,7 +308,7 @@ class TimingsLogger():
         if self._write_header:
             #   write file header
             # self._file.write(f'{"Frame Time":>12s}')
-            self._file.write(f'{"Total QC":>12s}')
+            self._file.write(f'{"Total_QC":>12s}')
             for key, value in times.items():
                 self._file.write(f'{key:>12s}')
             self._file.write('\n')
