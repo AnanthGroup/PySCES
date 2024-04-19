@@ -1862,10 +1862,20 @@ def correct_nac_sign(nac, nac_hist, tdm, tdm_hist, hist_length=None, debug=False
     # If there is not history, do not correct artificial sign flips
     #if len(nac_hist) == 0:
     #    return nac, []
-    if tdm is not None:
-        use_tdm = True
-    else:
+    # if tdm is not None:
+    #     use_tdm = True
+    # else:
+    #     use_tdm = False
+
+
+    if tdm is None:
         use_tdm = False
+    elif len(tdm) == 0:
+        use_tdm = False
+    else:
+        use_tdm = True
+    print("TDM HIST: ", tdm_hist, hist_length)
+
 
     if hist_length is None:
         hist_length = nac_hist.shape[3]

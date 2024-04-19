@@ -265,11 +265,14 @@ class TCRunner():
     @staticmethod
     def append_output_file(results: dict):
         output_file = os.path.join(results['job_dir'], 'tc.out')
-        # results['tc.out'] = open(results_file).readlines()
-        lines = open(output_file).readlines()
-        for n in range(len(lines)):
-            lines[n] = lines[n][0:-1]
-        results['tc.out'] = lines
+        if os.path.isfile(output_file):
+            # results['tc.out'] = open(results_file).readlines()
+            lines = open(output_file).readlines()
+            for n in range(len(lines)):
+                lines[n] = lines[n][0:-1]
+            results['tc.out'] = lines
+        else:
+            print("Warning: Output file not found at ", output_file)
         return results
     
     @staticmethod

@@ -68,6 +68,7 @@ def read_restart(file_loc: str='restart.out', ndof: int=0, integrator: str='RK4'
             energy = data['energy']
             time = data['time']
             nac_hist = np.array(data.get('nac_hist', np.array([])))
+            tdm_hist = np.array(data.get('tdm_hist', np.array([])))
 
             combo_q = np.array(elec_q + nucl_q)
             combo_p = np.array(elec_p + nucl_p)
