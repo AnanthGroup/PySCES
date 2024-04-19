@@ -1,7 +1,7 @@
 import os
 import json
 import numpy as np
-import qcRunners.TeraChem as TC
+#import qcRunners.TeraChem as TC
 from copy import deepcopy
 
 def read_restart(file_loc: str='restart.out', ndof: int=0, integrator: str='RK4') -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, float, float]:
@@ -214,6 +214,7 @@ class TCJobsLogger():
                 self._file = open(self._file_loc, 'w')
                 
             import yaml
+            import qcRunners.TeraChem as TC
             results = deepcopy(data.jobs_data)
             for res in results:
                 res = TC.TCRunner.append_output_file(res)
