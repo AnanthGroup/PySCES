@@ -79,6 +79,10 @@ tcr_state_options = {
 }
 #   TeraChem runner job specific options
 tcr_spec_job_opts = {}
+#    TeraChem runner job options for first frame only
+tcr_initial_frame_opts = {
+    'n_frames': 0
+}
 #   log TC job results
 tcr_log_jobs = False
 

@@ -177,6 +177,7 @@ class TCRunner():
                  atoms: list,
                  tc_options: dict,
                  tc_spec_job_opts: dict = None,
+                 tc_initial_job_options: dict = None,
                  server_roots = '.',
                  start_new:  bool=False,
                  run_options: dict={}, 
@@ -235,6 +236,12 @@ class TCRunner():
 
         #   job options for specific jobs
         self._spec_job_opts = tc_spec_job_opts
+
+        #   job options for first step only
+        self._initial_job_options = tc_initial_job_options
+
+        self._prev_results = []
+        self._frame_counter = 0
         
 
     @staticmethod
@@ -457,6 +464,13 @@ class TCRunner():
                     base_options[key] = val
         else:
             base_options.update(orig_opts)
+        
+        #   options for the first few steps only
+        if self._initial_job_options is not None:
+            if 'n_frames' not in self._initial_job_options:
+                self._initial_job_options['n_frames'] = 0
+            if self._frame_counter < self._initial_job_options['n_frames']:
+                base_options.update(self._initial_job_options)
 
         #   determine the range of gradients and couplings to compute
         grads = []
@@ -567,7 +581,7 @@ class TCRunner():
         #   if only one client is being used, don't open up threads, easier to debug
         if n_clients == 1:
             start = time.time()
-            results, times = _run_jobs(self._client_list[0], jobs_to_run[0], geom, excited_type, self._server_root_list[0], 0)
+            results, times = _run_jobs(self._client_list[0], jobs_to_run[0], geom, excited_type, self._server_root_list[0], 0, self._prev_results)
             all_results += results
             end = time.time()
 
@@ -577,7 +591,7 @@ class TCRunner():
                 futures = []
                 for i in range(n_clients):
                     jobs = jobs_to_run[i]
-                    args = (self._client_list[i], jobs, geom, excited_type, self._server_root_list[i], i)
+                    args = (self._client_list[i], jobs, geom, excited_type, self._server_root_list[i], i, self._prev_results)
                     future = executor.submit(_run_jobs, *args)
                     futures.append(future)
                 for f in futures:
@@ -586,7 +600,8 @@ class TCRunner():
                     times.update(batch_times)
             end = time.time()
 
-    
+        self._prev_results = all_results
+        self._frame_counter += 1
         self.set_avg_max_times(times)
 
         return all_results, times
@@ -594,7 +609,7 @@ class TCRunner():
     # def _set_guess(self, job_opts: dict, excited_type: str, all_results: list[dict], state):
     #     return _set_guess(job_opts, excited_type, all_results, state)
 
-def _run_jobs(client: TCPBClient, jobs, geom, excited_type, server_root, client_ID=0):
+def _run_jobs(client: TCPBClient, jobs, geom, excited_type, server_root, client_ID=0, prev_results=[]):
     times = {}
     all_results = []
     for job_name, job_props in jobs.items():
@@ -602,7 +617,7 @@ def _run_jobs(client: TCPBClient, jobs, geom, excited_type, server_root, client_
         job_type =  copy.deepcopy(job_props['type'])
         job_state = copy.deepcopy(job_props['state'])
 
-        _set_guess(job_opts, excited_type, all_results, job_state, client, server_root)
+        _set_guess(job_opts, excited_type, all_results + prev_results, job_state, client, server_root)
         print(f"\nRunning {job_name} on client ID {client_ID}")
         if 'cisrestart' in job_opts:
             job_opts['cisrestart'] = f"{job_opts['cisrestart']}_{client.host}_{client.port}"
@@ -617,10 +632,10 @@ def _run_jobs(client: TCPBClient, jobs, geom, excited_type, server_root, client_
 
     return all_results, times
 
-def _set_guess(job_opts: dict, excited_type: str, all_results: list[dict], state: int, client: TCPBClient, server_root='.'):
+def _set_guess(job_opts: dict, excited_type: str, prev_results: list[dict], state: int, client: TCPBClient, server_root='.'):
 
-    if len(all_results) != 0:
-        prev_job = all_results[-1]
+    if len(prev_results) != 0:
+        prev_job = prev_results[-1]
         job_dir = os.path.join(server_root, prev_job['job_dir'])
         if not os.path.isdir(job_dir):
             print("Warning: no job directory found at")
@@ -631,7 +646,7 @@ def _set_guess(job_opts: dict, excited_type: str, all_results: list[dict], state
     scf_guess = None
     if state > 0:
         if excited_type == 'cas':
-            for prev_job in reversed(all_results):
+            for prev_job in reversed(prev_results):
                 if prev_job.get('castarget', 0) >= 1:
                     prev_orb_file = prev_job['orbfile']
                     if prev_orb_file[-6:] == 'casscf':
@@ -639,7 +654,7 @@ def _set_guess(job_opts: dict, excited_type: str, all_results: list[dict], state
                         break
         #   we do not consider cis file because it is not stored in each job dorectory; we set it ourselves
 
-    for prev_job in reversed(all_results):
+    for prev_job in reversed(prev_results):
         if 'orbfile' in prev_job:
             scf_guess = os.path.join(server_root, prev_job['orbfile'])
             #   This is to fix a bug in terachem that still sets the c0.casscf file as the

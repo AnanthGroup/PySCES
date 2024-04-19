@@ -1571,7 +1571,7 @@ def rk4(initq,initp,tStop,H,restart,amu_mat,U, com_ang):
             if not proceed:
                 sys.exit("Electronic structure calculation failed at initial time. Exitting.")
         else:
-            tc_runner = TCRunner(tcr_host, tcr_port, atoms, tcr_job_options, server_roots=tcr_server_root, run_options=tcr_state_options, tc_spec_job_opts=tcr_spec_job_opts, start_new=False)
+            tc_runner = TCRunner(tcr_host, tcr_port, atoms, tcr_job_options, server_roots=tcr_server_root, run_options=tcr_state_options, tc_spec_job_opts=tcr_spec_job_opts, tc_initial_job_options=tcr_initial_frame_opts, start_new=False)
             job_results, qc_timings = tc_runner.run_TC_new_geom(qC/ang2bohr)
             # import pickle
             # pickle.dump([job_results, qc_timings], open('_tmp.pkl', 'wb'))
@@ -1639,7 +1639,7 @@ def rk4(initq,initp,tStop,H,restart,amu_mat,U, com_ang):
             if not proceed:
                 sys.exit("Electronic structure calculation failed at initial time. Exitting.")
         else:
-            tc_runner = TCRunner(tcr_host, tcr_port, atoms, tcr_job_options, server_roots=tcr_server_root, run_options=tcr_state_options, tc_spec_job_opts=tcr_spec_job_opts)
+            tc_runner = TCRunner(tcr_host, tcr_port, atoms, tcr_job_options, server_roots=tcr_server_root, run_options=tcr_state_options, tc_spec_job_opts=tcr_spec_job_opts, tc_initial_job_options=tcr_initial_frame_opts)
             job_results, qc_timings = tc_runner.run_TC_new_geom(qC/ang2bohr)
             # import json
             # json.dump(tc_runner.cleanup_multiple_jobs(job_results), open('tmp.json', 'w'), indent=4)
