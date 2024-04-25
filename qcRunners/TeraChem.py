@@ -743,8 +743,12 @@ def format_output_LSCIVR(job_data: list[dict]):
             # ivr_trans_dips[i, j] = trans_dips[(qc_i, qc_idx_j)]
             # ivr_trans_dips[j, i] = trans_dips[(qc_idx_j, qc_i)]
 
-            ivr_trans_dips[i, j] = trans_dips.get((qc_i, qc_idx_j), None)
-            ivr_trans_dips[j, i] = trans_dips.get((qc_idx_j, qc_i), None)
+            td = trans_dips.get((qc_i, qc_idx_j), None)
+            if td is not None:
+                ivr_trans_dips[i, j] = td
+                ivr_trans_dips[j, i] = td
+            else:
+                ivr_trans_dips = None
     print(" ---------------------------------")
 
     return ivr_energies, ivr_grads, ivr_nacs, ivr_trans_dips

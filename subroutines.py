@@ -1923,11 +1923,14 @@ def correct_nac_sign(nac, nac_hist, tdm, tdm_hist, hist_length=None, debug=False
             # if tdm is not available rely only on nac
             if use_tdm:
                 tdm_dot_product = np.dot(tdm[i,j,:],tdm_expol[i,j,:])
-                if np.sign(nac_dot_product) == np.sign(tdm_dot_product):
-                    nac[i,j,:] = np.sign(nac_dot_product)*nac[i,j,:]
-                    tdm[i,j,:] = np.sign(tdm_dot_product)*tdm[i,j,:]
+                sign_tdm = np.sign(tdm_dot_product)
+                sign_nac = np.sign(nac_dot_product)
+                if sign_tdm == sign_nac:
+                    nac[i,j,:] = sign_tdm*nac[i,j,:]
+                    tdm[i,j,:] = sign_nac*tdm[i,j,:]
             else:
-                nac[i,j,:] = np.sign(nac_dot_product)*nac[i,j,:]
+                sign = np.sign(nac_dot_product)
+                nac[i,j,:] = sign*nac[i,j,:]
 
 
     if debug:

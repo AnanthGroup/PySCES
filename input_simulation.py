@@ -84,7 +84,7 @@ tcr_initial_frame_opts = {
     'n_frames': 0
 }
 #   log TC job results
-tcr_log_jobs = False
+tcr_log_jobs = True
 
 # Terachem files
 fname_tc_xyz      = "tmp/tc_hf/hf.spherical.freq/Geometry.xyz"
