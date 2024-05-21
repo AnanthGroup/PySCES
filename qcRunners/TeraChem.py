@@ -624,7 +624,25 @@ def _run_jobs(client: TCPBClient, jobs, geom, excited_type, server_root, client_
 
         start = time.time()
         # results = client.compute_job_sync(job_type, geom, 'angstrom', **job_opts)
-        results = compute_job_sync(client, job_type, geom, 'angstrom', **job_opts)
+
+        max_tries = 2
+        try_count = 0
+        try_again = True
+        while try_again:
+            try:
+                results = compute_job_sync(client, job_type, geom, 'angstrom', **job_opts)
+                try_again = False
+            except ServerError as e:
+                try_count += 1
+                if try_count == max_tries:
+                    try_again = False
+                    print("Server error recieved; will not try again")
+                    exit()
+                else:
+                    try_again = True
+                    print("Server error recieved; trying to run job one more")
+                    time.sleep(30)
+
         times[job_name] = time.time() - start
         results['run'] = job_type
         results.update(job_opts)

@@ -311,6 +311,8 @@ def sample_nuclear(qcenter, frq):
     if(frq >= 0):
         # position
         Q = np.random.normal(loc=qcenter, scale=np.sqrt(1.0/(2.0*frq*np.tanh(beta*frq/2.0))))
+        # print("WARNING: Ignoring the nuclear coordinate sampling!!!!!!")
+        # Q = qcenter
         # momentum
         P = np.random.normal(loc=pN0, scale=np.sqrt(frq/(2.0*np.tanh(beta*frq/2.0))))
     else:
