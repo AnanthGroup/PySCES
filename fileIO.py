@@ -216,8 +216,6 @@ class TCJobsLogger():
             import yaml
             import qcRunners.TeraChem as TC
             results = deepcopy(data.jobs_data)
-            for res in results:
-                res = TC.TCRunner.append_output_file(res)
             cleaned = TC.TCRunner.cleanup_multiple_jobs(results, 'orb_energies', 'bond_order', 'orb_occupations', 'spins')
 
             out_data = {'time': data.time, 'jobs_data': cleaned}

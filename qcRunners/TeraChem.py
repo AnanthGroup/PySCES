@@ -168,8 +168,6 @@ def compute_job_sync(client: TCPBClient, jobType="energy", geom=None, unitType="
             )
     return client.recv_job_async()
 
-
-
 class TCRunner():
     def __init__(self, 
                  hosts: str, 
@@ -270,8 +268,8 @@ class TCRunner():
         return results
     
     @staticmethod
-    def append_output_file(results: dict):
-        output_file = os.path.join(results['job_dir'], 'tc.out')
+    def append_output_file(results: dict, server_root=''):
+        output_file = os.path.join(server_root, results['job_dir'], 'tc.out')
         if os.path.isfile(output_file):
             # results['tc.out'] = open(results_file).readlines()
             lines = open(output_file).readlines()
@@ -645,6 +643,7 @@ def _run_jobs(client: TCPBClient, jobs, geom, excited_type, server_root, client_
 
         times[job_name] = time.time() - start
         results['run'] = job_type
+        TCRunner.append_output_file(results, server_root)
         results.update(job_opts)
         all_results.append(results)
 
