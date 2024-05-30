@@ -1876,7 +1876,7 @@ def correct_nac_sign(nac, nac_hist, tdm, tdm_hist, hist_length=None, debug=False
         use_tdm = False
     else:
         use_tdm = True
-    print("TDM HIST: ", tdm_hist, hist_length)
+    if debug: print("TDM HIST: ", tdm_hist, hist_length)
 
 
     if hist_length is None:
@@ -1928,8 +1928,8 @@ def correct_nac_sign(nac, nac_hist, tdm, tdm_hist, hist_length=None, debug=False
                 sign_tdm = np.sign(tdm_dot_product)
                 sign_nac = np.sign(nac_dot_product)
                 if sign_tdm == sign_nac:
-                    nac[i,j,:] = sign_tdm*nac[i,j,:]
-                    tdm[i,j,:] = sign_nac*tdm[i,j,:]
+                    nac[i,j,:] = sign_nac*nac[i,j,:]
+                    tdm[i,j,:] = sign_tdm*tdm[i,j,:]
             else:
                 sign = np.sign(nac_dot_product)
                 nac[i,j,:] = sign*nac[i,j,:]
