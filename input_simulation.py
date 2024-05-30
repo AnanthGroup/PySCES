@@ -17,8 +17,6 @@ import input_simulation as opts
 ########## DEFAULT SETTINGS ##########
 
 nel, natom = 3, 6 # number of electronic states, number of atoms in the molecule
-nnuc = 3*natom # number of nuclear DOFs
-ndof = nel + nnuc 
 temp = 300 # simulation temperature in Kelvin
 
 # Initial sampling function ('conventioanl', 'modified', or 'spin' LSC-IVR)
@@ -26,8 +24,8 @@ sampling = 'conventional'
 
 # Centers of initial electronic coherent states (positions q0 & momenta p0)
 # From left, electronic state 1, 2, 3, ...
-q0 = [0.0, 0.0, 0.0] 
-p0 = [0.0, 0.0, 0.0]
+q0 = [0.0]*nel 
+p0 = [0.0]*nel
 
 # Center of initial momentum of nuclear modes (same value for all nuc DOFs)
 # NOTE: the centers of initial position are determined by normal coordinates
@@ -35,6 +33,7 @@ pN0 = 0.0
 
 # ELectronic coherent state width parameters
 # From left, electronic state 1, 2, 3, ...
+# TODO: possibly remove? This isn't used anywhere in subroutines or main
 width = [1.0, 1.0, 1.0]
 
 # Specify an integrator (Choose from 'ABM', 'BSH', and 'RK4')
@@ -44,7 +43,7 @@ timestep, nstep = 1.0, 16700
 # Maximum propagation time (a.u.), BSH step to be tried (a.u.), error tolerance (ratio) (Only relevant for BSH)
 tmax_bsh, Hbsh, tol = 10, 3.0, 0.01 
 # Maximum propagation time (a.u.), one Runge-Kutta step (a.u.) (Only relevant for RK4)
-tmax_rk4, Hrk4 = 20, 5.0 
+tmax_rk4, Hrk4 = 20671, 1.0 
 
 # Scaling factor of normal mode frequencies
 frq_scale = 0.967
@@ -75,7 +74,7 @@ tcr_port = 9876
 tcr_server_root = '.'
 tcr_job_options = {}
 tcr_state_options = {
-    'max_state': nel-1, 'grads': 'all', 'NACs': 'all'
+    'max_state': nel-1, 'grads': 'all'
 }
 #   TeraChem runner job specific options
 tcr_spec_job_opts = {}
@@ -107,6 +106,18 @@ logging_dir = 'logs'
 
 
 def _check_settings():
+    opts.nnuc = 3*opts.natom # number of nuclear DOFs
+    opts.ndof = opts.nel + opts.nnuc 
+    print("Number of atoms: ", opts.natom)
+    print("Number of electronic states: ", opts.nel)
+    print("Total number degrees of freedom: ", opts.ndof)
+
+    if 'q0' not in local:
+        opts.q0 = [0.0]*nel
+    if 'p0' not in local:
+        opts.p0 = [0.0]*nel
+
+
     #   set input format to the same type of QC runner
     if opts.mol_input_format == '':
         opts.mol_input_format = opts.QC_RUNNER
@@ -133,6 +144,7 @@ def _check_settings():
     if opts.QC_RUNNER == 'terachem':
         max_state = opts.tcr_state_options.get('max_state', False)
         grads = opts.tcr_state_options.get('grads', False)
+        
         if max_state and not grads:
             grads = list(range(max_state + 1))
             opts.tcr_state_options['grads'] = grads
@@ -142,6 +154,7 @@ def _check_settings():
         elif grads and max_state:
             if max_state != max(grads):
                 raise ValueError('"max_state" and highest "grads" index in "tcr_run_options" do not match')
+        
         if 'nacs' not in opts.tcr_state_options:
             opts.tcr_state_options['nacs'] = 'all'
 
@@ -171,9 +184,12 @@ try:
     sys.path.append(os.path.abspath(os.path.curdir))
     print("Importing local settings")
     from input_simulation_local import * 
+    import input_simulation_local as local_opts
+    local = local_opts.__dict__
 except Exception as e:
     print("Using default settings: ", e)
     from input_simulation import * 
+
 
 _check_settings()
 _set_seed()
