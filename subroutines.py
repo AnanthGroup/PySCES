@@ -184,30 +184,33 @@ def get_geo_hess_terachem():
 
 def get_geo_hess_gamess():
     # Read Cartesian coordinate of initial geometry
-    amu = []
+    atom_number = []
     xyz_ang = np.zeros(nnuc)
-    amu_mat = np.zeros((nnuc,nnuc))
-    f = open(os.path.join(__location__,'geo_gamess'))
-    f.readline()
+    atom_number_mat = np.zeros((nnuc, nnuc))
+    with open(os.path.join(__location__, 'geo_gamess'), 'r') as f:
+        f.readline()
+        for i in range(natom):
+            x = f.readline().split()
+            atom_number.append(x[1])
+            for j in range(3):
+                xyz_ang[3*i+j] = float(x[2+j])
+
+    # Form a diagonal matrix for atomic masses in amu as well as atomic numbers
+    amu = []
+    with open(os.path.join(__location__, 'mass_gamess'), 'r') as f:
+        for i in range(natom):
+            x = f.readline().split()
+            amu.append(float(x[2]))
+    amu_mat = np.zeros((nnuc, nnuc))
     for i in range(natom):
-        x = f.readline().split()
-        amu.append(float(x[1]))
         for j in range(3):
-            xyz_ang[3*i+j] = float(x[2+j])
-    
-    # Form a diagonal matrix for atomic masses in amu
-    # WARNING by tom: presumably buggy
-    # Afaik: The first column of geo_gamess contains 
-    # the atomic charge, NOT the mass
-    for i in range(natom):
-        for j in range(3):
-            amu_mat[3*i+j,3*i+j] = amu[i] 
-    f.close()
-    
+            amu_mat[3*i+j,3*i+j] = amu[i]
+            atom_number_mat[3*i+j,3*i+j] = atom_number[i]
+
     print(xyz_ang)
     # Read hessian from hess_gamess
     frq, redmas = np.zeros(nnuc), np.zeros(nnuc)
-    L, U = np.zeros((nnuc,nnuc)), np.zeros((nnuc,nnuc))
+    L, U = np.zeros((nnuc, nnuc)), np.zeros((nnuc, nnuc))
     if nnuc%5 == 0:
         nchunk = int(nnuc/5)
     else:
@@ -222,7 +225,7 @@ def get_geo_hess_gamess():
                 ncolumn = int(nnuc%5)
         else:
             ncolumn = 5
-        
+
         for iline in range(nline):
             x = f.readline()
             if iline == 1:
@@ -239,37 +242,26 @@ def get_geo_hess_gamess():
                     for icolumn in range(ncolumn):
                         L[ichunk*5+icolumn, iline-6] = float(x[icolumn])
     f.close()
-    
+
     # Convert frq & red. mass into atomic unit
     for i in range(nnuc):
         frq[i] *= 2.0*pi * clight*100 * autime2s * frq_scale
         redmas[i] *= amu2au
-    
-    # Redefine L so that the row of L, for example L(1,:),  
+
+    # Redefine L so that the row of L, for example L(1,:),
     # is (dx1/dq1, dx1/dq2, ..., dx1/dq3N)
     L = L.T
-    
+
     # Define a unitary matrix U based on L
-    U = np.zeros((nnuc,nnuc))
     U = np.matmul(L.T, amu_mat**0.5)
 
-    # Have to normalize 'U'. 
-    # Although it is supposed to be orthonormal already (otherwise not unitary), 
-    # it is NOT apparently :(
-    # Comment by tom: this is because the masses are read wrongly
-    for i in range(nnuc):
-        norm = sum(U[:,i]**2)
-        new = U[:,i]/np.sqrt(norm)
-        U = np.delete(U, i, axis=1)
-        U = np.insert(U, i, new, axis=1)
-   
     #   compute center of mass and remove from geometry
     amu = np.array(amu)
     xyz_shaped = xyz_ang.reshape((-1, 3))
     com = np.average(xyz_shaped, axis=0, weights=amu)
     xyz_ang = (xyz_shaped - com).flatten()
-    
-    return(amu_mat, xyz_ang, frq, redmas, L, U, com)
+
+    return amu_mat, xyz_ang, frq, redmas, L, U, com, atom_number_mat
 
 
 ##############################################################################
