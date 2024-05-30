@@ -189,6 +189,7 @@ try:
 except Exception as e:
     print("Using default settings: ", e)
     from input_simulation import * 
+    local = {}
 
 
 _check_settings()
