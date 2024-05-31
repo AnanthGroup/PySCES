@@ -30,7 +30,7 @@ print("git tag: "+str(os.popen(command_git_tag).readline()))
 initq, initp = np.zeros(ndof-6), np.zeros(ndof-6)
 
 # Read geo_gamess and hess_gamess
-amu_mat, xyz_ang, frq, redmas, L, U, com_ang = get_geo_hess()
+amu_mat, xyz_ang, frq, redmas, L, U, com_ang, AN_mat = get_geo_hess()
 
 if restart == 0: # If this is not a restart run
     # Rotate Cartesian coordinate into normal coordinate (normal_geo is in A.U.)
@@ -59,7 +59,7 @@ elif integrator == 'BSH':
     compute_CF(time_array, coord)
 
 elif integrator == 'RK4':
-    time_array, coord, initial_time = rk4(initq,initp,tmax_rk4,Hrk4,restart,amu_mat,U, com_ang)
+    time_array, coord, initial_time = rk4(initq, initp, tmax_rk4, Hrk4, restart, amu_mat, U, com_ang, AN_mat)
     compute_CF(time_array, coord)
 
 

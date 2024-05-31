@@ -53,13 +53,13 @@ beta     = 1.0/(temp * k2autmp) # inverse temperature in atomic unit
 ####################################################
 def get_geo_hess():
     if mol_input_format == "terachem":
-        amu_mat, xyz_ang, frq, redmas, L, U, com_ang = get_geo_hess_terachem()
+        amu_mat, xyz_ang, frq, redmas, L, U, com_ang, atom_number_mat = get_geo_hess_terachem()
     elif mol_input_format == "gamess":
-        amu_mat, xyz_ang, frq, redmas, L, U, com_ang = get_geo_hess_gamess()
+        amu_mat, xyz_ang, frq, redmas, L, U, com_ang, atom_number_mat = get_geo_hess_gamess()
     else:
         print("Error: get_geo_hess ran in undefined 'mol_input_format' case")        
         exit()
-    return(amu_mat, xyz_ang, frq, redmas, L, U, com_ang)
+    return(amu_mat, xyz_ang, frq, redmas, L, U, com_ang, atom_number_mat)
 
 def get_geo_hess_terachem():
     ##--------------------------------------------------
@@ -178,8 +178,9 @@ def get_geo_hess_terachem():
     xyz_shaped = xyz_ang.reshape((-1, 3))
     com = np.average(xyz_shaped, axis=0, weights=amu)
     xyz_ang = (xyz_shaped - com).flatten()
-    
-    return(amu_mat, xyz_ang, frq, redmas, L, U, com)
+
+    atom_number_mat = [] # Returns an empty array. Not necessary for terachem option
+    return(amu_mat, xyz_ang, frq, redmas, L, U, com, atom_number_mat)
 
 
 def get_geo_hess_gamess():
@@ -485,7 +486,7 @@ def update_geo_gamess(atom_symbols, amu_mat, qCart):
 ########################################################
 ### Write GAMESS CASSCF NACME calculation input file ###
 ########################################################
-def write_gms_input(input_name, opt, atoms, amu_mat, cart_ang):
+def write_gms_input(input_name, opt, atoms, AN_mat, cart_ang):
     input_file = input_name + '.inp'
     if os.path.exists(os.path.join(__location__, input_file)) == True:
         os.system('mv ' + input_file + ' ' + input_name + '_old.inp')
@@ -512,7 +513,7 @@ def write_gms_input(input_name, opt, atoms, amu_mat, cart_ang):
     f.write('comment comment comment \n')
     f.write(opt['sym']+' \n')
     for i in range(natom):
-        f.write('{:<3s}{:<6.1f}{:>12.5f}{:>12.5f}{:>12.5f}\n'.format(atoms[i],amu_mat[3*i,3*i],cart_ang[3*i+0],cart_ang[3*i+1],cart_ang[3*i+2]))
+        f.write('{:<3s}{:<6.1f}{:>12.5f}{:>12.5f}{:>12.5f}\n'.format(atoms[i], AN_mat[3*i,3*i], cart_ang[3*i+0], cart_ang[3*i+1], cart_ang[3*i+2]))
     f.write(' $end \n')
     
     # Read and write guess orbitals 
@@ -559,12 +560,12 @@ def write_subm_script(input_name):
 #####################################
 ### Call GAMESS NACME calculation ###
 #####################################
-def run_gms_cas(input_name, opt, atoms, amu_mat, qCart, submit_script_loc=None):
+def run_gms_cas(input_name, opt, atoms, AN_mat, qCart, submit_script_loc=None):
     # Convert Bohr into Angstrom
     qCart_ang = qCart/ang2bohr
     
     # Write an input file
-    input_file = write_gms_input(input_name, opt, atoms, amu_mat, qCart_ang)
+    input_file = write_gms_input(input_name, opt, atoms, AN_mat, qCart_ang)
     
     if submit_script_loc is None:
         # Write a submission script
@@ -1501,7 +1502,7 @@ def scipy_rk4(elecE, grad, nac, yvar, dt, au_mas):
 '''
 Main driver of RK4 and electronic structure 
 '''
-def rk4(initq,initp,tStop,H,restart,amu_mat,U, com_ang):
+def rk4(initq, initp, tStop, H, restart, amu_mat, U, com_ang, AN_mat):
     logger = SimulationLogger(nel, dir=logging_dir, save_jobs=tcr_log_jobs)
 
     if QC_RUNNER == 'terachem':
@@ -1552,10 +1553,10 @@ def rk4(initq,initp,tStop,H,restart,amu_mat,U, com_ang):
 
         if QC_RUNNER == 'gamess':
             # Update geo_gamess with qC
-            update_geo_gamess(atoms, amu_mat, qC)
+            update_geo_gamess(atoms, AN_mat, qC)
         
             # Call GAMESS to compute E, dE/dR, and NAC
-            run_gms_cas(input_name, opt, atoms, amu_mat, qC, sub_script)
+            run_gms_cas(input_name, opt, atoms, AN_mat, qC, sub_script)
             elecE, grad, nac, flag_grad, flag_nac = read_gms_out(input_name)
             if any([el == 1  for el in flag_grad]) or flag_nac == 1:
                 proceed = False
@@ -1623,7 +1624,7 @@ def rk4(initq,initp,tStop,H,restart,amu_mat,U, com_ang):
 
         if QC_RUNNER == 'gamess':
             # Call GAMESS to compute E, dE/dR, and NAC
-            run_gms_cas(input_name, opt, atoms, amu_mat, qC, sub_script)
+            run_gms_cas(input_name, opt, atoms, AN_mat, qC, sub_script)
             elecE, grad, nac, flag_grad, flag_nac = read_gms_out(input_name)
             if any([el == 1  for el in flag_grad]) or flag_nac == 1:
                 proceed = False
@@ -1695,8 +1696,8 @@ def rk4(initq,initp,tStop,H,restart,amu_mat,U, com_ang):
             qC = y[nel:ndof]
 
             if QC_RUNNER == 'gamess':
-                update_geo_gamess(atoms, amu_mat, qC)
-                run_gms_cas(input_name, opt, atoms, amu_mat, qC, sub_script)
+                update_geo_gamess(atoms, AN_mat, qC)
+                run_gms_cas(input_name, opt, atoms, AN_mat, qC, sub_script)
                 elecE, grad, nac, flag_grad, flag_nac = read_gms_out(input_name)
                 if any([el == 1 for el in flag_grad]) or flag_nac == 1:
                     proceed = False
