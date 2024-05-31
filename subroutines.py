@@ -1265,7 +1265,7 @@ def integrate(F, xvar, yvar, xStop, tol, input_name, atoms, amu_mat, qC):
 # H     = increment of x at which results are stored
 # F     = user-supplied function that returns the array F(x,y)={y'[0],y'[1],...,y'[n-1]}
 # =============================================================================
-def BulStoer(initq,initp,xStop,H,tol,restart,amu_mat,U, com_ang):
+def BulStoer(initq, initp, xStop, H, tol, restart, amu_mat, U, com_ang, AN_mat):
    proceed      = True
    input_name   = 'cas'
    au_mas = np.diag(amu_mat) * amu2au # masses of atoms in atomic unit (vector)
@@ -1296,10 +1296,10 @@ def BulStoer(initq,initp,xStop,H,tol,restart,amu_mat,U, com_ang):
       record_nuc_geo(restart, x, atoms, qC, com_ang)
 
       # Update geo_gamess with qC
-      update_geo_gamess(atoms, amu_mat, qC)
+      update_geo_gamess(atoms, AN_mat, qC)
   
       # Call GAMESS to compute E, dE/dR, and NAC
-      run_gms_cas(input_name, opt, atoms, amu_mat, qC)
+      run_gms_cas(input_name, opt, atoms, AN_mat, qC)
       elecE, grad, nac, flag_grad, flag_nac = read_gms_out(input_name)
       if any([el == 1  for el in flag_grad]) or flag_nac == 1:
          proceed = False
@@ -1365,7 +1365,7 @@ def BulStoer(initq,initp,xStop,H,tol,restart,amu_mat,U, com_ang):
          with open(os.path.join(__location__, 'progress.out'), 'a') as f:
             f.write('\n')
             f.write('Starting modified midpoint + Richardson extrapolation routine.\n')
-         y  = integrate(F,x,y,x+H,tol,input_name,atoms,amu_mat,qC) # midpoint method
+         y  = integrate(F, x, y, x+H, tol, input_name, atoms, amu_mat, qC) # midpoint method
          x += H
          X.append(x)
          Y.append(y)
@@ -1375,8 +1375,8 @@ def BulStoer(initq,initp,xStop,H,tol,restart,amu_mat,U, com_ang):
             f.write('\n')
             f.write('Midpoint+Richardson step has been accepted.\n')
          qC = y[nel:ndof]
-         update_geo_gamess(atoms, amu_mat, qC)
-         run_gms_cas(input_name, opt, atoms, amu_mat, qC)
+         update_geo_gamess(atoms, AN_mat, qC)
+         run_gms_cas(input_name, opt, atoms, AN_mat, qC)
          elecE, grad, nac, flag_grad, flag_nac = read_gms_out(input_name)
          if any([el == 1 for el in flag_grad]) or flag_nac == 1:
             proceed = False

@@ -55,7 +55,7 @@ if integrator == 'ABM':
             compute_CF(time_array, coord)
 
 elif integrator == 'BSH':
-    time_array, coord, initial_time = BulStoer(initq,initp,tmax_bsh,Hbsh,tol,restart,amu_mat,U, com_ang)
+    time_array, coord, initial_time = BulStoer(initq,initp,tmax_bsh,Hbsh,tol,restart,amu_mat,U, com_ang, AN_mat)
     compute_CF(time_array, coord)
 
 elif integrator == 'RK4':
