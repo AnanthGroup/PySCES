@@ -795,7 +795,7 @@ def get_energy(au_mas, q, p, elecE):
 ### MASS-WEIGHTED.  
 #############################################################################
 '''Last edited by by Ken Miyazaki on 05/10/2023'''
-def ME_ABM(restart, initq, initp, amu_mat, U, com_ang):
+def ME_ABM(restart, initq, initp, amu_mat, U, com_ang, AN_mat):
     force = np.zeros((2, ndof, 5))
     der   = np.zeros((2, ndof))
     coord = np.zeros((2, ndof, nstep+1))
@@ -859,10 +859,10 @@ def ME_ABM(restart, initq, initp, amu_mat, U, com_ang):
         au_mas = np.diag(amu_mat) * amu2au # masses of atoms in atomic unit
         
         # Update geo_gamess with qC
-        update_geo_gamess(atoms, amu_mat, qC)
+        update_geo_gamess(atoms, AN_mat, qC)
         
         # Call GAMESS to compute E, dE/dR, and NAC
-        run_gms_cas(input_name, opt, atoms, amu_mat, qC)
+        run_gms_cas(input_name, opt, atoms, AN_mat, qC)
 
         # Read GAMESS out file
         elecE, grad, nac, flag_grad, flag_nac = read_gms_out(input_name)
@@ -901,10 +901,10 @@ def ME_ABM(restart, initq, initp, amu_mat, U, com_ang):
                 qC = qpred[nel:]
                 
                 # Update geo_gamess with qC
-                update_geo_gamess(atoms, amu_mat, qC)
+                update_geo_gamess(atoms, AN_mat, qC)
                 
                 # Call GAMESS to compute E, dE/dR, and NAC
-                run_gms_cas(input_name, opt, atoms, amu_mat, qC)
+                run_gms_cas(input_name, opt, atoms, AN_mat, qC)
                 
                 # Read GAMESS out file
                 elecE, grad, nac, flag_grad, flag_nac = read_gms_out(input_name)
@@ -932,10 +932,10 @@ def ME_ABM(restart, initq, initp, amu_mat, U, com_ang):
                 q, p = qcorr, pcorr
                 
                 # Update geo_gamess with qC
-                update_geo_gamess(atoms, amu_mat, qC)
+                update_geo_gamess(atoms, AN_mat, qC)
                 
                 # Call GAMESS to compute E, dE/dR, and NAC
-                run_gms_cas(input_name, opt, atoms, amu_mat, qC)
+                run_gms_cas(input_name, opt, atoms, AN_mat, qC)
                 
                 # Read GAMESS out file
                 elecE, grad, nac, flag_grad, flag_nac = read_gms_out(input_name)
@@ -983,10 +983,10 @@ def ME_ABM(restart, initq, initp, amu_mat, U, com_ang):
                 qC = qpred[nel:]
                 
                 # Update geo_gamess with qC
-                update_geo_gamess(atoms, amu_mat, qC)
+                update_geo_gamess(atoms, AN_mat, qC)
                 
                 # Call GAMESS to compute E, dE/dR, and NAC
-                run_gms_cas(input_name, opt, atoms, amu_mat, qC)
+                run_gms_cas(input_name, opt, atoms, AN_mat, qC)
                 
                 # Read GAMESS out file
                 elecE, grad, nac, flag_grad, flag_nac = read_gms_out(input_name)
@@ -1011,10 +1011,10 @@ def ME_ABM(restart, initq, initp, amu_mat, U, com_ang):
                 qC, pC = qcorr[nel:], pcorr[nel:]
                 
                 # Update geo_gamess with qC
-                update_geo_gamess(atoms, amu_mat, qC)
+                update_geo_gamess(atoms, AN_mat, qC)
                 
                 # Call GAMESS to compute E, dE/dR, and NAC
-                run_gms_cas(input_name, opt, atoms, amu_mat, qC)
+                run_gms_cas(input_name, opt, atoms, AN_mat, qC)
                 
                 # Read GAMESS out file
                 elecE, grad, nac, flag_grad, flag_nac = read_gms_out(input_name)

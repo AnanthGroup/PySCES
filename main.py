@@ -49,7 +49,7 @@ if restart == 0: # If this is not a restart run
 
 # Start the propagation routine
 if integrator == 'ABM':
-    time_array,coord,flag_energy,flag_grad,flag_nac,flag_orb,initial_time = ME_ABM(restart, initq, initp, amu_mat, U, com_ang)
+    time_array,coord,flag_energy,flag_grad,flag_nac,flag_orb,initial_time = ME_ABM(restart, initq, initp, amu_mat, U, com_ang, AN_mat)
     if flag_energy == 0: # If energy is conserved,
         if all([el == 0 for el in flag_grad]) and flag_nac == 0 and flag_orb == 0: # If no error is raised by the CAS calculations
             compute_CF(time_array, coord)
