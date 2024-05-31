@@ -710,15 +710,16 @@ def format_output_LSCIVR(job_data: list[dict]):
             nacs[(state_1, state_2)] = np.array(job['nacme']).flatten()
             nacs[(state_2, state_1)] = - nacs[state_1, state_2]
 
-            x = len(job['cis_transition_dipoles'])
-            N = int((1 + int(np.sqrt(1+8*x)))/2) - 1
-            count = 0
-            for i in range(0, N):
-                for j in range(i+1, N+1):
-                    if (i, j) == (state_1, state_2):
-                        trans_dips[(state_1, state_2)] = job['cis_transition_dipoles'][count]
-                        trans_dips[(state_2, state_1)] = job['cis_transition_dipoles'][count]
-                    count += 1
+            if 'cis_transition_dipoles' in job:
+                x = len(job['cis_transition_dipoles'])
+                N = int((1 + int(np.sqrt(1+8*x)))/2) - 1
+                count = 0
+                for i in range(0, N):
+                    for j in range(i+1, N+1):
+                        if (i, j) == (state_1, state_2):
+                            trans_dips[(state_1, state_2)] = job['cis_transition_dipoles'][count]
+                            trans_dips[(state_2, state_1)] = job['cis_transition_dipoles'][count]
+                        count += 1
 
 
     #   make sure there are the correct number of gradients and NACs

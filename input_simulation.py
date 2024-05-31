@@ -17,6 +17,8 @@ import input_simulation as opts
 ########## DEFAULT SETTINGS ##########
 
 nel, natom = 3, 6 # number of electronic states, number of atoms in the molecule
+nnuc = natom*3
+ndof = nnuc + nel
 temp = 300 # simulation temperature in Kelvin
 
 # Initial sampling function ('conventioanl', 'modified', or 'spin' LSC-IVR)
