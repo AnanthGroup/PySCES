@@ -1,5 +1,12 @@
 debug/
 __pycache__
 .vscode
-tests/
+#examples/
 *.egg-info
+
+#   examples
+examples/*/logs*
+examples/*/cas.*
+examples/*/progress.out
+examples/*/__pycache__
+examples/*/restart.*
