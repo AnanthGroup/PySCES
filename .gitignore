@@ -3,6 +3,7 @@ __pycache__
 .vscode
 #examples/
 *.egg-info
+*test_
 
 #   examples
 examples/*/logs*
