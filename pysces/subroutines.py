@@ -208,7 +208,6 @@ def get_geo_hess_gamess():
             amu_mat[3*i+j,3*i+j] = amu[i]
             atom_number_mat[3*i+j,3*i+j] = atom_number[i]
 
-    print(xyz_ang)
     # Read hessian from hess_gamess
     frq, redmas = np.zeros(nnuc), np.zeros(nnuc)
     L, U = np.zeros((nnuc, nnuc)), np.zeros((nnuc, nnuc))
@@ -586,7 +585,7 @@ def run_gms_cas(input_name, opt, atoms, AN_mat, qCart, submit_script_loc=None):
         output_file = 'cas.out'
         script_loc = os.path.abspath(submit_script_loc)
         sp.call(f'{script_loc} {input_file} {output_file}'.split())
-    print("DONE RUNNING CAS")
+    print("Done running GAMESS CAS-SCF Calculations")
 
     return()
 
@@ -1687,6 +1686,8 @@ def rk4(initq, initp, tStop, H, restart, amu_mat, U, com_ang, AN_mat):
             t += H
             X.append(t)
             Y.append(y)
+            
+            print(f"##### Performing MD Step Time: {t:8.2f} a.u. ##### ")
     
             # ES calculation at new y
             with open(os.path.join(__location__, 'progress.out'), 'a') as f:
