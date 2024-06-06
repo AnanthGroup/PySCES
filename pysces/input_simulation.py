@@ -22,21 +22,11 @@ ndof = nnuc + nel
 temp = 300 # simulation temperature in Kelvin
 
 # Initial sampling function ('conventioanl', 'modified', or 'spin' LSC-IVR)
-sampling = 'conventional' 
-
-# Centers of initial electronic coherent states (positions q0 & momenta p0)
-# From left, electronic state 1, 2, 3, ...
-q0 = [0.0]*nel 
-p0 = [0.0]*nel
+sampling = 'conventional'
 
 # Center of initial momentum of nuclear modes (same value for all nuc DOFs)
 # NOTE: the centers of initial position are determined by normal coordinates
 pN0 = 0.0
-
-# ELectronic coherent state width parameters
-# From left, electronic state 1, 2, 3, ...
-# TODO: possibly remove? This isn't used anywhere in subroutines or main
-width = [1.0, 1.0, 1.0]
 
 # Specify an integrator (Choose from 'ABM', 'BSH', and 'RK4')
 integrator = 'RK4'
@@ -48,7 +38,7 @@ tmax_bsh, Hbsh, tol = 10, 3.0, 0.01
 tmax_rk4, Hrk4 = 20671, 1.0 
 
 # Scaling factor of normal mode frequencies
-frq_scale = 0.967
+frq_scale = 1.0
 
 # Number of CPUs and nodes in each internal NACME calculation
 ncpu, nnode = 1, 1

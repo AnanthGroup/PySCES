@@ -337,8 +337,8 @@ def sample_conventionalLSC(qN0, frq):
             x = np.sqrt(1.0/2.0) * np.cos(2.0*pi*theta)
             p = np.sqrt(1.0/2.0) * np.sin(2.0*pi*theta)
 
-        coord[0,i] = x + q0[i]
-        coord[1,i] = p + p0[i]
+        coord[0,i] = x
+        coord[1,i] = p
     
     # Nuclear phase space variables
     for i in range(nnuc-6):
@@ -367,8 +367,8 @@ def sample_modifiedLSC(qN0, frq):
             x = np.cos(2.0*pi*theta)
             p = np.sin(2.0*pi*theta)
 
-        coord[0,i] = x + q0[i]
-        coord[1,i] = p + p0[i]
+        coord[0,i] = x
+        coord[1,i] = p
     
     # Nuclear phase space variables
     for i in range(nnuc-6):
@@ -389,8 +389,8 @@ def sample_spinLSC(qN0, frq):
             x = np.sqrt(2.0/3.0) * np.cos(2.0*pi*theta)
             p = np.sqrt(2.0/3.0) * np.sin(2.0*pi*theta)
 
-        coord[0,i] = x + q0[i]
-        coord[1,i] = p + p0[i]
+        coord[0,i] = x
+        coord[1,i] = p
     
     # Nuclear phase space variables
     for i in range(nnuc-6):
@@ -1542,8 +1542,8 @@ def rk4(initq, initp, tStop, H, restart, amu_mat, U, com_ang, AN_mat):
         y = np.concatenate((q, p))
 
         # Arrays for history of nonadiabatic coupling vectors (nac) and transition dipole moments (tdm)
-        nac_hist = np.zeros((len(q0),len(q0),nnuc,hist_length)) # history of nonadiabatic coupling vectors for extrapolation in nac sign flip correction
-        tdm_hist = np.zeros((len(q0),len(q0),3,hist_length)) # history of transition dipole moments for extrapolation in nac sign flip correction
+        nac_hist = np.zeros((nel,nel,nnuc,hist_length)) # history of nonadiabatic coupling vectors for extrapolation in nac sign flip correction
+        tdm_hist = np.zeros((nel,nel,3,hist_length)) # history of transition dipole moments for extrapolation in nac sign flip correction
 
         # Get atom labels
         atoms = get_atom_label()
@@ -1642,12 +1642,12 @@ def rk4(initq, initp, tStop, H, restart, amu_mat, U, com_ang, AN_mat):
         
         # If nac_hist and tdm_hist array does not exist yet, create it as zeros array
         if nac_hist.size == 0:
-            nac_hist = np.zeros((len(q0),len(q0),nnuc,hist_length))
+            nac_hist = np.zeros((nel,nel,nnuc,hist_length))
             # fill array with current nac
             for it in range(0,hist_length):
                 nac_hist[:,:,:,it] = nac
         if tdm_hist.size == 0:
-            tdm_hist = np.zeros((len(q0),len(q0),3,hist_length))
+            tdm_hist = np.zeros((nel,nel,3,hist_length))
             # fill array with current tdm (if available)
             if trans_dips is not None:
                 for it in range(0,hist_length):
@@ -1887,8 +1887,8 @@ def correct_nac_sign(nac, nac_hist, tdm, tdm_hist, hist_length=None, debug=False
         # for scientific purposes only
         # uses the whole history
         timesteps = np.arange(hist_length)
-        for i in range(0,len(q0)):
-            for j in range(0,len(q0)):
+        for i in range(0, nel):
+            for j in range(0, nel):
                 for ix in range(0,nac.shape[2]):
                     coefficients = np.polyfit(timesteps,nac_hist[i,j,ix,:], polynom_degree)
                     nac_expol[i,j,ix] = np.polyval(coefficients,hist_length)
@@ -1900,8 +1900,8 @@ def correct_nac_sign(nac, nac_hist, tdm, tdm_hist, hist_length=None, debug=False
             tdm_expol = 2.0*tdm_hist[:,:,:,-1] - 1.0*tdm_hist[:,:,:,-2]
         else:
             timesteps = np.arange(hist_length)
-            for i in range(0,len(q0)):
-                for j in range(0,len(q0)):
+            for i in range(0, nel):
+                for j in range(0, nel):
                     for ix in range(0,3):
                         coefficients = np.polyfit(timesteps,tdm_hist[i,j,ix,:], polynom_degree)
                         tdm_expol[i,j,ix] = np.polyval(coefficients,hist_length)
@@ -1911,8 +1911,8 @@ def correct_nac_sign(nac, nac_hist, tdm, tdm_hist, hist_length=None, debug=False
     # (means an angle with more than 90 degree) as the estimation
     # if the angle is < 90 degree -> np.sign(dot_product)== 1 -> no flip
     # if the angle is > 90 degree -> np.sign(dot_product)==-1 -> flip
-    for i in range(0,len(q0)):
-        for j in range(0,len(q0)):
+    for i in range(0, nel):
+        for j in range(0, nel):
             nac_dot_product = np.dot(nac[i,j,:],nac_expol[i,j,:])
             # if tdm is available: check if it also flips sign. if not, no correction
             # if tdm is not available rely only on nac
