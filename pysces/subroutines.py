@@ -314,8 +314,8 @@ def sample_nuclear(qcenter, frq):
         P = pN0
     return(Q, P)
 
-'''Conventional LSC-IVR'''
-def sample_conventionalLSC(qN0, frq):
+'''LSC-IVR with Wigner population estimator'''
+def sample_wignerLSC(qN0, frq):
     coord = np.zeros((2, ndof-6)) 
     
     # Sampling radius depends on the number of electronic states
@@ -355,8 +355,8 @@ def sample_conventionalLSC(qN0, frq):
     return(coord)
 
 
-'''Modified LSC-IVR'''
-def sample_modifiedLSC(qN0, frq):
+'''LSC-IVR with semiclassical population estimator'''
+def sample_scLSC(qN0, frq):
     coord = np.zeros((2, ndof-6)) 
     # Electronic phase space variables
     for i in range(nel):

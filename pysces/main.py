@@ -35,10 +35,10 @@ def main():
         normal_geo = get_normal_geo(U, xyz_ang, amu_mat)
 
         # Sample initial phase space configuration
-        if sampling == 'conventional':
-            coord = sample_conventionalLSC(normal_geo, frq)
-        elif sampling == 'modified':
-            coord = sample_modifiedLSC(normal_geo, frq)
+        if sampling == 'wigner':
+            coord = sample_wignerLSC(normal_geo, frq)
+        elif sampling == 'sc':
+            coord = sample_scLSC(normal_geo, frq)
         elif sampling == 'spin':
             coord = sample_spinLSC(normal_geo, frq)
         
@@ -47,7 +47,7 @@ def main():
 
     # Start the propagation routine
     if integrator == 'ABM':
-        time_array,coord,flag_energy,flag_grad,flag_nac,flag_orb,initial_time = ME_ABM(restart, initq, initp, amu_mat, U, com_ang, AN_mat)
+        time_array, coord, flag_energy, flag_grad, flag_nac, flag_orb, initial_time = ME_ABM(restart, initq, initp, amu_mat, U, com_ang, AN_mat)
         if flag_energy == 0: # If energy is conserved,
             if all([el == 0 for el in flag_grad]) and flag_nac == 0 and flag_orb == 0: # If no error is raised by the CAS calculations
                 compute_CF(time_array, coord)

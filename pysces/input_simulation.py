@@ -21,8 +21,8 @@ from fileIO import print_ascii_art
 nel, natom = 3, 6 # number of electronic states, number of atoms in the molecule
 temp = 300 # simulation temperature in Kelvin
 
-# Initial sampling function ('conventioanl', 'modified', or 'spin' LSC-IVR)
-sampling = 'conventional'
+# Initial sampling function ('wigner', 'sc', or 'spin' LSC-IVR)
+sampling = 'wigner'
 
 # Center of initial momentum of nuclear modes (same value for all nuc DOFs)
 # NOTE: the centers of initial position are determined by normal coordinates
