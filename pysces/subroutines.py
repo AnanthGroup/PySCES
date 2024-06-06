@@ -316,17 +316,16 @@ def sample_nuclear(qcenter, frq):
 
 '''LSC-IVR with Wigner population estimator'''
 def sample_wignerLSC(qN0, frq):
-    coord = np.zeros((2, ndof-6)) 
-    
-    # Sampling radius depends on the number of electronic states
-    if nel == 2:
-        r = 1.39758
-    elif nel == 3:
-        r = 1.55892
-    elif nel == 4:
-        r = 1.6726
-    elif nel == 5:
-        r = 1.76729
+    coord = np.zeros((2, ndof-6))
+
+    # Determine the sampling radius of initially occupied electronic state
+    from scipy.optimize import fsolve
+    from functools import partial
+    def eqn(F, r):
+        return 2 ** (F + 1) * (r - 0.5) * np.exp(-(r + 0.5 * (F - 1))) - 1
+
+    root = fsolve(partial(eqn, nel), 2)
+    r = root[0] ** 0.5
         
     # Electronic phase space variables
     for i in range(nel):
@@ -338,12 +337,12 @@ def sample_wignerLSC(qN0, frq):
             x = np.sqrt(1.0/2.0) * np.cos(2.0*pi*theta)
             p = np.sqrt(1.0/2.0) * np.sin(2.0*pi*theta)
 
-        coord[0,i] = x
-        coord[1,i] = p
+        coord[0, i] = x
+        coord[1, i] = p
     
     # Nuclear phase space variables
     for i in range(nnuc-6):
-        coord[0,i+nel],coord[1,i+nel] = sample_nuclear(qN0[i], frq[i+6])
+        coord[0, i+nel], coord[1, i+nel] = sample_nuclear(qN0[i], frq[i+6])
 
 #    # Nuclear phase space variables
 #    for i in range(nnuc-6):
@@ -373,7 +372,7 @@ def sample_scLSC(qN0, frq):
     
     # Nuclear phase space variables
     for i in range(nnuc-6):
-        coord[0,i+nel],coord[1,i+nel] = sample_nuclear(qN0[i], frq[i+6])
+        coord[0, i+nel], coord[1, i+nel] = sample_nuclear(qN0[i], frq[i+6])
     
     return(coord)
 
@@ -390,12 +389,12 @@ def sample_spinLSC(qN0, frq):
             x = np.sqrt(2.0/3.0) * np.cos(2.0*pi*theta)
             p = np.sqrt(2.0/3.0) * np.sin(2.0*pi*theta)
 
-        coord[0,i] = x
-        coord[1,i] = p
+        coord[0, i] = x
+        coord[1, i] = p
     
     # Nuclear phase space variables
     for i in range(nnuc-6):
-        coord[0,i+nel],coord[1,i+nel] = sample_nuclear(qN0[i], frq[i+6])
+        coord[0, i+nel], coord[1, i+nel] = sample_nuclear(qN0[i], frq[i+6])
     
     return(coord)
 
