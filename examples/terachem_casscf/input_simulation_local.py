@@ -1,7 +1,7 @@
-#   number of atoms in the molecule
-natom = 6
-nel = 3 # number of electronic states
-temp = 300 # simulation temperature in Kelvin
+
+natom = 6       # number of atoms in the molecule
+nel = 3         # number of electronic states
+temp = 300      # simulation temperature in Kelvin
 
 # Maximum propagation time (a.u.), one Runge-Kutta step (a.u.) (Only relevant for RK4)
 tmax_rk4, Hrk4 = 5, 1.0

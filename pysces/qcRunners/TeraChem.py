@@ -258,8 +258,7 @@ class TCRunner():
                 total_wait += time_btw_check
                 if total_wait >= max_wait:
                     raise TimeoutError('Maximum time allotted for checking for TeraChem server')
-        print('Terachem Server is available')
-        print(avail)
+        print('Terachem Server is available and connected')
 
     @staticmethod
     def append_results_file(results: dict):
@@ -741,7 +740,7 @@ def format_output_LSCIVR(job_data: list[dict]):
     ivr_nacs  = np.zeros((n_states, n_states, n_atoms*3))
     ivr_trans_dips = np.zeros((n_states, n_states, 3))
     print(" --------------------------------")
-    print(" LSC-IVR to quantum chemistry")
+    print(" LSC-IVR to TeraChem")
     print(" state number mapping")
     print(" ---------------------------------")
     print(" LSC-IVR -->   QC  ")

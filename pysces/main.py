@@ -20,11 +20,6 @@ __location__ = ''
 
 from input_simulation import * 
 
-# Print git commit
-command_git_tag="git -C "+str(os.path.dirname(os.path.realpath(__file__)))+" describe --tags"
-print("git tag: "+str(os.popen(command_git_tag).readline()))
-
-
 def main():
     ###################################
     ### Propagation of a trajectory ###
@@ -64,6 +59,8 @@ def main():
         time_array, coord, initial_time = rk4(initq, initp, tmax_rk4, Hrk4, restart, amu_mat, U, com_ang, AN_mat)
         compute_CF(time_array, coord)
 
+
+    print("\n\nSimulation completed successfully")
 
     '''End of the program'''
 

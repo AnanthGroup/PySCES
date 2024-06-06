@@ -12,6 +12,8 @@ Repository of simulation variables
 import sys, os
 import shutil
 import input_simulation as opts
+from subprocess import Popen
+from fileIO import print_ascii_art
 
 
 ########## DEFAULT SETTINGS ##########
@@ -110,9 +112,6 @@ logging_dir = 'logs'
 def _check_settings():
     opts.nnuc = 3*opts.natom # number of nuclear DOFs
     opts.ndof = opts.nel + opts.nnuc 
-    print("Number of atoms: ", opts.natom)
-    print("Number of electronic states: ", opts.nel)
-    print("Total number degrees of freedom: ", opts.ndof)
 
     if 'q0' not in local:
         opts.q0 = [0.0]*nel
@@ -193,6 +192,40 @@ except Exception as e:
     from input_simulation import * 
     local = {}
 
+def _print_settings():
+    print
+    print(f'Number of atoms:                    {natom}')
+    print(f'Number of electronic states:        {nel}')
+    print(f'Total degress of freedom:           {ndof}')
+    print(f'Sampling method:                    {sampling}')
+    print(f'Type fo integrator:                 {integrator}')
+    if integrator == 'RK4:':
+        print(f'Maximum simulation time:            {tmax_rk4:.2f} a.u.')
+        print(f'Integrator time step:               {Hrk4} a.u.')
+
+    print(f'Normal mode frequency scaling:      {frq_scale}')
+    print(f'Electronic structure runner:        {QC_RUNNER}')
+    print(f'Restart file will be written to     {restart_file_in}')
+    print(f'current working directory:          {os.path.abspath(os.path.curdir)}')
+    print(f'Logs will be written to:            {logging_dir}')
+
+    # Print git commit
+    try:
+        command_git_tag="git -C "+str(os.path.dirname(os.path.realpath(__file__)))+" describe --tags"
+        print("git tag: "+str(os.popen(command_git_tag).readline()))
+    except:
+        #   older versions of git don't have the -C option
+        print("Cound not obtain git tag: If ithis is not desired, check your git version")
+
+
+    # print(fmt_string.format("Number of atoms")'natom')
+    # print(fmt_string.format("Number of electronic states", nel))
+    # print(fmt_string.format("Total degress of freedom", ndof))
+    # print(fmt_string.format("Sampling method", sampling))
+    # print(fmt_string.format("Type fo integrator", integrator))
+    # print(fmt_string.format("Maximum simulation time", integrator))
 
 _check_settings()
 _set_seed()
+print_ascii_art()
+_print_settings()

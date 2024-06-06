@@ -298,8 +298,28 @@ class TimingsLogger():
         self._file = open(file_loc, 'w')
         self._write_header = True
 
+        labels = ['gradient_0', 'gradient_n', 'nac_0_n', 'nac_n_m', 'total']
+        self._descriptions = ['Ground state gradient', 'Excited state gradients', 
+                              'Ground-excited NACs', 'Excited-excited NACs', 'Total']
+        self._label_to_desc = dict(zip(labels, self._descriptions))
+        self._totals = {l: 0.0 for l in labels}
+        self._n_steps = 0
+
     def __del__(self):
         self._file.close()
+        self._print_final_sumamry()
+
+    def _print_final_sumamry(self):
+        #   print final summary
+        n_steps = self._n_steps
+        if self._n_steps == 0:
+            n_steps = 1
+        print("Electronic Structure Average Timings")
+        total = self._totals['total']
+        for l, v in self._totals.items():
+            description = self._label_to_desc[l] + ':'
+            print(f'    {description:25s} {v/n_steps:8.2f} s  {100*v/total:5.1f} %')
+        print()
 
     def write(self, data: LoggerData):
         times = data.timings
@@ -324,6 +344,33 @@ class TimingsLogger():
             self._file.write(f'{value:12.3f}')
         self._file.write('\n')
         self._file.flush()
+
+        #   print a sumamry for this timestep
+        print("Electronic Structure Timings:")
+        g_0, g_n, d_0n, d_nm = 0.0, 0.0, 0.0, 0.0
+        for key, value in times.items():
+            if 'gradient_0' == key:
+                g_0 = value
+                self._totals['gradient_0'] += value
+            elif 'gradient_' in key:
+                g_n += value
+                self._totals['gradient_n'] += value
+            elif 'nac_0_' in key:
+                d_0n += value
+                self._totals['nac_0_n'] += value
+            elif 'nac_' in key:
+                d_nm += value
+                self._totals['nac_n_m'] += value
+        self._totals['total'] += total
+        
+        print(f'    Ground state gradient:  { g_0:.2f} s')
+        print(f'    Excited state gradients: {g_n:.2f} s')
+        print(f'    Ground-Excited NACs:     {d_0n:.2f} s')
+        print(f'    Excited-Excited NACs:    {d_nm:.2f} s')
+        print(f'    Total:                   {total:.2f} s')
+        print("")
+        self._n_steps += 1
+
 
 class CorrelationLogger():
     def __init__(self, file_loc: str) -> None:
@@ -442,7 +489,6 @@ class NACLogger():
             for i in range(n_NACs):
                 for j in range(i+1, n_NACs):
                     # labels.append(f'S{i}_S{j} ')
-                    print(i, j)
                     labels.append(f'{state_labels[i]}_{state_labels[j]} ')
 
         # self._file.write('%16s' % 'Time')
@@ -458,7 +504,6 @@ class NACLogger():
         if self._write_header:
             self._write_header_to_file(data.state_labels)
         out_data = []
-        print("N STATES: ", self._n_states)
         for i in range(self._n_states):
             for j in range(i+1, self._n_states):
                 out_data.append(NACs[i, j])
@@ -466,3 +511,42 @@ class NACLogger():
             header=f'time_step {self._total_writes}\ntime {time}')
         self._file.flush()
         self._total_writes += 1
+
+def print_ascii_art():
+    art = '''                                                                                     
+                                        @@@@@@@                                 
+                                 @@@@@@@@@   @@@@@@@@@                          
+                                 @@@                  @@@@@                     
+                                   @@@                    @@@@                  
+                                     @@                      @@@                
+                              @@@@@@@@@   @@@@@@@@             @@@              
+                          @@@@@                  @@@@@@@         @@@            
+                       @@@                             @@@@@       @@@          
+                     @@@                                   @@       @@          
+                   @@                                              @@@          
+                 @@@                                              @@            
+                @@@                              @@@@@@     @@     @@@          
+               @@@   @@@@@@@@@@@@@@@            @@    @@  @@@        @@         
+              @@  @@@@              @@@@        @@     @@@@           @@        
+          @@@@  @@@                    @@@@     @@@@@@  @@             @@       
+       @@@@      @@                 @@@@@@@@@       @@@@@@        @@@  @@@      
+    @@@          @@               @@@       @@         @@         @@@   @@      
+   @@     @@@     @@                @@@@@                                @@     
+  @@   @@@@ @@   @@                     @@@@@@      @@@                  @@@    
+ @@@@@@     @@  @@                         @@@    @@@  @@@                @@    
+ @@@       @@ @@@                         @@@@@@@@@       @@@@            @@    
+           @@@@                            @@@                @@@@@       @@    
+          @@@@                                                    @@@@@@@@@     
+          @@                                                                                                                                           
+                                                                                
+       @@@@@@@@              @@@@@@@@     @@@@@@@@    @@@@@@@@   @@@@@@@@       
+       @@@    @@@           @@@    @@@  @@@@    @@@   @@        @@@    @@@      
+       @@@    @@@ @@@   @@@ @@@@@       @@            @@         @@@@           
+       @@@@@@@@@   @@  @@@    @@@@@@@  @@@            @@@@@@@@     @@@@@@@      
+       @@@         @@@ @@          @@@  @@@     @@@   @@               @@@      
+       @@@          @@@@@   @@@   @@@@   @@@   @@@@   @@        @@@@   @@@      
+       @@@           @@@      @@@@@@       @@@@@@     @@@@@@@@    @@@@@@        
+                  @@@@@                                                         
+                  @@@                                                                                                                          
+'''
+    print(art)
