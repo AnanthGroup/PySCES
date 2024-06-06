@@ -36,10 +36,18 @@ def main():
 
         # Sample initial phase space configuration
         if sampling == 'wigner':
+            if nel == 1:
+                print('WARNING: Wigner population estimator with nel=1 will result in\n')
+                print('an unphysical radius of sampling. Use "sc" option instead.\n')
+                exit()
             coord = sample_wignerLSC(normal_geo, frq)
         elif sampling == 'sc':
             coord = sample_scLSC(normal_geo, frq)
         elif sampling == 'spin':
+            if nel != 3:
+                print('WARNING: Spin mapping population estimator with nel being other than 3\n')
+                print('is not implemented. Use "wigner" or "sc" option instead.\n')
+                exit()
             coord = sample_spinLSC(normal_geo, frq)
         
         initq = coord[0,:] # A.U.
