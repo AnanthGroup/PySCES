@@ -19,8 +19,6 @@ from fileIO import print_ascii_art
 ########## DEFAULT SETTINGS ##########
 
 nel, natom = 3, 6 # number of electronic states, number of atoms in the molecule
-nnuc = natom*3
-ndof = nnuc + nel
 temp = 300 # simulation temperature in Kelvin
 
 # Initial sampling function ('conventioanl', 'modified', or 'spin' LSC-IVR)
@@ -186,7 +184,7 @@ def _print_settings():
     print
     print(f'Number of atoms:                    {natom}')
     print(f'Number of electronic states:        {nel}')
-    print(f'Total degress of freedom:           {ndof}')
+    print(f'Total degress of freedom:           {3*natom + nel}')
     print(f'Sampling method:                    {sampling}')
     print(f'Type fo integrator:                 {integrator}')
     if integrator == 'RK4:':
@@ -210,7 +208,7 @@ def _print_settings():
 
     # print(fmt_string.format("Number of atoms")'natom')
     # print(fmt_string.format("Number of electronic states", nel))
-    # print(fmt_string.format("Total degress of freedom", ndof))
+    # print(fmt_string.format("Total degress of freedom", 3*natom+nel))
     # print(fmt_string.format("Sampling method", sampling))
     # print(fmt_string.format("Type fo integrator", integrator))
     # print(fmt_string.format("Maximum simulation time", integrator))

@@ -24,6 +24,7 @@ def main():
     ###################################
     ### Propagation of a trajectory ###
     ###################################
+    ndof = 3*natom + nel
     initq, initp = np.zeros(ndof-6), np.zeros(ndof-6)
 
     # Read geo_gamess and hess_gamess

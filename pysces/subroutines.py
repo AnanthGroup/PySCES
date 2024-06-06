@@ -25,7 +25,9 @@ from fileIO import SimulationLogger, write_restart, read_restart
 # __location__ = os.path.realpath(os.path.join(os.getcwd(), os.path.dirname(__file__)))
 __location__ = ''
 
-from input_simulation import * 
+from input_simulation import *
+nnuc = 3*natom
+ndof = nnuc + nel
     
 # Physical constants and unit conversion factors
 pi       = np.pi
