@@ -314,8 +314,11 @@ class TimingsLogger():
         n_steps = self._n_steps
         if self._n_steps == 0:
             n_steps = 1
-        print("Electronic Structure Average Timings")
+
         total = self._totals['total']
+        if total == 0.0:
+            return
+        print("Electronic Structure Average Timings")
         for l, v in self._totals.items():
             description = self._label_to_desc[l] + ':'
             print(f'    {description:25s} {v/n_steps:8.2f} s  {100*v/total:5.1f} %')
@@ -363,7 +366,7 @@ class TimingsLogger():
                 self._totals['nac_n_m'] += value
         self._totals['total'] += total
         
-        print(f'    Ground state gradient:  { g_0:.2f} s')
+        print(f'    Ground state gradient:   {g_0:.2f} s')
         print(f'    Excited state gradients: {g_n:.2f} s')
         print(f'    Ground-Excited NACs:     {d_0n:.2f} s')
         print(f'    Excited-Excited NACs:    {d_nm:.2f} s')
