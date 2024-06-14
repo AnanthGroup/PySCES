@@ -38,7 +38,7 @@ timestep, nstep = 1.0, 16700
 # Maximum propagation time (a.u.), BSH step to be tried (a.u.), error tolerance (ratio) (Only relevant for BSH)
 tmax_bsh, Hbsh, tol = 10, 3.0, 0.01 
 # Maximum propagation time (a.u.), one Runge-Kutta step (a.u.) (Only relevant for RK4)
-tmax_rk4, Hrk4 = 4200*4, 1.0
+tmax_rk4, Hrk4 = 20, 5.0 
 
 # Scaling factor of normal mode frequancies
 frq_scale = 0.967
@@ -59,28 +59,13 @@ init_state = 2
 restart = 0
 
 #   type of QC runner, either 'gamess or 'terachem'
-QC_RUNNER = 'terachem'
 QC_RUNNER = 'gamess'
 
 #   TeraChem runner options
-tcr_host = '10.1.1.156'
-# tcr_host = 'localhost'
+tcr_host = '10.1.1.154'
 tcr_port = 9876
-tcr_job_options = {
-        'method': 'camb3lyp',
-        'basis': '6-31g',
-        'charge': 0,
-        'spinmult': 1,
-        'closed_shell': True,
-        'restricted': True,
-        'precision': 'mixed',
-        'convthre': 1E-6,
-}
-tcr_state_options = {
-    'max_state': len(q0)-1, 'grads': 'all', 'NACs': 'all'
-}
+tcr_job_options = {}
+tcr_state_options = {}
 
-# sub_script = '/home/cmyers7/software/gamess_source/rungms'
-sub_script = 'run_gamess.sh'
-
-mol_input_format = 'gamess'
+#   GAMESS submission script name
+sub_script = None
