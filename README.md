@@ -16,7 +16,7 @@ The easiest way to get PySCES is to clone the repository from github. As the cod
 The `-e` will tell pip not to copy over the code itself into your python environment. To get the latest updates, just go back to the location you cloned the repository, run a `git pull`, and your installation will also be updated. You do not need to run a `pip install` again.
 
 ## Running PySCES
-After installation, the command `pysces` will be registered with your conda environment and is used to initialize and run the simulation. After running this command, PySCES will look for an input file `input\_simulation\_local.py}` in the current directory. This file is formatted in python and sets the primary variables that control the simulation.  
+After installation, the command `pysces` will be registered with your conda environment and is used to initialize and run the simulation. After running this command, PySCES will look for an input file `input_simulation_local.py` in the current directory. This file is formatted in python and sets the primary variables that control the simulation.  
 
 Each input will usually contain the following information:
 * Number of atoms in the molecule system.
