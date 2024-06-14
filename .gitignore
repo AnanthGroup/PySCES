@@ -1,0 +1,13 @@
+debug/
+__pycache__
+.vscode
+#examples/
+*.egg-info
+*test_
+
+#   examples
+examples/*/logs*
+examples/*/cas.*
+examples/*/progress.out
+examples/*/__pycache__
+examples/*/restart.*
