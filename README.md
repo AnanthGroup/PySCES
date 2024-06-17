@@ -1,5 +1,5 @@
-# AI-LSC-IVR
-AI-LSC-IVR is a code written in Python3 to perform ab initio nonadiabatic dynamics using linearized semiclassical initial value representation (LSC-IVR). The current version of the code is interfaced with an electronic structure package GAMESS and computes an electronic population correlation function using Wigner, semiclassical, or spin mapping population estimator. See the following references for the implementation and the application of the code:
+# PySCES
+PySCES, **Py**thon code for Linearized **S**emi-**C**lassical Dynamics with On-the-fly **E**lectronic **S**tructure, is a highly parallelized code for ab initio nonadiabatic molecular dynamics using linearized semiclassical initial value representation (LSC-IVR). As of now, on-the-fly updates of electronic structure variables can be performed either by GPU-assisted electronic structure package, TeraChem, or, as its original implementation was structured, GAMESS. The code is intended for computing electronic population correlation functions through one of three population estimators: Wigner, semiclassical, or spin mapping population estimator. See the following references for the implementation and the application of the code:
 
 - C. A. Myers, K. Miyazaki, T. Trepl, C. M. Isborn, and N Ananth. "GPU-Accelerated On-the-fly Nonadiabatic Semiclassical Dynamics," J. Chem. Phys., XXXX, XXXXXX, (2024)
 
