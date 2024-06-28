@@ -9,3 +9,17 @@ References for the most recent implementation will be added as they become avail
 Created by Christopher Myers, Ken Miyazaki, and Thomas Werner Trepl.
 
 Disclaimer: The code contained in this package has been written, edited, and used by members of the Ananth group at Cornell University and the Isborn group at the University of California, Merced. It has not been formally reviewed, nor published, nor are there copyrights. Bugs and errors may be present.
+
+## Installation
+
+The easiest way to get PySCES is to clone the repository from github. As the code is still in active development, this makes it convenient to get the latest changes as they are uploaded. PySCES can be installed with pip, and we recommend you make a new python environment with Conda prior to the installation:
+```
+    conda create -n pysces python
+    conda activate pysces
+    cd /dir/where/you/git/cloned/
+    pip install -e .
+```
+The `-e` flag will tell pip not to copy over the code itself into your python environment. To get the latest updates, just go back to the location you cloned the repository, run a \texttt{git pull}, and your installation will also be updated. You do not need to run a `pip install` again.
+
+## Usage
+For further details, including the various options that can control PySCES, please read the Manual in PDF form within the repository. 
