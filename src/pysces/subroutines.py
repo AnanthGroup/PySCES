@@ -19,13 +19,13 @@ import subprocess as sp
 import random
 import pandas
 import time
-from input_simulation import * 
-from input_gamess import nacme_option as opt 
-from fileIO import SimulationLogger, write_restart, read_restart
+from pysces.input_simulation import * 
+from pysces.input_gamess import nacme_option as opt 
+from pysces.fileIO import SimulationLogger, write_restart, read_restart
 # __location__ = os.path.realpath(os.path.join(os.getcwd(), os.path.dirname(__file__)))
 __location__ = ''
 
-from input_simulation import *
+# from input_simulation import *
 nnuc = 3*natom
 ndof = nnuc + nel
     
@@ -1506,7 +1506,7 @@ def rk4(initq, initp, tStop, H, restart, amu_mat, U, com_ang, AN_mat):
     logger = SimulationLogger(nel, dir=logging_dir, save_jobs=tcr_log_jobs)
 
     if QC_RUNNER == 'terachem':
-        from qcRunners.TeraChem import TCRunner, format_output_LSCIVR
+        from pysces.qcRunners.TeraChem import TCRunner, format_output_LSCIVR
         logger.state_labels = [f'S{x}' for x in tcr_state_options['grads']]
     
     trans_dips = None

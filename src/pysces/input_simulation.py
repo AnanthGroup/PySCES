@@ -11,9 +11,9 @@ Repository of simulation variables
 """
 import sys, os
 import shutil
-import input_simulation as opts
+from pysces import input_simulation as opts
 from subprocess import Popen
-from fileIO import print_ascii_art
+from pysces.fileIO import print_ascii_art
 
 
 ########## DEFAULT SETTINGS ##########
@@ -177,10 +177,10 @@ try:
     local = local_opts.__dict__
 except Exception as e:
     print("Using default settings: ", e)
-    from input_simulation import * 
+    from pysces.input_simulation import * 
     local = {}
 
-def _print_settings():
+def print_settings():
     print
     print(f'Number of atoms:                    {natom}')
     print(f'Number of electronic states:        {nel}')
@@ -215,5 +215,3 @@ def _print_settings():
 
 _check_settings()
 _set_seed()
-print_ascii_art()
-_print_settings()

@@ -34,8 +34,4 @@ classifiers = [
 Repository = "https://github.com/AnanthGroup/AI-LSC-IVR"
 
 [project.scripts]
-pysces = "main:main"
-
-[tool.setuptools.packages.find]
-where = ["pysces"]
-exclude = ["examples", "debug", "__pycache__"]
+pysces = "pysces.pysces:main"

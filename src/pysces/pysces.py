@@ -13,14 +13,18 @@ Main code to run LSC-IVR dynamics
 import os
 import numpy as np
 import pandas
-from input_gamess import * 
-from subroutines import *
+from pysces.input_gamess import * 
+from pysces.subroutines import *
 # __location__ = os.path.realpath(os.path.join(os.getcwd(), os.path.dirname(__file__)))
 __location__ = ''
 
-from input_simulation import * 
+from pysces.input_simulation import * 
 
 def main():
+    print_ascii_art()
+    print_settings()
+
+
     ###################################
     ### Propagation of a trajectory ###
     ###################################

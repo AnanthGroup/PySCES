@@ -214,7 +214,7 @@ class TCJobsLogger():
                 self._file = open(self._file_loc, 'w')
                 
             import yaml
-            import qcRunners.TeraChem as TC
+            from pysces.qcRunners import TeraChem as TC
             results = deepcopy(data.jobs_data)
             cleaned = TC.TCRunner.cleanup_multiple_jobs(results, 'orb_energies', 'bond_order', 'orb_occupations', 'spins')
 

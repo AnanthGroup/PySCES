@@ -11,3 +11,5 @@ examples/*/cas.*
 examples/*/progress.out
 examples/*/__pycache__
 examples/*/restart.*
+
+test*
