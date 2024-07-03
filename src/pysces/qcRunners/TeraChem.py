@@ -508,7 +508,7 @@ class TCRunner():
 
 
         n_clients = len(self._client_list)
-        jobs_to_run = [{} for i in range(n_clients)]
+        jobs_to_run = [[] for i in range(n_clients)]
         job_num = 0
 
         #   run energy only if gradients and NACs are not requested
@@ -542,13 +542,7 @@ class TCRunner():
                     
             # self._set_guess(job_opts, excited_type, all_results, state)
 
-            jobs_to_run[job_num % n_clients][name] = {
-                'geom': geom,
-                'excited_type': excited_type,
-                'opts': job_opts.copy(), 
-                'type': 'gradient', 
-                'state': state
-                }
+            jobs_to_run[job_num % n_clients].append(TCJob(geom, job_opts.copy(), 'gradient', excited_type, state, name))
             job_num += 1
 
 
@@ -570,13 +564,7 @@ class TCRunner():
             job_opts['nacstate1'] = nac1
             job_opts['nacstate2'] = nac2
 
-            jobs_to_run[job_num % n_clients][name] = {
-                'geom': geom,
-                'excited_type': excited_type,
-                'opts': job_opts.copy(),
-                'type': 'coupling',
-                'state': max(nac1, nac2)
-                }
+            jobs_to_run[job_num % n_clients].append(TCJob(geom, job_opts.copy(), 'coupling', excited_type, max(nac1, nac2)))
             job_num += 1
 
         all_results, times = self._send_jobs_to_clients(jobs_to_run)
@@ -613,21 +601,32 @@ class TCRunner():
         self.set_avg_max_times(times)
 
         return all_results, times
+
+
+class TCJob():
+    def __init__(self, geom, opts, job_type, excited_type, state, name='') -> None:
+        self.geom = geom
+        self.excited_type = excited_type
+        self.opts = opts
+        self.job_type = job_type
+        self.state = state
+        self.name = name
     
+
     # def _set_guess(self, job_opts: dict, excited_type: str, all_results: list[dict], state):
     #     return _set_guess(job_opts, excited_type, all_results, state)
 
-def _run_jobs_on_client(client: TCPBClient, jobs, server_root, client_ID=0, prev_results=[]):
+def _run_jobs_on_client(client: TCPBClient, jobs: list[TCJob], server_root, client_ID=0, prev_results=[]):
     times = {}
     all_results = []
-    for job_name, job_props in jobs.items():
-        geom = copy.deepcopy(job_props['geom'])
-        excited_type = copy.deepcopy(job_props['excited_type'])
-        job_opts =  copy.deepcopy(job_props['opts'])
-        job_type =  copy.deepcopy(job_props['type'])
-        job_state = copy.deepcopy(job_props['state'])
 
-        _set_guess(job_opts, excited_type, all_results + prev_results, job_state, client, server_root)
+    for j in jobs:
+        job_name = j.name
+        geom = j.geom
+        job_opts =  j.opts
+        job_type =  j.job_type
+
+        _set_guess(job_opts, j.excited_type, all_results + prev_results, j.state, client, server_root)
         print(f"\nRunning {job_name} on client ID {client_ID}")
         if 'cisrestart' in job_opts:
             job_opts['cisrestart'] = f"{job_opts['cisrestart']}_{client.host}_{client.port}"
