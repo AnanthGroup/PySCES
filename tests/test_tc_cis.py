@@ -51,6 +51,7 @@ class Test_TC_CIS(unittest.TestCase):
         from pysces import options
         pysces.main()
 
+        #   check simple panda readable data
         for file in ['corr.txt', 'electric_pq.txt', 'energy.txt', 'grad.txt', 'nac.txt']:
             data_ref = pandas.read_csv(f'logs_ref/{file}', sep='\s+', comment='#')
             data_tst = pandas.read_csv(f'logs/{file}', sep='\s+', comment='#')
@@ -58,7 +59,8 @@ class Test_TC_CIS(unittest.TestCase):
                 np.testing.assert_allclose(data_tst[key], data_ref[key], 
                                            rtol=1e-5, verbose=True, strict=True,
                                            err_msg=f'file: {file}')
-                
+        
+        #   check data in xyz formats
         for file in ['nuc_geo.xyz', 'nuclear_P.txt']:
             data_ref = parse_xyz_data(f'logs_ref/{file}')
             data_tst = parse_xyz_data(f'logs/{file}')
@@ -67,15 +69,13 @@ class Test_TC_CIS(unittest.TestCase):
                 np.testing.assert_allclose(frame_tst['positions'], frame_ref['positions'],
                                            atol=1e-16, verbose=True, strict=True,
                                            err_msg=f'file: {file}; frame {frame}')
-                
+        
+        #   check checkpoint files
         with open('restart_end.json') as file:
             restart_ref = json.load(file)
         with open('restart.json') as file:
             restart_tst = json.load(file)
         assert_dictionary(self, restart_ref, restart_tst)
-
-        
-        
 
     def __del__(self):
         pass
@@ -85,8 +85,6 @@ class Test_TC_CIS(unittest.TestCase):
         for file in os.listdir('logs'):
             os.remove(os.path.join('logs', file))
         os.removedirs('logs')
-
-
                 
 if __name__ == '__main__':
     test = Test_TC_CIS()

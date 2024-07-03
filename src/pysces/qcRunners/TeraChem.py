@@ -512,7 +512,6 @@ class TCRunner():
         job_num = 0
 
         #   run energy only if gradients and NACs are not requested
-        all_results = []
         if len(grads) == 0 and len(NACs) == 0:
             job_opts = base_options.copy()
             start = time.time()
@@ -520,7 +519,9 @@ class TCRunner():
             times[f'energy'] = time.time() - start
             results['run'] = 'energy'
             results.update(job_opts)
-            all_results.append(results)
+
+            return [results], times
+
 
         #   create gradient job properties
         #   gradient computations have to be separated from NACs
@@ -542,6 +543,8 @@ class TCRunner():
             # self._set_guess(job_opts, excited_type, all_results, state)
 
             jobs_to_run[job_num % n_clients][name] = {
+                'geom': geom,
+                'excited_type': excited_type,
                 'opts': job_opts.copy(), 
                 'type': 'gradient', 
                 'state': state
@@ -568,17 +571,25 @@ class TCRunner():
             job_opts['nacstate2'] = nac2
 
             jobs_to_run[job_num % n_clients][name] = {
+                'geom': geom,
+                'excited_type': excited_type,
                 'opts': job_opts.copy(),
                 'type': 'coupling',
                 'state': max(nac1, nac2)
                 }
             job_num += 1
 
+        all_results, times = self._send_jobs_to_clients(jobs_to_run)
+        return all_results, times
+
+    def _send_jobs_to_clients(self, jobs_to_run: list):
+        n_clients = len(self._client_list)
+        all_results = []
 
         #   if only one client is being used, don't open up threads, easier to debug
         if n_clients == 1:
             start = time.time()
-            results, times = _run_jobs(self._client_list[0], jobs_to_run[0], geom, excited_type, self._server_root_list[0], 0, self._prev_results)
+            results, times = _run_jobs_on_client(self._client_list[0], jobs_to_run[0], self._server_root_list[0], 0, self._prev_results)
             all_results += results
             end = time.time()
 
@@ -588,8 +599,8 @@ class TCRunner():
                 futures = []
                 for i in range(n_clients):
                     jobs = jobs_to_run[i]
-                    args = (self._client_list[i], jobs, geom, excited_type, self._server_root_list[i], i, self._prev_results)
-                    future = executor.submit(_run_jobs, *args)
+                    args = (self._client_list[i], jobs, self._server_root_list[i], i, self._prev_results)
+                    future = executor.submit(_run_jobs_on_client, *args)
                     futures.append(future)
                 for f in futures:
                     batch_results, batch_times = f.result()
@@ -606,10 +617,12 @@ class TCRunner():
     # def _set_guess(self, job_opts: dict, excited_type: str, all_results: list[dict], state):
     #     return _set_guess(job_opts, excited_type, all_results, state)
 
-def _run_jobs(client: TCPBClient, jobs, geom, excited_type, server_root, client_ID=0, prev_results=[]):
+def _run_jobs_on_client(client: TCPBClient, jobs, server_root, client_ID=0, prev_results=[]):
     times = {}
     all_results = []
     for job_name, job_props in jobs.items():
+        geom = copy.deepcopy(job_props['geom'])
+        excited_type = copy.deepcopy(job_props['excited_type'])
         job_opts =  copy.deepcopy(job_props['opts'])
         job_type =  copy.deepcopy(job_props['type'])
         job_state = copy.deepcopy(job_props['state'])
