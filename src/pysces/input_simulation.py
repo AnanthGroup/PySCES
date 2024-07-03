@@ -187,7 +187,7 @@ def print_settings():
     print(f'Total degress of freedom:           {3*natom + nel}')
     print(f'Sampling method:                    {sampling}')
     print(f'Type fo integrator:                 {integrator}')
-    if integrator == 'RK4:':
+    if integrator == 'RK4':
         print(f'Maximum simulation time:            {tmax_rk4:.2f} a.u.')
         print(f'Integrator time step:               {Hrk4} a.u.')
 

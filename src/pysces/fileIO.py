@@ -466,6 +466,7 @@ class GradientLogger():
         self._n_states = len(grads)
         if self._write_header:
             self._write_header_to_file(data.state_labels)
+            self._write_header = False
         np.savetxt(self._file, np.transpose(grads), fmt='%16.10f', 
             header=f'time_step {self._total_writes}\ntime {time}')
         self._file.flush()
