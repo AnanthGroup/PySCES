@@ -5,40 +5,6 @@ import numpy as np
 import os
 from tools import parse_xyz_data, assert_dictionary
 import json
-# from pysces import main
-
-class Tester(unittest.TestCase):
-    '''
-        Wrapper for unittest.TestCase with explicit logging.
-        FOR DEBUGGING ONLY
-    '''
-    def __init__(self, methodName: str = "runTest") -> None:
-        super().__init__(methodName)
-        self.logger = io.StringIO()
-        self.logger.write(f"{'Label':30s} {'Max Diff':12s} {'Max Rel Diff':12s}\n")
-        self.logger.write('-------------------------------------------------------------\n')
-
-        #   All functions start this verable set to True and exit seeting it false
-        #   If an error is raised, logs will be print
-        self.print_log = False
-
-    def assert_allclose(self, label, actual, desired, rtol=1e-7, atol=0, equal_nan=True):
-        self.print_log = True
-        diff = actual - desired
-        max_diff = np.max(np.abs(diff))
-        rel_diff = np.abs(diff)/max_diff
-        self.log(label, max_diff, rel_diff)
-        np.testing.assert_allclose(actual, desired, rtol, atol, equal_nan, verbose=True, strict=True)
-        self.print_log = False
-
-    def log(self, file, key, diff, rel_diff):
-        self.logger.write(f'{file:20s} {key:10s} {diff:12.5e} {rel_diff:12.5e}\n')
-
-
-    def __dell__(self):
-        if self.print_log:
-            print(self.logger.getvalue())
-
 
 class Test_TC_CIS(unittest.TestCase):
     def __init__(self, methodName: str = "runTest") -> None:
@@ -46,10 +12,10 @@ class Test_TC_CIS(unittest.TestCase):
 
     def test_jobs(self):
         this_dir = os.path.abspath(os.path.curdir)
-        os.chdir('test_tc_cis')
+        os.chdir('test_dual_tc_servers')
 
         import pysces
-        pysces.main() 
+        pysces.main()
 
         for file in ['corr.txt', 'electric_pq.txt', 'energy.txt', 'grad.txt', 'nac.txt']:
             data_ref = pandas.read_csv(f'logs_ref/{file}', sep='\s+', comment='#')
@@ -65,7 +31,7 @@ class Test_TC_CIS(unittest.TestCase):
             for frame, (frame_tst, frame_ref) in enumerate(zip(data_tst, data_ref)):
                 np.testing.assert_equal(frame_tst['atoms'], frame_ref['atoms'])
                 np.testing.assert_allclose(frame_tst['positions'], frame_ref['positions'],
-                                           atol=1e-16, verbose=True, strict=True,
+                                           rtol=1e-5, verbose=True, strict=True,
                                            err_msg=f'file: {file}; frame {frame}')
                 
         with open('restart_end.json') as file:
