@@ -168,6 +168,33 @@ def compute_job_sync(client: TCPBClient, jobType="energy", geom=None, unitType="
             )
     return client.recv_job_async()
 
+class TCJob():
+    __job_counter = 0.0
+    def __init__(self, geom, opts, job_type, excited_type, state, name='') -> None:
+        self.geom = geom
+        self.excited_type = excited_type
+        self.opts = opts
+        self.job_type = job_type
+        self.state = state
+        self.name = name
+        self.time = 0.0
+
+        self._results = {}
+
+        TCJob.__job_counter += 1
+        self.__jobID = TCJob.__job_counter
+
+    @property
+    def jobID(self):
+        return self.__jobID
+    
+    @property
+    def results(self):
+        return self._results
+    
+    @results.setter
+    def results(self, value):
+        self._results = value
 class TCRunner():
     def __init__(self, 
                  hosts: str, 
@@ -564,21 +591,20 @@ class TCRunner():
             job_opts['nacstate1'] = nac1
             job_opts['nacstate2'] = nac2
 
-            jobs_to_run[job_num % n_clients].append(TCJob(geom, job_opts.copy(), 'coupling', excited_type, max(nac1, nac2)))
+            jobs_to_run[job_num % n_clients].append(TCJob(geom, job_opts.copy(), 'coupling', excited_type, max(nac1, nac2), name))
             job_num += 1
 
         all_results, times = self._send_jobs_to_clients(jobs_to_run)
         return all_results, times
 
-    def _send_jobs_to_clients(self, jobs_to_run: list):
+    def _send_jobs_to_clients(self, jobs_to_run: list[TCJob]):
         n_clients = len(self._client_list)
-        all_results = []
 
         #   if only one client is being used, don't open up threads, easier to debug
         if n_clients == 1:
             start = time.time()
-            results, times = _run_jobs_on_client(self._client_list[0], jobs_to_run[0], self._server_root_list[0], 0, self._prev_results)
-            all_results += results
+            # results, times = _run_jobs_on_client(self._client_list[0], jobs_to_run[0], self._server_root_list[0], 0, self._prev_results)
+            _run_jobs_on_client(self._client_list[0], jobs_to_run[0], self._server_root_list[0], 0, self._prev_results)
             end = time.time()
 
         else:
@@ -592,9 +618,18 @@ class TCRunner():
                     futures.append(future)
                 for f in futures:
                     batch_results, batch_times = f.result()
-                    all_results += batch_results
                     times.update(batch_times)
             end = time.time()
+
+        all_results = []
+        times = {}
+        for jobs in jobs_to_run:
+            for j in jobs:
+                all_results.append(j.results)
+                times[j.name] = j.time
+                
+
+        # all_results = [j.results for j in jobs]
 
         self._prev_results = all_results
         self._frame_counter += 1
@@ -602,16 +637,34 @@ class TCRunner():
 
         return all_results, times
 
+    def _run_numerical_derivatives(self, ref_job: TCJob, ref_result: dict, dx=0.01, overlap=False):
+        '''
+            dx is in bohr
+        '''
+        base_opts = ref_job.opts.copy()
+        num_deriv_jobs = []
+        indicies = []
+        for n in range(len(ref_job.geom)):
+            for i in [0, 1, 2]:
+                for j in [-1, +1]:
+                    indicies.append(n, i, j)
 
-class TCJob():
-    def __init__(self, geom, opts, job_type, excited_type, state, name='') -> None:
-        self.geom = geom
-        self.excited_type = excited_type
-        self.opts = opts
-        self.job_type = job_type
-        self.state = state
-        self.name = name
-    
+        for n, i, j in indicies:
+            new_geom = np.copy(ref_job.geom)
+            new_geom[n, i] += j*dx
+            job = TCJob(new_geom, base_opts, 'energy', ref_job.excited_type, ref_job.state, str((n, i, j)))
+            num_deriv_jobs.append(job)
+        results, times = _run_jobs_on_client(self._client_list[0], num_deriv_jobs, self._server_root_list[0], 0, self._prev_results)
+
+        if overlap:
+            num_deriv_jobs = []
+            for result in results:
+                if ref_job.excited_type != 'cas':
+                    raise ValueError('Wavefunction overlaps are only available for CAS methods in TeraChem')
+                opts = copy.copy(base_opts)
+                # geom = num_deriv_jobs[]
+                job = TCJob(result['geom'], )
+            
 
     # def _set_guess(self, job_opts: dict, excited_type: str, all_results: list[dict], state):
     #     return _set_guess(job_opts, excited_type, all_results, state)
@@ -649,16 +702,17 @@ def _run_jobs_on_client(client: TCPBClient, jobs: list[TCJob], server_root, clie
                     exit()
                 else:
                     try_again = True
-                    print("Server error recieved; trying to run job one more")
+                    print("Server error recieved; trying to run job once more")
                     time.sleep(30)
-
-        times[job_name] = time.time() - start
+        j.time = time.time() - start
+        # times[job_name] = time.time() - start
         results['run'] = job_type
         TCRunner.append_output_file(results, server_root)
         results.update(job_opts)
+        j.results = results
         all_results.append(results)
 
-    return all_results, times
+    # return all_results, times
 
 def _set_guess(job_opts: dict, excited_type: str, prev_results: list[dict], state: int, client: TCPBClient, server_root='.'):
 
