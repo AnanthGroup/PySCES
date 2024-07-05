@@ -12,4 +12,4 @@ examples/*/progress.out
 examples/*/__pycache__
 examples/*/restart.*
 
-# test*
+tests/host_ports.txt
