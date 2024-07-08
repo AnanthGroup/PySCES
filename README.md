@@ -1,8 +1,6 @@
-
-
-<img src="https://github.com/AnanthGroup/PySCES/assets/19658094/9fedb6f5-07a2-4237-8168-0bd2b15b6406" alt="drawing" width="200"/>
-
-
+<p align="center">
+  <img src="https://github.com/AnanthGroup/PySCES/assets/19658094/9fedb6f5-07a2-4237-8168-0bd2b15b6406" alt="drawing" width="200"/>
+</p>
 
 PySCES, **Py**thon code for Linearized **S**emi-**C**lassical Dynamics with On-the-fly **E**lectronic **S**tructure, is a highly parallelized code for ab initio nonadiabatic molecular dynamics using linearized semiclassical initial value representation (LSC-IVR). As of now, on-the-fly updates of electronic structure variables can be performed either by GPU-assisted electronic structure package, TeraChem, or, as its original implementation was structured, GAMESS. The code is intended for computing electronic population correlation functions through one of three population estimators: Wigner, semiclassical, or spin mapping population estimator. See the following references for the original implementation and the application of the code:
 
