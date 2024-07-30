@@ -647,7 +647,7 @@ class TCRunner():
 
         for n, i, j in indicies:
             new_geom = np.copy(ref_job.geom)
-            new_geom[n, i] += j*dx*1.8897259886 # angstrom to bohr
+            new_geom[n, i] += j*dx/1.8897259886 # angstrom to bohr
             job = TCJob(new_geom, base_opts, 'energy', ref_job.excited_type, ref_job.state, str((n, i, j)))
             num_deriv_jobs.append(job)
 
@@ -694,6 +694,30 @@ class TCRunner():
 
     # def _set_guess(self, job_opts: dict, excited_type: str, all_results: list[dict], state):
     #     return _set_guess(job_opts, excited_type, all_results, state)
+
+
+def _correct_signs_from_overlaps(job: TCJob, overlap_job: TCJob):
+    signs = np.sign(np.diag(overlap_job.results['ci_overlap']))
+    n_states = len(job.results['energy'])
+
+    #   correct the transition dipole moments
+    for k in ['cas', 'cis']:
+        key = f'{k}_transition_dipoles' 
+        if key not in job.results:
+            continue
+        count = 0
+        for i in range(n_states):
+            for j in range(i+1, n_states):
+                dipole = job.results[key][count]
+                job.results[key][count] = (np.array(dipole)*signs[i]*signs[j]).tolist()
+                count += 1
+
+    #   correct the nonadibatic coupling
+    if 'nacme' in job.results:
+        idx1 = job.results['nacstate1']
+        idx2 = job.results['nacstate2']
+        job.results['nacme'] = (np.array(job.results['nacme'])*signs[idx1]*signs[idx2]).tolist()
+
 
 def _run_jobs_on_client(client: TCPBClient, jobs: list[TCJob], server_root, client_ID=0, prev_results=[]):
     times = {}
