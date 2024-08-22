@@ -15,9 +15,12 @@ import psutil
 import concurrent.futures
 import copy
 import pickle
+from typing import Literal
+import itertools
 
 
 _server_processes = {}
+_DEBUG = bool(int(os.environ.get('DEBUG', False)))
 
 class TCServerStallError(Exception):
     def __init__(self, message):            
@@ -149,12 +152,12 @@ def compute_job_sync(client: TCPBClient, jobType="energy", geom=None, unitType="
     print("Submitting Job...")
     accepted = client.send_job_async(jobType, geom, unitType, **kwargs)
     while accepted is False:
-        time.sleep(0.1)
+        time.sleep(0.5)
         accepted = client.send_job_async(jobType, geom, unitType, **kwargs)
 
     completed = client.check_job_complete()
     while completed is False:
-        time.sleep(0.1)
+        time.sleep(0.5)
         client._send_msg(pb.STATUS, None)
         status = client._recv_msg(pb.STATUS)
 
@@ -173,14 +176,15 @@ class TCJob():
     __job_counter = 0
     def __init__(self, geom, opts, job_type, excited_type, state, name='') -> None:
         self.geom = geom
-        self.excited_type = excited_type
+        self.excited_type: Literal['cas', 'cis'] = excited_type
         self.opts = opts
         self.job_type = job_type
         self.state = state
         self.name = name
         self.time = 0.0
-
         self._results = {}
+
+        assert self.excited_type in ('cas', 'cis')
 
         TCJob.__job_counter += 1
         self.__jobID = TCJob.__job_counter
@@ -651,10 +655,15 @@ class TCRunner():
             job = TCJob(new_geom, base_opts, 'energy', ref_job.excited_type, ref_job.state, str((n, i, j)))
             num_deriv_jobs.append(job)
 
-        # _run_jobs_on_client(self._client_list[0], num_deriv_jobs, self._server_root_list[0], 0, self._prev_results)
-        # pickle.dump(num_deriv_jobs, open('num_deriv_jobs.pkl', 'wb'))
-        num_deriv_jobs = pickle.load(open('num_deriv_jobs.pkl', 'rb'))
-        
+
+        if not _DEBUG:
+            _run_jobs_on_client(self._client_list[0], num_deriv_jobs, self._server_root_list[0], 0, self._prev_results)
+        else:
+            if os.path.isfile('_num_deriv_jobs.pkl'):
+                with open('_num_deriv_jobs.pkl', 'rb') as file: num_deriv_jobs = pickle.load(file)
+            else:
+                _run_jobs_on_client(self._client_list[0], num_deriv_jobs, self._server_root_list[0], 0, self._prev_results)
+                with open('_num_deriv_jobs.pkl', 'wb') as file: pickle.dump(num_deriv_jobs, file)        
 
         if overlap:
             overlap_jobs = []
@@ -675,11 +684,15 @@ class TCRunner():
                 # deriv_to_overlap[deriv_job.jobID] = job.jobID
                 job_pairs.append((deriv_job, job))
 
-            # _run_jobs_on_client(self._client_list[0], overlap_jobs, self._server_root_list[0], 0, self._prev_results)
-            # with open('overlap_pairs.pkl', 'wb') as file:
-            #     pickle.dump(job_pairs, file)
-            with open('overlap_pairs.pkl', 'rb') as file:
-                job_pairs = pickle.load(file)
+            if not _DEBUG:
+                _run_jobs_on_client(self._client_list[0], overlap_jobs, self._server_root_list[0], 0, self._prev_results)
+            else:
+                if os.path.isfile('_overlap_pairs.pkl'):
+                    with open('_overlap_pairs.pkl', 'rb') as file: job_pairs = pickle.load(file)
+                else:
+                    _run_jobs_on_client(self._client_list[0], overlap_jobs, self._server_root_list[0], 0, self._prev_results)
+                    with open('_overlap_pairs.pkl', 'wb') as file: pickle.dump(job_pairs, file)
+            
 
             #   make sure each returned job is in the same order as in job_pairs
             return_dict = {'num_deriv_jobs': [], 'overlap_jobs': []}
@@ -697,6 +710,11 @@ class TCRunner():
 
 
 def _correct_signs_from_overlaps(job: TCJob, overlap_job: TCJob):
+    '''
+        Correct the sings of transition dipole moments and NACs based 
+        on the overlaps with previous jobs.
+    '''
+
     signs = np.sign(np.diag(overlap_job.results['ci_overlap']))
     n_states = len(job.results['energy'])
 
@@ -717,6 +735,117 @@ def _correct_signs_from_overlaps(job: TCJob, overlap_job: TCJob):
         idx1 = job.results['nacstate1']
         idx2 = job.results['nacstate2']
         job.results['nacme'] = (np.array(job.results['nacme'])*signs[idx1]*signs[idx2]).tolist()
+    
+def _correct_signs_from_charges(job: TCJob, ref_job: TCJob):
+    '''
+        Correct the sings of transition dipole moments and NACs based 
+        on the overlaps with previous jobs.
+    '''
+    _debug_print = False
+
+    n_states = len(job.results['energy'])
+
+    if 'cas_tr_resp_charges' in job.results:
+        exc_type = 'cas'
+    elif 'cis_tr_resp_charges' in job.results:
+        exc_type = 'cis'
+    else:
+        warnings.warn('cas_tr_resp_charges or cis_tr_resp_charges not found in job results, cannot correct transition charges')
+        return
+
+    #   Get the correct dipole key. Some CAS jobs don't have an 's' at the end
+    dipole_key = None
+    if f'{exc_type}_transition_dipole' in job.results:
+        dipole_key = f'{exc_type}_transition_dipole'
+
+    elif f'{exc_type}_transition_dipoles' in job.results:
+        dipole_key = f'{exc_type}_transition_dipoles' 
+
+    charges_orig = np.array(job.results.get(f'{exc_type}_tr_resp_charges', None))
+    charges_ref = np.array(ref_job.results.get(f'{exc_type}_tr_resp_charges', None))
+    if charges_orig is None or charges_ref is None:
+        return
+
+    # for line in job.results['tc.out']:
+    #     print(line)
+
+    min_RRMSE_all = []
+    min_RRMSE = 1e20
+    min_signs = None
+    combos = itertools.combinations_with_replacement(range(n_states), n_states)
+    used_signs = []
+
+    #   we exhaustively search for the combination of sign flips that minimizes
+    #   the agreement with the reference job. This is not a problem for only a
+    #   small number of states, but will quickly become expensive to many states
+    for c in combos:
+        c_unique = set(c)
+
+        #   don't include cases where the ground state is negated
+        # if 0 in c:
+        #     continue
+
+        #   don't use repeated combos
+        # if c_unique in used_signs:
+        #     continue
+        used_signs.append(c_unique)
+
+        #   each indix indicates a the state that is negated
+        signs = np.ones(n_states, dtype=int)
+        for i in c_unique:
+            signs[i] = -1
+
+        RRMSE = 0.0
+        count = 0
+        for i in range(0, n_states):
+            for j in range(i+1, n_states):
+                q_new = charges_orig[count]*signs[i]*signs[j]
+                q_ref = charges_ref[count]
+                arg_max = np.argmax(np.abs(q_new))
+                RRMSE += np.sqrt(np.mean((q_new - q_ref)**2) / np.mean(q_ref**2))
+
+                # print(count, i, j, signs, q_ref[arg_max], q_new[arg_max])
+                # if signs.tolist() == [-1,-1,-1,1]:
+                #     for x, y in zip(q_ref, q_new):
+                #         print(x, y)
+                #     print("CURRENT RRMSE: ", RRMSE)
+
+                count += 1
+        # print(RRMSE)
+        # print()
+        min_RRMSE_all.append((signs, RRMSE))
+        if RRMSE < min_RRMSE:
+            min_signs = signs.copy()
+            min_RRMSE = RRMSE
+
+
+    if _debug_print:
+        print("Transition dipoles BEFORE sign corrections")
+        for i in range(len(job.results[dipole_key])):
+            fmt_str = '{:10.6f} '*3 + '|' + '{:10.6f} '*3 + '|' + '{:10.6f}'
+            ref_d, job_d = ref_job.results[dipole_key][i], job.results[dipole_key][i]
+            print(fmt_str.format(*ref_d, *job_d, np.dot(ref_d, job_d)))
+
+    count = 0
+    for i in range(0, n_states):
+        for j in range(i+1, n_states):
+            dipole = np.array(job.results[dipole_key][count])
+            job.results[dipole_key][count] = dipole*min_signs[i]*min_signs[j]
+            count += 1
+
+    if _debug_print:
+        print("Transition dipoles AFTER sign corrections")
+        print("minimum RRMSE: ", min_RRMSE, min_signs)
+        for i in range(len(job.results[dipole_key])):
+            ref_d, job_d = ref_job.results[dipole_key][i], job.results[dipole_key][i]
+            print(fmt_str.format(*ref_d, *job_d, np.dot(ref_d, job_d)))
+
+
+    #   correct the nonadibatic coupling
+    if 'nacme' in job.results:
+        idx1 = job.results['nacstate1']
+        idx2 = job.results['nacstate2']
+        job.results['nacme'] = (np.array(job.results['nacme'])*min_signs[idx1]*min_signs[idx2]).tolist()
 
 
 def _run_jobs_on_client(client: TCPBClient, jobs: list[TCJob], server_root, client_ID=0, prev_results=[]):
@@ -786,7 +915,9 @@ def _set_guess(job_opts: dict, excited_type: str, prev_results: list[dict], stat
                         break
         else:
             #   we do not consider cis file because it is not stored in each job dorectory; we set it ourselves
-            job_opts['cisrestart'] = f"{job_opts['cisrestart']}_{client.host}_{client.port}"
+            host_port_str = f'{client.host}_{client.port}'
+            if host_port_str not in job_opts['cisrestart']:
+                job_opts['cisrestart'] = f"{job_opts['cisrestart']}_{host_port_str}"
             
 
     for prev_job in reversed(prev_results):
