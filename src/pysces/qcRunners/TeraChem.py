@@ -189,6 +189,19 @@ class TCJob():
         TCJob.__job_counter += 1
         self.__jobID = TCJob.__job_counter
 
+    def __repr__(self) -> str:
+        out_str = '('
+        for k in ['name', 'excited_type', 'job_type', 'state']:
+            out_str += f'{k}={self.__dict__[k]}, '
+        out_str += f'jobID={self.jobID}, complete={self.complete}'
+        out_str += ')'
+        return out_str
+
+    @property
+    def complete(self):
+        if self.results: return True
+        else: return False
+
     @property
     def jobID(self):
         return self.__jobID
@@ -271,7 +284,7 @@ class TCRunner():
         self._initial_job_options = tc_initial_job_options
 
         self._prev_results = []
-        self._prev_jobs = []
+        self._prev_jobs: list[TCJob] = []
         self._frame_counter = 0
         
 
