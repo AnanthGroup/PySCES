@@ -181,7 +181,7 @@ except Exception as e:
     local = {}
 
 def print_settings():
-    print
+    print()
     print(f'Number of atoms:                    {natom}')
     print(f'Number of electronic states:        {nel}')
     print(f'Total degress of freedom:           {3*natom + nel}')
@@ -200,7 +200,7 @@ def print_settings():
     # Print git commit
     try:
         command_git_tag="git -C "+str(os.path.dirname(os.path.realpath(__file__)))+" describe --tags"
-        print("git tag: "+str(os.popen(command_git_tag).readline()))
+        print("git tag: "+str(Popen(command_git_tag).readline()))
     except:
         #   older versions of git don't have the -C option
         print("Cound not obtain git tag: If ithis is not desired, check your git version")

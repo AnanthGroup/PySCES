@@ -411,9 +411,12 @@ def get_atom_label():
       f = open(os.path.join(__location__,fname_tc_xyz), 'r')
       f.readline()
       f.readline()
+    else:
+        raise ValueError("'mol_input_format' must be either 'gamess' or 'terachem'")
     for i in range(natom):
         x = f.readline().split()
         atoms.append(x[0])
+    f.close()
     return(atoms)
 
 

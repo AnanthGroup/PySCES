@@ -305,6 +305,18 @@ class TCRunner():
         self._prev_jobs: list[TCJob] = []
         self._frame_counter = 0
         
+    def __del__(self):
+        self._disconnect_clients()
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, type, value, traceback):
+        self._disconnect_clients()
+
+    def _disconnect_clients(self):
+        for client in self._client_list:
+            client.disconnect()
 
     @staticmethod
     def wait_until_available(client: TCPBClient, max_wait=10.0, time_btw_check=1.0):
