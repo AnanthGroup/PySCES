@@ -213,6 +213,24 @@ class TCJob():
     @results.setter
     def results(self, value):
         self._results = value
+
+class TCJobBatch():
+    '''
+        Combines multiple TCJobs into one wrapper
+    '''
+    def __init__(self, jobs: list[TCJob]) -> None:
+        self.jobs = jobs
+    
+    @property
+    def results_list(self) -> list[dict]:
+        return [j.results for j in self.jobs]
+    
+    @property
+    def timings(self) -> dict:
+        timings = {j.name: j.time for j in self.jobs}
+        timings['Wall_Time'] = np.sum(list(timings.values()))
+        return timings
+
 class TCRunner():
     def __init__(self, 
                  hosts: str, 
@@ -441,7 +459,7 @@ class TCRunner():
     def run_TC_new_geom(self, geom):
 
         try:
-            result = self._run_TC_new_geom_kernel(geom)
+            job_batch = self._run_TC_new_geom_kernel(geom)
         except TCServerStallError as error:
             host, port = self._host, self._port
             print('TC Server stalled: attempting to restart server')
@@ -451,9 +469,9 @@ class TCRunner():
             self._client = TCPBClient(host=host, port=port)
             self.wait_until_available(self._client, max_wait=20)
             print('Started new TC Server: re-running current step')
-            result = self.run_TC_new_geom(geom)
+            job_batch = self.run_TC_new_geom(geom)
                 
-        return result
+        return job_batch
     
     def set_avg_max_times(self, times: dict):
         max_time = np.max(list(times.values()))
@@ -470,11 +488,8 @@ class TCRunner():
         max_state = self._max_state
         gradients = self._grads
         couplings = self._NACs
-
         self._job_counter = 0
     
-        times = {}
-
         #   convert all keys to lowercase
         orig_opts = {}
         for key, val in opts.items():
@@ -560,14 +575,12 @@ class TCRunner():
         #   run energy only if gradients and NACs are not requested
         if len(grads) == 0 and len(NACs) == 0:
             job_opts = base_options.copy()
-            start = time.time()
             results = self.compute_job_sync_with_restart('energy', geom, 'angstrom', **job_opts)
-            times[f'energy'] = time.time() - start
+            # times[f'energy'] = time.time() - start
             results['run'] = 'energy'
             results.update(job_opts)
 
-            return [results], times
-
+            return TCJobBatch([results])
 
         #   create gradient job properties
         #   gradient computations have to be separated from NACs
@@ -613,12 +626,12 @@ class TCRunner():
             jobs_to_run[job_num % n_clients].append(TCJob(geom, job_opts.copy(), 'coupling', excited_type, max(nac1, nac2), name))
             job_num += 1
 
-        all_results, times = self._send_jobs_to_clients(jobs_to_run)
+        job_batch = self._send_jobs_to_clients(jobs_to_run)
         self._frame_counter += 1
         self._prev_jobs = [job for job_list in jobs_to_run for job in job_list]
-        return all_results, times
+        return job_batch
 
-    def _send_jobs_to_clients(self, jobs_to_run: list[TCJob]):
+    def _send_jobs_to_clients(self, jobs_to_run: list[TCJob]) -> tuple[TCJobBatch, dict]:
         n_clients = len(self._client_list)
 
         #   if only one client is being used, don't open up threads, easier to debug
@@ -637,18 +650,17 @@ class TCRunner():
                 for f in futures:
                     f.result()
 
-        #   collect all results and times
-        all_results = []
-        times = {}
+        #   collect all jobs
+        all_jobs = []
         for jobs in jobs_to_run:
             for j in jobs:
-                all_results.append(j.results)
-                times[j.name] = j.time
+                all_jobs.append(j)
 
-        self._prev_results = all_results
-        self.set_avg_max_times(times)
+        job_batch = TCJobBatch(all_jobs)
+        self._prev_results = job_batch.results_list
+        self.set_avg_max_times(job_batch.timings)
 
-        return all_results, times
+        return job_batch
 
     def _run_numerical_derivatives(self, ref_job: TCJob, dx=0.01, overlap=False):
         '''
