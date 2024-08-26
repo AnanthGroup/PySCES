@@ -674,16 +674,19 @@ class TCRunner():
 
         return job_batch
 
-    def _run_numerical_derivatives(self, ref_job: TCJob, dx=0.01, overlap=False):
+    def _run_numerical_derivatives(self, ref_job: TCJob, n_points=3, dx=0.01, overlap=False):
         '''
             dx is in bohr
         '''
+
         base_opts = ref_job.opts.copy()
         num_deriv_jobs = []
         indicies = []
         for n in range(len(ref_job.geom)):
             for i in [0, 1, 2]:
-                for j in [-1, +1]:
+                shift_multiples = (np.arange(n_points) - n_points//2).tolist()
+                shift_multiples.pop(n_points//2)
+                for j in shift_multiples:
                     indicies.append((n, i, j))
 
         for n, i, j in indicies:
