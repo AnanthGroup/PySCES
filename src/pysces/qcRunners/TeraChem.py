@@ -14,9 +14,17 @@ import time
 import psutil
 import concurrent.futures
 import copy
+import pickle
+from typing import Literal
+import itertools
 
 
 _server_processes = {}
+
+#   debug flags
+_DEBUG = bool(int(os.environ.get('DEBUG', False)))
+_DEBUG_TRAJ = os.environ.get('DEBUG_TRAJ', False)
+_SAVE_DEBUG_TRAJ = os.environ.get('SAVE_DEBUG_TRAJ', False)
 
 class TCServerStallError(Exception):
     def __init__(self, message):            
@@ -148,12 +156,12 @@ def compute_job_sync(client: TCPBClient, jobType="energy", geom=None, unitType="
     print("Submitting Job...")
     accepted = client.send_job_async(jobType, geom, unitType, **kwargs)
     while accepted is False:
-        time.sleep(0.1)
+        time.sleep(0.5)
         accepted = client.send_job_async(jobType, geom, unitType, **kwargs)
 
     completed = client.check_job_complete()
     while completed is False:
-        time.sleep(0.1)
+        time.sleep(0.5)
         client._send_msg(pb.STATUS, None)
         status = client._recv_msg(pb.STATUS)
 
@@ -167,6 +175,65 @@ def compute_job_sync(client: TCPBClient, jobType="energy", geom=None, unitType="
                 client,
             )
     return client.recv_job_async()
+
+class TCJob():
+    __job_counter = 0
+    def __init__(self, geom, opts, job_type, excited_type, state, name='') -> None:
+        self.geom = geom
+        self.excited_type: Literal['cas', 'cis'] = excited_type
+        self.opts = opts
+        self.job_type = job_type
+        self.state = state
+        self.name = name
+        self.time = 0.0
+        self._results = {}
+
+        assert self.excited_type in ('cas', 'cis')
+
+        TCJob.__job_counter += 1
+        self.__jobID = TCJob.__job_counter
+
+    def __repr__(self) -> str:
+        out_str = '('
+        for k in ['name', 'excited_type', 'job_type', 'state']:
+            out_str += f'{k}={self.__dict__[k]}, '
+        out_str += f'jobID={self.jobID}, complete={self.complete}'
+        out_str += ')'
+        return out_str
+
+    @property
+    def complete(self):
+        if self.results: return True
+        else: return False
+
+    @property
+    def jobID(self):
+        return self.__jobID
+    
+    @property
+    def results(self):
+        return self._results
+    
+    @results.setter
+    def results(self, value):
+        self._results = value
+
+class TCJobBatch():
+    '''
+        Combines multiple TCJobs into one wrapper
+    '''
+    def __init__(self, jobs: list[TCJob]) -> None:
+        self.jobs = jobs
+    
+    @property
+    def results_list(self) -> list[dict]:
+        return [j.results for j in self.jobs]
+    
+    @property
+    def timings(self) -> dict:
+        timings = {j.name: j.time for j in self.jobs}
+        timings['Wall_Time'] = np.sum(list(timings.values()))
+        return timings
 
 class TCRunner():
     def __init__(self, 
@@ -230,7 +297,7 @@ class TCRunner():
             raise ValueError('either "max_state" or a list of "grads" must be specified')
         # self._max_state = run_options.get('max_state', 0)
         # self._grads = run_options.get('grads', False)
-        self._NACs = run_options.pop('nacs', False)
+        self._NACs = run_options.pop('nacs', 'all')
 
         #   job options for specific jobs
         self._spec_job_opts = tc_spec_job_opts
@@ -239,8 +306,30 @@ class TCRunner():
         self._initial_job_options = tc_initial_job_options
 
         self._prev_results = []
+        self._prev_jobs: list[TCJob] = []
         self._frame_counter = 0
+
+        # Don't actually run terachem, instead load a trajectory from a file
+        self._debug_traj = []
+        if _DEBUG_TRAJ:
+            with open(_DEBUG_TRAJ, 'rb') as file:
+                self._debug_traj = pickle.load(file)
         
+    def __del__(self):
+        self._disconnect_clients()
+        if _SAVE_DEBUG_TRAJ:
+            with open(_SAVE_DEBUG_TRAJ, 'wb') as file:
+                pickle.dump(self._debug_traj, file)
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, type, value, traceback):
+        self._disconnect_clients()
+
+    def _disconnect_clients(self):
+        for client in self._client_list:
+            client.disconnect()
 
     @staticmethod
     def wait_until_available(client: TCPBClient, max_wait=10.0, time_btw_check=1.0):
@@ -391,11 +480,15 @@ class TCRunner():
                     raise TCServerStallError('TeraChem server might have stalled')
 
             return self._client.recv_job_async()
+        
+    def set_avg_max_times(self, times: dict):
+        max_time = np.max(list(times.values()))
+        self._max_time_list.append(max_time)
+        self._max_time = np.mean(self._max_time_list)*5
 
     def run_TC_new_geom(self, geom):
-
         try:
-            result = self._run_TC_new_geom_kernel(geom)
+            job_batch = self._run_TC_new_geom_kernel(geom)
         except TCServerStallError as error:
             host, port = self._host, self._port
             print('TC Server stalled: attempting to restart server')
@@ -405,17 +498,18 @@ class TCRunner():
             self._client = TCPBClient(host=host, port=port)
             self.wait_until_available(self._client, max_wait=20)
             print('Started new TC Server: re-running current step')
-            result = self.run_TC_new_geom(geom)
+            job_batch = self.run_TC_new_geom(geom)
+
+        if _SAVE_DEBUG_TRAJ:
+            self._debug_traj.append(job_batch)
                 
-        return result
-    
-    def set_avg_max_times(self, times: dict):
-        max_time = np.max(list(times.values()))
-        self._max_time_list.append(max_time)
-        self._max_time = np.mean(self._max_time_list)*5
-    
+        return job_batch
 
     def _run_TC_new_geom_kernel(self, geom):
+
+        if self._debug_traj:
+            time.sleep(1)
+            return self._debug_traj.pop(0)
 
         self._n_calls += 1
         client = self._client
@@ -424,11 +518,8 @@ class TCRunner():
         max_state = self._max_state
         gradients = self._grads
         couplings = self._NACs
-
         self._job_counter = 0
     
-        times = {}
-
         #   convert all keys to lowercase
         orig_opts = {}
         for key, val in opts.items():
@@ -508,19 +599,18 @@ class TCRunner():
 
 
         n_clients = len(self._client_list)
-        jobs_to_run = [{} for i in range(n_clients)]
+        jobs_to_run = [[] for i in range(n_clients)]
         job_num = 0
 
         #   run energy only if gradients and NACs are not requested
-        all_results = []
         if len(grads) == 0 and len(NACs) == 0:
             job_opts = base_options.copy()
-            start = time.time()
             results = self.compute_job_sync_with_restart('energy', geom, 'angstrom', **job_opts)
-            times[f'energy'] = time.time() - start
+            # times[f'energy'] = time.time() - start
             results['run'] = 'energy'
             results.update(job_opts)
-            all_results.append(results)
+
+            return TCJobBatch([results])
 
         #   create gradient job properties
         #   gradient computations have to be separated from NACs
@@ -541,11 +631,7 @@ class TCRunner():
                     
             # self._set_guess(job_opts, excited_type, all_results, state)
 
-            jobs_to_run[job_num % n_clients][name] = {
-                'opts': job_opts.copy(), 
-                'type': 'gradient', 
-                'state': state
-                }
+            jobs_to_run[job_num % n_clients].append(TCJob(geom, job_opts.copy(), 'gradient', excited_type, state, name))
             job_num += 1
 
 
@@ -567,57 +653,273 @@ class TCRunner():
             job_opts['nacstate1'] = nac1
             job_opts['nacstate2'] = nac2
 
-            jobs_to_run[job_num % n_clients][name] = {
-                'opts': job_opts.copy(),
-                'type': 'coupling',
-                'state': max(nac1, nac2)
-                }
+            jobs_to_run[job_num % n_clients].append(TCJob(geom, job_opts.copy(), 'coupling', excited_type, max(nac1, nac2), name))
             job_num += 1
 
+        job_batch = self._send_jobs_to_clients(jobs_to_run)
+        self._frame_counter += 1
+        self._prev_jobs = [job for job_list in jobs_to_run for job in job_list]
+        return job_batch
+
+    def _send_jobs_to_clients(self, jobs_to_run: list[TCJob]) -> tuple[TCJobBatch, dict]:
+        n_clients = len(self._client_list)
 
         #   if only one client is being used, don't open up threads, easier to debug
         if n_clients == 1:
-            start = time.time()
-            results, times = _run_jobs(self._client_list[0], jobs_to_run[0], geom, excited_type, self._server_root_list[0], 0, self._prev_results)
-            all_results += results
-            end = time.time()
+            _run_jobs_on_client(self._client_list[0], jobs_to_run[0], self._server_root_list[0], 0, self._prev_results)
 
+        #   submit jobs as separate threads, one per client
         else:
-            start = time.time()
             with concurrent.futures.ThreadPoolExecutor() as executor:
                 futures = []
                 for i in range(n_clients):
                     jobs = jobs_to_run[i]
-                    args = (self._client_list[i], jobs, geom, excited_type, self._server_root_list[i], i, self._prev_results)
-                    future = executor.submit(_run_jobs, *args)
+                    args = (self._client_list[i], jobs, self._server_root_list[i], i, self._prev_results)
+                    future = executor.submit(_run_jobs_on_client, *args)
                     futures.append(future)
                 for f in futures:
-                    batch_results, batch_times = f.result()
-                    all_results += batch_results
-                    times.update(batch_times)
-            end = time.time()
+                    f.result()
 
-        self._prev_results = all_results
-        self._frame_counter += 1
-        self.set_avg_max_times(times)
+        #   collect all jobs
+        all_jobs = []
+        for jobs in jobs_to_run:
+            for j in jobs:
+                all_jobs.append(j)
 
-        return all_results, times
-    
+        job_batch = TCJobBatch(all_jobs)
+        self._prev_results = job_batch.results_list
+        self.set_avg_max_times(job_batch.timings)
+
+        return job_batch
+
+    def _run_numerical_derivatives(self, ref_job: TCJob, n_points=3, dx=0.01, overlap=False):
+        '''
+            dx is in bohr
+        '''
+
+        base_opts = ref_job.opts.copy()
+        num_deriv_jobs = []
+        indicies = []
+        for n in range(len(ref_job.geom)):
+            for i in [0, 1, 2]:
+                shift_multiples = (np.arange(n_points) - n_points//2).tolist()
+                shift_multiples.pop(n_points//2)
+                for j in shift_multiples:
+                    indicies.append((n, i, j))
+
+        for n, i, j in indicies:
+            new_geom = np.copy(ref_job.geom)
+            new_geom[n, i] += j*dx/1.8897259886 # angstrom to bohr
+            job = TCJob(new_geom, base_opts, 'energy', ref_job.excited_type, ref_job.state, str((n, i, j)))
+            num_deriv_jobs.append(job)
+
+
+        if not _DEBUG:
+            _run_jobs_on_client(self._client_list[0], num_deriv_jobs, self._server_root_list[0], 0, self._prev_results)
+        else:
+            if os.path.isfile('_num_deriv_jobs.pkl'):
+                with open('_num_deriv_jobs.pkl', 'rb') as file: num_deriv_jobs = pickle.load(file)
+            else:
+                _run_jobs_on_client(self._client_list[0], num_deriv_jobs, self._server_root_list[0], 0, self._prev_results)
+                with open('_num_deriv_jobs.pkl', 'wb') as file: pickle.dump(num_deriv_jobs, file)        
+
+        if overlap:
+            overlap_jobs = []
+            job_pairs = []
+            for deriv_job in num_deriv_jobs:
+                if ref_job.excited_type != 'cas':
+                    raise ValueError('Wavefunction overlaps are only available for CAS methods in TeraChem')
+                opts = copy.copy(base_opts)
+                job_results = deriv_job.results
+                ref_results = ref_job.results
+                opts['cvec1file'] = os.path.join(self._server_root_list[0], ref_results["job_scr_dir"], "CIvecs.Singlet.dat")
+                opts['cvec2file'] = os.path.join(self._server_root_list[0], job_results["job_scr_dir"], "CIvecs.Singlet.dat")
+                opts['orb1afile'] = os.path.join(self._server_root_list[0], ref_results["job_scr_dir"], "c0")
+                opts['orb2afile'] = os.path.join(self._server_root_list[0], job_results["job_scr_dir"], "c0")
+                opts['old_coors'] = os.path.join(self._server_root_list[0], ref_results["job_dir"], "geom.xyz")
+                job = TCJob(job.geom, opts, 'ci_vec_overlap', ref_job.excited_type, ref_job.state, f'overlap_{deriv_job.name}')
+                overlap_jobs.append(job)
+                # deriv_to_overlap[deriv_job.jobID] = job.jobID
+                job_pairs.append((deriv_job, job))
+
+            if not _DEBUG:
+                _run_jobs_on_client(self._client_list[0], overlap_jobs, self._server_root_list[0], 0, self._prev_results)
+            else:
+                if os.path.isfile('_overlap_pairs.pkl'):
+                    with open('_overlap_pairs.pkl', 'rb') as file: job_pairs = pickle.load(file)
+                else:
+                    _run_jobs_on_client(self._client_list[0], overlap_jobs, self._server_root_list[0], 0, self._prev_results)
+                    with open('_overlap_pairs.pkl', 'wb') as file: pickle.dump(job_pairs, file)
+            
+
+            #   make sure each returned job is in the same order as in job_pairs
+            return_dict = {'num_deriv_jobs': [], 'overlap_jobs': []}
+            for deriv_job, overlap_job in job_pairs:
+                return_dict['num_deriv_jobs'].append(deriv_job)
+                return_dict['overlap_jobs'].append(overlap_job)
+            return return_dict
+        
+        else:
+            return_dict = {'num_deriv_jobs': num_deriv_jobs, 'overlap_jobs': None}
+            return return_dict
+
     # def _set_guess(self, job_opts: dict, excited_type: str, all_results: list[dict], state):
     #     return _set_guess(job_opts, excited_type, all_results, state)
 
-def _run_jobs(client: TCPBClient, jobs, geom, excited_type, server_root, client_ID=0, prev_results=[]):
+
+def _correct_signs_from_overlaps(job: TCJob, overlap_job: TCJob):
+    '''
+        Correct the sings of transition dipole moments and NACs based 
+        on the overlaps with previous jobs.
+    '''
+
+    signs = np.sign(np.diag(overlap_job.results['ci_overlap']))
+    n_states = len(job.results['energy'])
+
+    #   correct the transition dipole moments
+    for k in ['cas', 'cis']:
+        key = f'{k}_transition_dipoles' 
+        if key not in job.results:
+            continue
+        count = 0
+        for i in range(n_states):
+            for j in range(i+1, n_states):
+                dipole = job.results[key][count]
+                job.results[key][count] = (np.array(dipole)*signs[i]*signs[j]).tolist()
+                count += 1
+
+    #   correct the nonadibatic coupling
+    if 'nacme' in job.results:
+        idx1 = job.results['nacstate1']
+        idx2 = job.results['nacstate2']
+        job.results['nacme'] = (np.array(job.results['nacme'])*signs[idx1]*signs[idx2]).tolist()
+    
+def _correct_signs_from_charges(job: TCJob, ref_job: TCJob):
+    '''
+        Correct the sings of transition dipole moments and NACs based 
+        on the overlaps with previous jobs.
+    '''
+    _debug_print = False
+
+    n_states = len(job.results['energy'])
+
+    if 'cas_tr_resp_charges' in job.results:
+        exc_type = 'cas'
+    elif 'cis_tr_resp_charges' in job.results:
+        exc_type = 'cis'
+    else:
+        warnings.warn('cas_tr_resp_charges or cis_tr_resp_charges not found in job results, cannot correct transition charges')
+        return
+
+    #   Get the correct dipole key. Some CAS jobs don't have an 's' at the end
+    dipole_key = None
+    if f'{exc_type}_transition_dipole' in job.results:
+        dipole_key = f'{exc_type}_transition_dipole'
+
+    elif f'{exc_type}_transition_dipoles' in job.results:
+        dipole_key = f'{exc_type}_transition_dipoles' 
+
+    charges_orig = np.array(job.results.get(f'{exc_type}_tr_resp_charges', None))
+    charges_ref = np.array(ref_job.results.get(f'{exc_type}_tr_resp_charges', None))
+    if charges_orig is None or charges_ref is None:
+        return
+
+    # for line in job.results['tc.out']:
+    #     print(line)
+
+    min_RRMSE_all = []
+    min_RRMSE = 1e20
+    min_signs = None
+    combos = itertools.combinations_with_replacement(range(n_states), n_states)
+    used_signs = []
+
+    #   we exhaustively search for the combination of sign flips that minimizes
+    #   the agreement with the reference job. This is not a problem for only a
+    #   small number of states, but will quickly become expensive to many states
+    for c in combos:
+        c_unique = set(c)
+
+        #   don't include cases where the ground state is negated
+        # if 0 in c:
+        #     continue
+
+        #   don't use repeated combos
+        # if c_unique in used_signs:
+        #     continue
+        used_signs.append(c_unique)
+
+        #   each indix indicates a the state that is negated
+        signs = np.ones(n_states, dtype=int)
+        for i in c_unique:
+            signs[i] = -1
+
+        RRMSE = 0.0
+        count = 0
+        for i in range(0, n_states):
+            for j in range(i+1, n_states):
+                q_new = charges_orig[count]*signs[i]*signs[j]
+                q_ref = charges_ref[count]
+                arg_max = np.argmax(np.abs(q_new))
+                RRMSE += np.sqrt(np.mean((q_new - q_ref)**2) / np.mean(q_ref**2))
+
+                # print(count, i, j, signs, q_ref[arg_max], q_new[arg_max])
+                # if signs.tolist() == [-1,-1,-1,1]:
+                #     for x, y in zip(q_ref, q_new):
+                #         print(x, y)
+                #     print("CURRENT RRMSE: ", RRMSE)
+
+                count += 1
+        # print(RRMSE)
+        # print()
+        min_RRMSE_all.append((signs, RRMSE))
+        if RRMSE < min_RRMSE:
+            min_signs = signs.copy()
+            min_RRMSE = RRMSE
+
+
+    if _debug_print:
+        print("Transition dipoles BEFORE sign corrections")
+        for i in range(len(job.results[dipole_key])):
+            fmt_str = '{:10.6f} '*3 + '|' + '{:10.6f} '*3 + '|' + '{:10.6f}'
+            ref_d, job_d = ref_job.results[dipole_key][i], job.results[dipole_key][i]
+            print(fmt_str.format(*ref_d, *job_d, np.dot(ref_d, job_d)))
+
+    count = 0
+    for i in range(0, n_states):
+        for j in range(i+1, n_states):
+            dipole = np.array(job.results[dipole_key][count])
+            job.results[dipole_key][count] = dipole*min_signs[i]*min_signs[j]
+            count += 1
+
+    if _debug_print:
+        print("Transition dipoles AFTER sign corrections")
+        print("minimum RRMSE: ", min_RRMSE, min_signs)
+        for i in range(len(job.results[dipole_key])):
+            ref_d, job_d = ref_job.results[dipole_key][i], job.results[dipole_key][i]
+            print(fmt_str.format(*ref_d, *job_d, np.dot(ref_d, job_d)))
+
+
+    #   correct the nonadibatic coupling
+    if 'nacme' in job.results:
+        idx1 = job.results['nacstate1']
+        idx2 = job.results['nacstate2']
+        job.results['nacme'] = (np.array(job.results['nacme'])*min_signs[idx1]*min_signs[idx2]).tolist()
+
+
+def _run_jobs_on_client(client: TCPBClient, jobs: list[TCJob], server_root, client_ID=0, prev_results=[]):
     times = {}
     all_results = []
-    for job_name, job_props in jobs.items():
-        job_opts =  copy.deepcopy(job_props['opts'])
-        job_type =  copy.deepcopy(job_props['type'])
-        job_state = copy.deepcopy(job_props['state'])
 
-        _set_guess(job_opts, excited_type, all_results + prev_results, job_state, client, server_root)
+    for j in jobs:
+        job_name = j.name
+        geom = j.geom
+        job_opts =  j.opts
+        job_type =  j.job_type
+
+        _set_guess(job_opts, j.excited_type, all_results + prev_results, j.state, client, server_root)
         print(f"\nRunning {job_name} on client ID {client_ID}")
-        if 'cisrestart' in job_opts:
-            job_opts['cisrestart'] = f"{job_opts['cisrestart']}_{client.host}_{client.port}"
+        # if 'cisrestart' in job_opts:
+        #     job_opts['cisrestart'] = f"{job_opts['cisrestart']}_{client.host}_{client.port}"
 
         start = time.time()
         # results = client.compute_job_sync(job_type, geom, 'angstrom', **job_opts)
@@ -637,16 +939,17 @@ def _run_jobs(client: TCPBClient, jobs, geom, excited_type, server_root, client_
                     exit()
                 else:
                     try_again = True
-                    print("Server error recieved; trying to run job one more")
+                    print("Server error recieved; trying to run job once more")
                     time.sleep(30)
-
-        times[job_name] = time.time() - start
+        j.time = time.time() - start
+        # times[job_name] = time.time() - start
         results['run'] = job_type
         TCRunner.append_output_file(results, server_root)
         results.update(job_opts)
+        j.results = results.copy()
         all_results.append(results)
 
-    return all_results, times
+    # return all_results, times
 
 def _set_guess(job_opts: dict, excited_type: str, prev_results: list[dict], state: int, client: TCPBClient, server_root='.'):
 
@@ -668,7 +971,12 @@ def _set_guess(job_opts: dict, excited_type: str, prev_results: list[dict], stat
                     if prev_orb_file[-6:] == 'casscf':
                         cas_guess = os.path.join(server_root, prev_orb_file)
                         break
-        #   we do not consider cis file because it is not stored in each job dorectory; we set it ourselves
+        else:
+            #   we do not consider cis file because it is not stored in each job dorectory; we set it ourselves
+            host_port_str = f'{client.host}_{client.port}'
+            if host_port_str not in job_opts['cisrestart']:
+                job_opts['cisrestart'] = f"{job_opts['cisrestart']}_{host_port_str}"
+            
 
     for prev_job in reversed(prev_results):
         if 'orbfile' in prev_job:
