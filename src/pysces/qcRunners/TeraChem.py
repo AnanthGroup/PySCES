@@ -20,7 +20,11 @@ import itertools
 
 
 _server_processes = {}
+
+#   debug flags
 _DEBUG = bool(int(os.environ.get('DEBUG', False)))
+_DEBUG_TRAJ = os.environ.get('DEBUG_TRAJ', False)
+_SAVE_DEBUG_TRAJ = os.environ.get('SAVE_DEBUG_TRAJ', False)
 
 class TCServerStallError(Exception):
     def __init__(self, message):            
@@ -304,9 +308,18 @@ class TCRunner():
         self._prev_results = []
         self._prev_jobs: list[TCJob] = []
         self._frame_counter = 0
+
+        # Don't actually run terachem, instead load a trajectory from a file
+        self._debug_traj = []
+        if _DEBUG_TRAJ:
+            with open(_DEBUG_TRAJ, 'rb') as file:
+                self._debug_traj = pickle.load(file)
         
     def __del__(self):
         self._disconnect_clients()
+        if _SAVE_DEBUG_TRAJ:
+            with open(_SAVE_DEBUG_TRAJ, 'wb') as file:
+                pickle.dump(self._debug_traj, file)
 
     def __enter__(self):
         return self
@@ -467,9 +480,13 @@ class TCRunner():
                     raise TCServerStallError('TeraChem server might have stalled')
 
             return self._client.recv_job_async()
+        
+    def set_avg_max_times(self, times: dict):
+        max_time = np.max(list(times.values()))
+        self._max_time_list.append(max_time)
+        self._max_time = np.mean(self._max_time_list)*5
 
     def run_TC_new_geom(self, geom):
-
         try:
             job_batch = self._run_TC_new_geom_kernel(geom)
         except TCServerStallError as error:
@@ -482,16 +499,17 @@ class TCRunner():
             self.wait_until_available(self._client, max_wait=20)
             print('Started new TC Server: re-running current step')
             job_batch = self.run_TC_new_geom(geom)
+
+        if _SAVE_DEBUG_TRAJ:
+            self._debug_traj.append(job_batch)
                 
         return job_batch
-    
-    def set_avg_max_times(self, times: dict):
-        max_time = np.max(list(times.values()))
-        self._max_time_list.append(max_time)
-        self._max_time = np.mean(self._max_time_list)*5
-    
 
     def _run_TC_new_geom_kernel(self, geom):
+
+        if self._debug_traj:
+            time.sleep(1)
+            return self._debug_traj.pop(0)
 
         self._n_calls += 1
         client = self._client
