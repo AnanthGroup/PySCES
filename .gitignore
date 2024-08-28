@@ -13,3 +13,9 @@ examples/*/__pycache__
 examples/*/restart.*
 
 tests/host_ports.txt
+tests/*/logs
+tests/*/logs.*
+tests/*/progress.out
+tests/*/restart.json
+tests/*/restart.out
+tests/*/corr.out
