@@ -1655,7 +1655,7 @@ def rk4(initq, initp, tStop, H, restart, amu_mat, U, com_ang, AN_mat):
     # pops = compute_CF_single(q[0:nel], p[0:nel])
     logger.atoms = atoms
     # qc_timings['Wall_Time'] = 0.0
-    logger.write(t, init_energy, elecE,  grad, nac, job_batch.timings, elec_p=p[0:nel], elec_q=q[0:nel], nuc_p=p[nel:], jobs_data=job_batch.results_list)
+    logger.write(t, init_energy, elecE,  grad, nac, job_batch.timings, elec_p=p[0:nel], elec_q=q[0:nel], nuc_p=p[nel:], jobs_data=job_batch)
 
     opt['guess'] = 'moread'
     X,Y = [],[]
@@ -1736,7 +1736,7 @@ def rk4(initq, initp, tStop, H, restart, amu_mat, U, com_ang, AN_mat):
             # pops = compute_CF_single(y[0:nel], y[ndof:ndof+nel])
             # end_time = time.time()
             # qc_timings['Wall_Time'] = end_time - start_time
-            logger.write(t, total_E=new_energy, elec_E=elecE,  grads=grad, NACs=nac, timings=job_batch.timings, elec_q=y[0:nel], elec_p=y[ndof:ndof+nel], nuc_p=y[-natom*3:], jobs_data=job_batch.results_list)
+            logger.write(t, total_E=new_energy, elec_E=elecE,  grads=grad, NACs=nac, timings=job_batch.timings, elec_q=y[0:nel], elec_p=y[ndof:ndof+nel], nuc_p=y[-natom*3:], jobs_data=job_batch)
             write_restart('restart.json', [Y[-1][:ndof], Y[-1][ndof:]], nac_hist, tdm_hist, new_energy, t, nel, 'rk4')
 
             if t == tStop:

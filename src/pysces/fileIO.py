@@ -1,8 +1,18 @@
 import os
 import json
 import numpy as np
-#import qcRunners.TeraChem as TC
+import h5py
 from copy import deepcopy
+import pprint
+
+_TC_AVAIL = False
+try:
+    import yaml
+    from pysces.qcRunners import TeraChem as TC
+    
+    _TC_AVAIL=True
+except:
+    pass
 
 def read_restart(file_loc: str='restart.out', ndof: int=0, integrator: str='RK4') -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, float, float]:
     '''
@@ -141,6 +151,19 @@ def write_restart(file_loc: str, coord: list | np.ndarray, nac_hist: np.ndarray,
     else:
         exit(f'ERROR: only RK4 is implimented fileIO')
 
+def _append_dataset(ds: h5py.Dataset, value):
+    ds.resize(ds.shape[0]+1, axis=0)
+    ds[-1] = value
+
+def _print_h5_data(data: h5py.File | h5py.Dataset | h5py.Group, spacing=''):
+    if isinstance(data, h5py.Group) or isinstance(data, h5py.File):
+        for key, val in data.items():
+            print(f'{spacing}{key}: ')
+            _print_h5_data(val, spacing + '    ')
+    elif isinstance(data, h5py.Dataset):
+        print(f'{spacing}{data.shape}')
+        print(data[:])
+
 class LoggerData():
     def __init__(self, time, atoms=None, total_E=None, elec_E=None, grads=None, NACs=None, timings=None, elec_p=None, elec_q=None, nuc_p=None, nuc_q=None, state_labels=None, jobs_data=None) -> None:
         self.time = time
@@ -157,7 +180,7 @@ class LoggerData():
         self.state_labels = state_labels
 
         #   place holder for all other types of data
-        self.jobs_data = jobs_data
+        self.jobs_data: dict | TC.TCJobBatch = jobs_data
 
 class SimulationLogger():
     def __init__(self, n_states, save_energy=True, save_grad=True, save_nac=True, save_corr=True, save_timigs=True, dir=None, save_geo=True, save_elec=True, save_p=True, save_jobs=True, atoms=None) -> None:
@@ -199,28 +222,137 @@ class SimulationLogger():
 
         #TODO: add nuc_geo logging here
 
-class TCJobsLogger():
+class TCJobsLogger_OLD():
     def __init__(self, file_loc: str) -> None:
         self._file_loc = file_loc
         self._file = None
+
+        if not _TC_AVAIL:
+            raise ImportError('Could not import TeraChem Runner: TCJobsLogger not available for use')
         
     def __del__(self):
         if self._file is not None:
             self._file.close()
 
     def write(self, data: LoggerData):
-        if data.jobs_data is not None:
-            if self._file is None:
-                self._file = open(self._file_loc, 'w')
-                
-            import yaml
-            from pysces.qcRunners import TeraChem as TC
+        if data.jobs_data is None:
+            return
+        if self._file is None:
+            self._file = open(self._file_loc, 'w')
+        if isinstance(data, TC.TCJobBatch):
+            results = data.results_list
+        else:
             results = deepcopy(data.jobs_data)
-            cleaned = TC.TCRunner.cleanup_multiple_jobs(results, 'orb_energies', 'bond_order', 'orb_occupations', 'spins')
+        cleaned = TC.TCRunner.cleanup_multiple_jobs(results, 'orb_energies', 'bond_order', 'orb_occupations', 'spins')
 
-            out_data = {'time': data.time, 'jobs_data': cleaned}
-            yaml.dump(out_data, self._file, allow_unicode=True, explicit_start=True, default_flow_style=False, sort_keys=False)
-            self._file.flush()
+        out_data = {'time': data.time, 'jobs_data': cleaned}
+        yaml.dump(out_data, self._file, allow_unicode=True, explicit_start=True, default_flow_style=False, sort_keys=False)
+        self._file.flush()
+
+class TCJobsLogger():
+    def __init__(self, file_loc: str) -> None:
+        self._file_loc = file_loc
+        self._file: h5py.File = None
+
+        if not _TC_AVAIL:
+            raise ImportError('Could not import TeraChem Runner: TCJobsLogger not available for use')
+
+        self._data_fields = [
+            'energy', 'gradient', 'dipole_moment', 'dipole_vector', 'nacme', 'cis_', 'cas_'
+        ]
+        self._job_datasets = {}
+        self._group_name = 'tc_job_data'
+
+        
+    def __del__(self):
+        if self._file is not None:
+            self._file.close()
+
+    def write(self, data: LoggerData):
+
+        if data.jobs_data is None:
+            return
+        
+        if self._file is None:
+            self._file = h5py.File(self._file_loc, 'w')
+            
+        results: list[dict] = deepcopy(data.jobs_data.results_list)
+        cleaned_results = TC.TCRunner.cleanup_multiple_jobs(results, 'orb_energies', 'bond_order', 'orb_occupations', 'spins')
+        cleaned_batch = deepcopy(data.jobs_data)
+        for job, res in zip(cleaned_batch.jobs, cleaned_results):
+            job.results = res
+
+
+        if self._group_name not in self._file:
+            self._file.create_group(self._group_name)
+
+            #   collect all data
+            # all_job_data = {}
+            # for job in results:
+            #     all_job_data.update(job)
+
+            #   figure out which keys to actually add to the traj file
+            # fields_to_create = []
+            # for k in all_job_data:
+            #     for f in self._data_fields:
+            #         if f in k:
+            #             fields_to_create.append(k)
+            #             break
+            
+            # for f in fields_to_create:
+            #     data = np.array(all_job_data[f])
+            #     self._file.create_dataset(name=f'tc_job_data/{f}', 
+            #                               shape = (1,) + data.shape, 
+            #                               maxshape=(None,) + data.shape,
+            #                               data = data
+            #                               )
+
+            
+            for job in cleaned_batch.jobs:
+                group = self._file[self._group_name].create_group(name=job.name)
+                group.create_dataset(name='timestep', shape=(0,1), maxshape=(None, 1))
+                for key, value in job.results.items():
+                    for k in self._data_fields:
+                        if k in key:
+                            if isinstance(value, list):
+                                print("FOUND LIST: ", key, value)
+                                shape = (0,) + np.shape(value)
+                            else:   #   assume it is a single value
+                                print("NOT LIST: ", key, value, type(value))
+                                shape = (0,1)
+                            group.create_dataset(name=key, shape=shape, maxshape=(None,) + shape[1:])
+
+                #   couldn't figure out how to initialize with an empty shape when using strings,
+                #   so I just resized afterwards
+                ds = group.create_dataset(name='other', shape=(1,1), maxshape=(None, 1), data='')
+                ds.resize((0, 1))
+
+
+            self._file.create_dataset(name = f'{self._group_name}/atoms', data = results[0]['atoms'].tolist())
+            geom = np.array(results[0]['geom'].tolist())
+            self._file.create_dataset(name = f'{self._group_name}/geom', data = [geom], maxshape=(None,) + geom.shape)
+
+        group = self._file[self._group_name]
+        _append_dataset(group['geom'], cleaned_batch.results_list[0]['geom'])
+        for job in cleaned_batch.jobs:
+            results = job.results.copy()
+            results.pop('geom')
+            results.pop('atoms')
+            for key in group[job.name]:
+                if key in ['other', 'timestep']:
+                    continue
+                _append_dataset(group[job.name][key], results[key])
+                results.pop(key)
+            other_data = json.dumps(results)
+            print("ADDING OTHER DATA")
+            pprint.pprint(other_data)
+            _append_dataset(group[job.name]['other'], other_data)
+            _append_dataset(group[job.name]['timestep'], data.time)
+            
+        _print_h5_data(self._file)
+        exit()
+
+        self._file.flush()
 
 class NucGeoLogger():
     def __init__(self, file_loc: str) -> None:
