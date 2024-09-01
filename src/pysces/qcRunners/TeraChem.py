@@ -265,7 +265,11 @@ class TCRunner():
         self._port_list = ports
         self._server_root_list = server_roots
         self._client_list = []
+
         for h, p in zip(hosts, ports):
+            if _DEBUG_TRAJ: 
+                self._client_list.append(None)
+                break
             client = TCPBClient(host=h, port=p)
             self.wait_until_available(client, max_wait=max_wait)
             self._client_list.append(client)
@@ -329,6 +333,8 @@ class TCRunner():
         self._disconnect_clients()
 
     def _disconnect_clients(self):
+        if _DEBUG_TRAJ:
+            return
         for client in self._client_list:
             client.disconnect()
 
