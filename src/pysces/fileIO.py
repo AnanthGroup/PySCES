@@ -151,19 +151,127 @@ def write_restart(file_loc: str, coord: list | np.ndarray, nac_hist: np.ndarray,
     else:
         exit(f'ERROR: only RK4 is implimented fileIO')
 
-def _append_dataset(ds: h5py.Dataset, value):
-    ds.resize(ds.shape[0]+1, axis=0)
-    ds[-1] = value
+class H5File(h5py.File):
+    def __init__(self, name, mode='r', driver=None, libver=None, userblock_size=None, swmr=False, rdcc_nslots=None, rdcc_nbytes=None, rdcc_w0=None, track_order=None, fs_strategy=None, fs_persist=False, fs_threshold=1, fs_page_size=None, page_buf_size=None, min_meta_keep=0, min_raw_keep=0, locking=None, alignment_threshold=1, alignment_interval=1, meta_block_size=None, **kwds):
+        super().__init__(name, mode, driver, libver, userblock_size, swmr, rdcc_nslots, rdcc_nbytes, rdcc_w0, track_order, fs_strategy, fs_persist, fs_threshold, fs_page_size, page_buf_size, min_meta_keep, min_raw_keep, locking, alignment_threshold, alignment_interval, meta_block_size, **kwds)
 
-def _print_h5_data(data: h5py.File | h5py.Dataset | h5py.Group, spacing=''):
+    @staticmethod
+    def _append_dataset(ds: h5py.Dataset, value):
+        ds.resize(ds.shape[0]+1, axis=0)
+        ds[-1] = value
+
+    def print_data_structure(self, data: h5py.File | h5py.Dataset | h5py.Group = None, string=''):
+        if data is None:
+            data = self
+        if isinstance(data, h5py.Group) or isinstance(data, h5py.File):
+            for key, val in data.items():
+                # print(f'{string}/{key}: attrs = ', dict(val.attrs))
+                print(f'{string}/{key}: ')
+                print(' '*len(f'{string}/{key}'), ' attrs = ', dict(data.attrs))
+                self.print_data_structure(val, string + '/' + key)
+        elif isinstance(data, h5py.Dataset):
+            print(' '*len(string), ' shape = ', data.shape)
+
+
+    def print_data(self, data: h5py.File |  h5py.Dataset | h5py.Group = None):
+        if data is None:
+            data = self
+        out_data = {}
+        if isinstance(data, h5py.Group) or isinstance(data, h5py.File):
+            for key, val in data.items():
+                out_data[key] = self.print_data(val)
+        elif isinstance(data, h5py.Dataset):
+            return {'type': str(data.dtype), 'shape': str(data.shape)}
+
+        return out_data
+    
+    def to_file_and_dir(self):
+        self._to_file_and_dir_meat(self, '')
+
+    @staticmethod
+    def _to_file_and_dir_meat(data: h5py.File |  h5py.Dataset | h5py.Group, parent_dir=''):
+
+        if isinstance(data, h5py.Group) or isinstance(data, h5py.File):
+            dir_path = data.name
+            #   paths can not be at root or blank
+            if dir_path != '' and dir_path != '/':
+                if dir_path[0] == '/':
+                    dir_path = dir_path[1:]
+                os.makedirs(dir_path, exist_ok=True)
+            for key, val in data.items():
+                H5File._to_file_and_dir_meat(val, dir_path)
+        elif isinstance(data, h5py.Dataset):
+            file_name = data.name
+            #   paths can not be at root
+            if file_name[0] == '/':
+                file_name = file_name[1:]
+            if data.dtype=='object':
+                np.save(file_name, data[:])
+            elif data.ndim <= 2:
+                np.savetxt(file_name + '.txt', data[:])
+            else:
+                np.save(file_name, data[:])
+
+
+    def to_json(self, data: h5py.File |  h5py.Dataset | h5py.Group = None):
+        if data is None:
+            data = self
+        out_data = {}
+        if isinstance(data, h5py.Group) or isinstance(data, h5py.File):
+            for key, val in data.items():
+                print(key)
+                out_data[key] = self._to_json(val)
+        elif isinstance(data, h5py.Dataset):
+            if data.dtype == 'object':
+                conv_data = np.array(data[:]).astype(str).tolist()
+            else:
+                conv_data = data[:].tolist()
+            return conv_data
+        else:
+            print("Could not convert ", data)
+        return out_data
+
+
+'''
+def _print_h5_data_structure(data: h5py.File | h5py.Dataset | h5py.Group, string=''):
     if isinstance(data, h5py.Group) or isinstance(data, h5py.File):
         for key, val in data.items():
-            print(f'{spacing}{key}: ')
-            _print_h5_data(val, spacing + '    ')
+            # print(f'{string}/{key}: attrs = ', dict(val.attrs))
+            print(f'{string}/{key}: ')
+            print(' '*len(f'{string}/{key}'), ' attrs = ', dict(data.attrs))
+            _print_h5_data_structure(val, string + '/' + key)
     elif isinstance(data, h5py.Dataset):
-        print(f'{spacing}{data.shape}')
-        print(data[:])
+        print(' '*len(string), ' shape = ', data.shape)
 
+
+
+def _print_h5_data(data: h5py.File |  h5py.Dataset | h5py.Group):
+    out_data = {}
+    if isinstance(data, h5py.Group) or isinstance(data, h5py.File):
+        for key, val in data.items():
+            out_data[key] = _print_h5_data(val)
+    elif isinstance(data, h5py.Dataset):
+        return {'type': str(data.dtype), 'shape': str(data.shape)}
+
+    return out_data
+
+def _dataset_to_json(data: h5py.File |  h5py.Dataset | h5py.Group):
+    out_data = {}
+    if isinstance(data, h5py.Group) or isinstance(data, h5py.File):
+        for key, val in data.items():
+            print(key)
+            out_data[key] = _dataset_to_json(val)
+    elif isinstance(data, h5py.Dataset):
+        if data.dtype == 'object':
+            conv_data = np.array(data[:]).astype(str).tolist()
+        else:
+            conv_data = data[:].tolist()
+        return conv_data
+    else:
+        print("Could not convert ", data)
+    return out_data
+'''
+    
 class LoggerData():
     def __init__(self, time, atoms=None, total_E=None, elec_E=None, grads=None, NACs=None, timings=None, elec_p=None, elec_q=None, nuc_p=None, nuc_q=None, state_labels=None, jobs_data=None) -> None:
         self.time = time
@@ -239,8 +347,9 @@ class TCJobsLogger_OLD():
             return
         if self._file is None:
             self._file = open(self._file_loc, 'w')
-        if isinstance(data, TC.TCJobBatch):
-            results = data.results_list
+
+        if isinstance(data.jobs_data, TC.TCJobBatch):
+            results = data.jobs_data.results_list
         else:
             results = deepcopy(data.jobs_data)
         cleaned = TC.TCRunner.cleanup_multiple_jobs(results, 'orb_energies', 'bond_order', 'orb_occupations', 'spins')
@@ -250,9 +359,9 @@ class TCJobsLogger_OLD():
         self._file.flush()
 
 class TCJobsLogger():
-    def __init__(self, file_loc: str) -> None:
+    def __init__(self, file_loc: str, file: h5py.File =None) -> None:
         self._file_loc = file_loc
-        self._file: h5py.File = None
+        self._file: h5py.File = file
 
         if not _TC_AVAIL:
             raise ImportError('Could not import TeraChem Runner: TCJobsLogger not available for use')
@@ -263,77 +372,65 @@ class TCJobsLogger():
         self._job_datasets = {}
         self._group_name = 'tc_job_data'
 
+        if self._file is None:
+            self._file = H5File(self._file_loc, 'w')
+            # self._file = h5py.File(self._file_loc, 'w')
         
     def __del__(self):
+        # print("NAME: ", self._file['/tc_job_data/nac_2_3/nacme'].name)
+        print(self._file.print_data_structure(self._file))
+        self._file.to_file_and_dir()
+
         if self._file is not None:
             self._file.close()
+
+    def _initialize(self, cleaned_batch: TC.TCJobBatch):
+        self._file.create_group(self._group_name)
+        
+        for job in cleaned_batch.jobs:
+            group = self._file[self._group_name].create_group(name=job.name)
+            group.create_dataset(name='timestep', shape=(0,1), maxshape=(None, 1))
+            for key, value in job.results.items():
+                for k in self._data_fields:
+                    if k in key:
+                        if isinstance(value, list):
+                            shape = (0,) + np.shape(value)
+                        else:   #   assume it is a single value
+                            shape = (0,1)
+                        group.create_dataset(name=key, shape=shape, maxshape=(None,) + shape[1:])
+
+            #   couldn't figure out how to initialize with an empty shape when using strings,
+            #   so I just resized afterwards
+            ds = group.create_dataset(name='other', shape=(1,1), maxshape=(None, 1), data='')
+            ds.resize((0, 1))
+
+
+        self._file.create_dataset(name = f'{self._group_name}/atoms', 
+                                  data = cleaned_batch.results_list[0]['atoms'])
+        geom = np.array(cleaned_batch.results_list[0]['geom'])
+        self._file.create_dataset(name = f'{self._group_name}/geom', 
+                                  data = [geom], 
+                                  maxshape=(None,) + geom.shape)
 
     def write(self, data: LoggerData):
 
         if data.jobs_data is None:
             return
         
-        if self._file is None:
-            self._file = h5py.File(self._file_loc, 'w')
-            
         results: list[dict] = deepcopy(data.jobs_data.results_list)
         cleaned_results = TC.TCRunner.cleanup_multiple_jobs(results, 'orb_energies', 'bond_order', 'orb_occupations', 'spins')
         cleaned_batch = deepcopy(data.jobs_data)
         for job, res in zip(cleaned_batch.jobs, cleaned_results):
             job.results = res
 
-
+        #   the first job is used to establish dataset sizes
         if self._group_name not in self._file:
-            self._file.create_group(self._group_name)
+            self._initialize(cleaned_batch)
 
-            #   collect all data
-            # all_job_data = {}
-            # for job in results:
-            #     all_job_data.update(job)
-
-            #   figure out which keys to actually add to the traj file
-            # fields_to_create = []
-            # for k in all_job_data:
-            #     for f in self._data_fields:
-            #         if f in k:
-            #             fields_to_create.append(k)
-            #             break
-            
-            # for f in fields_to_create:
-            #     data = np.array(all_job_data[f])
-            #     self._file.create_dataset(name=f'tc_job_data/{f}', 
-            #                               shape = (1,) + data.shape, 
-            #                               maxshape=(None,) + data.shape,
-            #                               data = data
-            #                               )
-
-            
-            for job in cleaned_batch.jobs:
-                group = self._file[self._group_name].create_group(name=job.name)
-                group.create_dataset(name='timestep', shape=(0,1), maxshape=(None, 1))
-                for key, value in job.results.items():
-                    for k in self._data_fields:
-                        if k in key:
-                            if isinstance(value, list):
-                                print("FOUND LIST: ", key, value)
-                                shape = (0,) + np.shape(value)
-                            else:   #   assume it is a single value
-                                print("NOT LIST: ", key, value, type(value))
-                                shape = (0,1)
-                            group.create_dataset(name=key, shape=shape, maxshape=(None,) + shape[1:])
-
-                #   couldn't figure out how to initialize with an empty shape when using strings,
-                #   so I just resized afterwards
-                ds = group.create_dataset(name='other', shape=(1,1), maxshape=(None, 1), data='')
-                ds.resize((0, 1))
-
-
-            self._file.create_dataset(name = f'{self._group_name}/atoms', data = results[0]['atoms'].tolist())
-            geom = np.array(results[0]['geom'].tolist())
-            self._file.create_dataset(name = f'{self._group_name}/geom', data = [geom], maxshape=(None,) + geom.shape)
+    
 
         group = self._file[self._group_name]
-        _append_dataset(group['geom'], cleaned_batch.results_list[0]['geom'])
+        H5File._append_dataset(group['geom'], cleaned_batch.results_list[0]['geom'])
         for job in cleaned_batch.jobs:
             results = job.results.copy()
             results.pop('geom')
@@ -341,16 +438,12 @@ class TCJobsLogger():
             for key in group[job.name]:
                 if key in ['other', 'timestep']:
                     continue
-                _append_dataset(group[job.name][key], results[key])
+                H5File._append_dataset(group[job.name][key], results[key])
                 results.pop(key)
             other_data = json.dumps(results)
-            print("ADDING OTHER DATA")
-            pprint.pprint(other_data)
-            _append_dataset(group[job.name]['other'], other_data)
-            _append_dataset(group[job.name]['timestep'], data.time)
+            H5File._append_dataset(group[job.name]['other'], other_data)
+            H5File._append_dataset(group[job.name]['timestep'], data.time)
             
-        _print_h5_data(self._file)
-        exit()
 
         self._file.flush()
 

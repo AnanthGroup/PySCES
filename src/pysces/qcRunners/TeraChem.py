@@ -26,6 +26,7 @@ _DEBUG = bool(int(os.environ.get('DEBUG', False)))
 _DEBUG_TRAJ = os.environ.get('DEBUG_TRAJ', False)
 _SAVE_DEBUG_TRAJ = os.environ.get('SAVE_DEBUG_TRAJ', False)
 
+
 class TCServerStallError(Exception):
     def __init__(self, message):            
         # Call the base class constructor with the parameters it needs
@@ -501,14 +502,15 @@ class TCRunner():
             job_batch = self.run_TC_new_geom(geom)
 
         if _SAVE_DEBUG_TRAJ:
+            print("APPENDING DEBUG TRAJ")
             self._debug_traj.append(job_batch)
                 
         return job_batch
 
     def _run_TC_new_geom_kernel(self, geom):
 
-        if self._debug_traj:
-            time.sleep(1)
+        if self._debug_traj and not _SAVE_DEBUG_TRAJ:
+            time.sleep(0.025)
             return self._debug_traj.pop(0)
 
         self._n_calls += 1
