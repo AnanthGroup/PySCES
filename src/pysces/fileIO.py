@@ -3,7 +3,6 @@ import json
 import numpy as np
 import h5py
 from copy import deepcopy
-import pprint
 
 _TC_AVAIL = False
 try:
@@ -186,10 +185,10 @@ class H5File(h5py.File):
         return out_data
     
     def to_file_and_dir(self):
-        self._to_file_and_dir_meat(self, '')
+        self._to_file_and_dir_details(self, '')
 
     @staticmethod
-    def _to_file_and_dir_meat(data: h5py.File |  h5py.Dataset | h5py.Group, parent_dir=''):
+    def _to_file_and_dir_details(data: h5py.File |  h5py.Dataset | h5py.Group, parent_dir=''):
 
         if isinstance(data, h5py.Group) or isinstance(data, h5py.File):
             dir_path = data.name
@@ -198,15 +197,39 @@ class H5File(h5py.File):
                 if dir_path[0] == '/':
                     dir_path = dir_path[1:]
                 os.makedirs(dir_path, exist_ok=True)
+
+            attribs = dict(data.attrs)
             for key, val in data.items():
-                H5File._to_file_and_dir_meat(val, dir_path)
+                val: h5py.Dataset | h5py.Group
+                H5File._to_file_and_dir_details(val, dir_path)
+
+                #   update attributes if present
+                if len(val.attrs) == 0:
+                    continue
+                val_key = os.path.basename(val.name)
+                attribs[val_key] = {}
+                for attr_k, attr_v in val.attrs.items():
+
+                    if isinstance(attr_v, np.ndarray):
+                        attribs[val_key][attr_k] = attr_v.tolist()
+                    else:
+                        attribs[val_key][attr_k] = attr_v
+                # attribs.update(dict(val.attrs))
+
+            #   write atribues to a json file
+            if len(attribs) > 0:
+                json_file_path = os.path.join(dir_path, 'attr.json')
+                with open(json_file_path, 'w') as file:
+                    json.dump(attribs, file, indent=4)
+
         elif isinstance(data, h5py.Dataset):
+            
             file_name = data.name
             #   paths can not be at root
             if file_name[0] == '/':
                 file_name = file_name[1:]
             if data.dtype=='object':
-                np.save(file_name, data[:])
+                np.save(file_name + '.npy', data[:])
             elif data.ndim <= 2:
                 np.savetxt(file_name + '.txt', data[:])
             else:
@@ -231,46 +254,6 @@ class H5File(h5py.File):
             print("Could not convert ", data)
         return out_data
 
-
-'''
-def _print_h5_data_structure(data: h5py.File | h5py.Dataset | h5py.Group, string=''):
-    if isinstance(data, h5py.Group) or isinstance(data, h5py.File):
-        for key, val in data.items():
-            # print(f'{string}/{key}: attrs = ', dict(val.attrs))
-            print(f'{string}/{key}: ')
-            print(' '*len(f'{string}/{key}'), ' attrs = ', dict(data.attrs))
-            _print_h5_data_structure(val, string + '/' + key)
-    elif isinstance(data, h5py.Dataset):
-        print(' '*len(string), ' shape = ', data.shape)
-
-
-
-def _print_h5_data(data: h5py.File |  h5py.Dataset | h5py.Group):
-    out_data = {}
-    if isinstance(data, h5py.Group) or isinstance(data, h5py.File):
-        for key, val in data.items():
-            out_data[key] = _print_h5_data(val)
-    elif isinstance(data, h5py.Dataset):
-        return {'type': str(data.dtype), 'shape': str(data.shape)}
-
-    return out_data
-
-def _dataset_to_json(data: h5py.File |  h5py.Dataset | h5py.Group):
-    out_data = {}
-    if isinstance(data, h5py.Group) or isinstance(data, h5py.File):
-        for key, val in data.items():
-            print(key)
-            out_data[key] = _dataset_to_json(val)
-    elif isinstance(data, h5py.Dataset):
-        if data.dtype == 'object':
-            conv_data = np.array(data[:]).astype(str).tolist()
-        else:
-            conv_data = data[:].tolist()
-        return conv_data
-    else:
-        print("Could not convert ", data)
-    return out_data
-'''
     
 class LoggerData():
     def __init__(self, time, atoms=None, total_E=None, elec_E=None, grads=None, NACs=None, timings=None, elec_p=None, elec_q=None, nuc_p=None, nuc_q=None, state_labels=None, jobs_data=None) -> None:
@@ -369,16 +352,15 @@ class TCJobsLogger():
         self._data_fields = [
             'energy', 'gradient', 'dipole_moment', 'dipole_vector', 'nacme', 'cis_', 'cas_'
         ]
+        self._units_from_field = {'energy': 'a.u.', 'dipole_moment': 'Debye'}
         self._job_datasets = {}
         self._group_name = 'tc_job_data'
 
         if self._file is None:
             self._file = H5File(self._file_loc, 'w')
-            # self._file = h5py.File(self._file_loc, 'w')
         
     def __del__(self):
-        # print("NAME: ", self._file['/tc_job_data/nac_2_3/nacme'].name)
-        print(self._file.print_data_structure(self._file))
+        # print(self._file.print_data_structure(self._file))
         self._file.to_file_and_dir()
 
         if self._file is not None:
@@ -397,7 +379,9 @@ class TCJobsLogger():
                             shape = (0,) + np.shape(value)
                         else:   #   assume it is a single value
                             shape = (0,1)
-                        group.create_dataset(name=key, shape=shape, maxshape=(None,) + shape[1:])
+                        ds = group.create_dataset(name=key, shape=shape, maxshape=(None,) + shape[1:])
+                        if k in self._units_from_field:
+                            ds.attrs['units'] = self._units_from_field[k]
 
             #   couldn't figure out how to initialize with an empty shape when using strings,
             #   so I just resized afterwards
@@ -408,9 +392,11 @@ class TCJobsLogger():
         self._file.create_dataset(name = f'{self._group_name}/atoms', 
                                   data = cleaned_batch.results_list[0]['atoms'])
         geom = np.array(cleaned_batch.results_list[0]['geom'])
-        self._file.create_dataset(name = f'{self._group_name}/geom', 
+        geom_ds = self._file.create_dataset(name = f'{self._group_name}/geom', 
                                   data = [geom], 
                                   maxshape=(None,) + geom.shape)
+        geom_ds.attrs.create('units', 'angstroms')
+        
 
     def write(self, data: LoggerData):
 
