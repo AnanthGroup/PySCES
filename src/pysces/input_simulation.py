@@ -93,6 +93,9 @@ mol_input_format = ''
 #   logging directory
 logging_dir = 'logs'
 
+#   HDF5 File logging
+hdf5_logging = False
+
 ########## END DEFAULT SETTINGS ##########
 
 

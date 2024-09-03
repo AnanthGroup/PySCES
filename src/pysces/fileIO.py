@@ -255,8 +255,9 @@ class H5File(h5py.File):
         return out_data
 
     
+#   TODO: Convert to a @dataclass
 class LoggerData():
-    def __init__(self, time, atoms=None, total_E=None, elec_E=None, grads=None, NACs=None, timings=None, elec_p=None, elec_q=None, nuc_p=None, nuc_q=None, state_labels=None, jobs_data=None) -> None:
+    def __init__(self, time, atoms=None, total_E=None, elec_E=None, grads=None, NACs=None, timings=None, elec_p=None, elec_q=None, nuc_p=None, nuc_q=None, state_labels=None, jobs_data=None, all_energies = None) -> None:
         self.time = time
         self.atoms = atoms
         self.total_E = total_E
@@ -269,20 +270,24 @@ class LoggerData():
         self.nuc_p = nuc_p
         self.nuc_q = nuc_q
         self.state_labels = state_labels
+        self.all_energies = all_energies
 
         #   place holder for all other types of data
         self.jobs_data: dict | TC.TCJobBatch = jobs_data
 
 class SimulationLogger():
-    def __init__(self, n_states, save_energy=True, save_grad=True, save_nac=True, save_corr=True, save_timigs=True, dir=None, save_geo=True, save_elec=True, save_p=True, save_jobs=True, atoms=None) -> None:
+    def __init__(self, save_energy=True, save_grad=True, save_nac=True, save_corr=True, save_timigs=True, dir=None, save_geo=True, save_elec=True, save_p=True, save_jobs=True, atoms=None, hdf5=False) -> None:
         if dir is None:
             dir = os.path.abspath(os.path.curdir)
         self.atoms = atoms
 
+        self._h5_file = None
+        if hdf5:
+            self._h5_file = H5File(os.path.join(dir, 'logs.h5'), 'w')
 
         self._loggers = []
         if save_energy:
-            self._loggers.append(EnergyLogger(os.path.join(dir, 'energy.txt')))
+            self._loggers.append(EnergyLogger(os.path.join(dir, 'energy.txt'), self._h5_file))
         if save_grad:
             self._loggers.append(GradientLogger(os.path.join(dir, 'grad.txt')))
         if save_nac:
@@ -306,8 +311,8 @@ class SimulationLogger():
         self.state_labels = None
 
 
-    def write(self, time, total_E=None, elec_E=None, grads=None, NACs=None, timings=None, elec_p=None, elec_q=None, nuc_p=None, nuc_q=None, jobs_data=None):
-        data = LoggerData(time, self.atoms, total_E, elec_E, grads, NACs, timings, elec_p, elec_q, nuc_p, None, self.state_labels, jobs_data)
+    def write(self, time, total_E=None, elec_E=None, grads=None, NACs=None, timings=None, elec_p=None, elec_q=None, nuc_p=None, nuc_q=None, jobs_data=None, all_energies=None):
+        data = LoggerData(time, self.atoms, total_E, elec_E, grads, NACs, timings, elec_p, elec_q, nuc_p, None, self.state_labels, jobs_data, all_energies)
         for logger in self._loggers:
             logger.write(data)
 
@@ -625,34 +630,75 @@ class CorrelationLogger():
         self._file.flush()
 
 class EnergyLogger():
-    def __init__(self, file_loc: str) -> None:
-        self._file = open(file_loc, 'w')
-        self._write_header = True
+    def __init__(self, file_loc: str=None, h5_file: H5File = None) -> None:
+        self._file = None
+        self._h5_group = None
+        self._initialized = False
         self._total_writes = 0
         self._n_states = 0
+        if file_loc:
+            self._file = open(file_loc, 'w')
+        self._h5_file = h5_file
+
 
     def __del__(self):
-        self._file.close()
+        if self._file:
+            self._file.close()
+        print(f'{self._h5_group=}')
+        if self._h5_group:
+            self._h5_file.to_file_and_dir()
+            print(f'{self._h5_group=}')
 
-    def _write_header_to_file(self, labels=None):
-        self._file.write('%12s' % 'Time')
-        self._file.write(' %16s' % 'Total')
+    def _initialize(self, data: LoggerData):
+        labels = data.state_labels
         if labels is None:
             labels = [f'S{i}' for i in range(self._n_states)]
-        for i in range(self._n_states):
-            self._file.write(' %16s' % labels[i])
-        self._file.write('\n')
-        self._write_header = False
+
+        if self._file:
+            self._file.write('%12s' % 'Time')
+            self._file.write(' %16s' % 'Total')
+            for l in labels:
+                self._file.write(' %16s' % l)
+            self._file.write('\n')
+        
+        if self._h5_file:
+            self._h5_group = self._h5_file.create_group('energy')
+            self._h5_group.create_dataset('time', shape=(0, 1), maxshape=(None, 1))
+            self._h5_group.create_dataset('total', shape=(0, 1), maxshape=(None, 1))
+            #   as of now, GAMESS does not report all energies, only the ones used in
+            if data.all_energies is not None:
+                for i in range(len(data.all_energies)):
+                    self._h5_group.create_dataset(f'S{i}', shape=(0, 1), maxshape=(None, 1))
+            else:
+                for l in labels:
+                    self._h5_group.create_dataset(l, shape=(0, 1), maxshape=(None, 1))
+
+        
+        self._initialized = True
+
 
     def write(self, data: LoggerData):
-        self._n_states = len(data.elec_E)
-        if self._write_header:
-            self._write_header_to_file(data.state_labels)
-        out_str = f'{data.time:12.6f} {data.total_E:16.10f}'
-        for i in range(len(data.elec_E)):
-            out_str += f' {data.elec_E[i]:16.10f}'
-        self._file.write(f'{out_str}\n')
-        self._file.flush()
+        if not self._initialized:
+            self._initialize(data)
+        if self._file:
+            self._n_states = len(data.elec_E)
+            out_str = f'{data.time:12.6f} {data.total_E:16.10f}'
+            for i in range(len(data.elec_E)):
+                out_str += f' {data.elec_E[i]:16.10f}'
+            self._file.write(f'{out_str}\n')
+            self._file.flush()
+        
+        if self._h5_group:
+            H5File._append_dataset(self._h5_group['time'], data.time)
+            H5File._append_dataset(self._h5_group['total'], data.total_E)
+
+            #   as of now, GAMESS does not report all energies, only the ones used in dynamics
+            if data.all_energies is not None:
+                for i, e in enumerate(data.all_energies):
+                    H5File._append_dataset(self._h5_group[f'S{i}'], e)
+            else:
+                for i, l in enumerate(data.state_labels):
+                    H5File._append_dataset(self._h5_group[l], data.elec_E[i])
 
 class GradientLogger():
     def __init__(self, file_loc: str) -> None:

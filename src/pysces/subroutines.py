@@ -1506,13 +1506,14 @@ def scipy_rk4(elecE, grad, nac, yvar, dt, au_mas):
 Main driver of RK4 and electronic structure 
 '''
 def rk4(initq, initp, tStop, H, restart, amu_mat, U, com_ang, AN_mat):
-    logger = SimulationLogger(nel, dir=logging_dir, save_jobs=tcr_log_jobs)
+    logger = SimulationLogger(dir=logging_dir, save_jobs=tcr_log_jobs, hdf5=hdf5_logging)
 
     if QC_RUNNER == 'terachem':
         from pysces.qcRunners.TeraChem import TCRunner, TCJobBatch, format_output_LSCIVR
         logger.state_labels = [f'S{x}' for x in tcr_state_options['grads']]
     
     trans_dips = None
+    all_energies = None
     job_batch: TCJobBatch
     proceed      = True
     input_name   = 'cas'
@@ -1570,7 +1571,7 @@ def rk4(initq, initp, tStop, H, restart, amu_mat, U, com_ang, AN_mat):
         else:
             tc_runner = TCRunner(tcr_host, tcr_port, atoms, tcr_job_options, server_roots=tcr_server_root, run_options=tcr_state_options, tc_spec_job_opts=tcr_spec_job_opts, tc_initial_job_options=tcr_initial_frame_opts, start_new=False)
             job_batch = tc_runner.run_TC_new_geom(qC/ang2bohr)
-            elecE, grad, nac, trans_dips = format_output_LSCIVR(job_batch.results_list)
+            all_energies, elecE, grad, nac, trans_dips = format_output_LSCIVR(job_batch.results_list)
 
 
         # Total initial energy at t=0
@@ -1655,7 +1656,7 @@ def rk4(initq, initp, tStop, H, restart, amu_mat, U, com_ang, AN_mat):
     # pops = compute_CF_single(q[0:nel], p[0:nel])
     logger.atoms = atoms
     # qc_timings['Wall_Time'] = 0.0
-    logger.write(t, init_energy, elecE,  grad, nac, job_batch.timings, elec_p=p[0:nel], elec_q=q[0:nel], nuc_p=p[nel:], jobs_data=job_batch)
+    logger.write(t, init_energy, elecE,  grad, nac, job_batch.timings, elec_p=p[0:nel], elec_q=q[0:nel], nuc_p=p[nel:], jobs_data=job_batch, all_energies=all_energies)
 
     opt['guess'] = 'moread'
     X,Y = [],[]
@@ -1705,7 +1706,7 @@ def rk4(initq, initp, tStop, H, restart, amu_mat, U, com_ang, AN_mat):
                     proceed = False
             else:
                 job_batch = tc_runner.run_TC_new_geom(qC/ang2bohr)
-                elecE, grad, nac, trans_dips  = format_output_LSCIVR(job_batch.results_list)
+                all_energies, elecE, grad, nac, trans_dips  = format_output_LSCIVR(job_batch.results_list)
             #correct nac sign
             nac, nac_hist, tdm_hist = correct_nac_sign(nac,nac_hist,trans_dips,tdm_hist)
 
@@ -1736,7 +1737,7 @@ def rk4(initq, initp, tStop, H, restart, amu_mat, U, com_ang, AN_mat):
             # pops = compute_CF_single(y[0:nel], y[ndof:ndof+nel])
             # end_time = time.time()
             # qc_timings['Wall_Time'] = end_time - start_time
-            logger.write(t, total_E=new_energy, elec_E=elecE,  grads=grad, NACs=nac, timings=job_batch.timings, elec_q=y[0:nel], elec_p=y[ndof:ndof+nel], nuc_p=y[-natom*3:], jobs_data=job_batch)
+            logger.write(t, total_E=new_energy, elec_E=elecE,  grads=grad, NACs=nac, timings=job_batch.timings, elec_q=y[0:nel], elec_p=y[ndof:ndof+nel], nuc_p=y[-natom*3:], jobs_data=job_batch, all_energies=all_energies)
             write_restart('restart.json', [Y[-1][:ndof], Y[-1][ndof:]], nac_hist, tdm_hist, new_energy, t, nel, 'rk4')
 
             if t == tStop:

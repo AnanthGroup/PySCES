@@ -1008,10 +1008,12 @@ def format_output_LSCIVR(job_data: list[dict]):
     # grads = np.zeros((n_elec, n_atoms*3))
     # nacs = np.zeros((n_elec, n_elec, n_atoms*3))
     energies = {}
+    all_energies = []
     grads = {}
     nacs = {}
     trans_dips = {}
     for job in job_data:
+        all_energies = job['energy']
         if job['run'] == 'gradient':
             state = job.get('cistarget', job.get('castarget', 0))
             grads[state] = np.array(job['gradient']).flatten()
@@ -1084,5 +1086,5 @@ def format_output_LSCIVR(job_data: list[dict]):
                 ivr_trans_dips = None
     print(" ---------------------------------")
 
-    return ivr_energies, ivr_grads, ivr_nacs, ivr_trans_dips
+    return all_energies, ivr_energies, ivr_grads, ivr_nacs, ivr_trans_dips
     # return energies, grads, nacs
