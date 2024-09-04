@@ -443,8 +443,26 @@ class TCJobsLogger():
             H5File._append_dataset(group[job.name]['timestep'], data.time)
             
 
-        self._file.flush()
+        self._file.flush()     
+    
 
+class BaseLogger():
+    def __init__(self, file_loc: str = None, h5_group: h5py.Group = None) -> None:
+        self._file = None
+        if file_loc:
+            self._file = open(file_loc, 'w')
+        self._h5_dataset = None
+        self._h5_group = h5_group
+        self._initialized = False
+
+    def __del__(self):
+        if self._file:
+            self._file.close()
+
+    def write(self, data: LoggerData) -> None:
+        if not self._initialized:
+            self._initialize(data)
+            self._initialized = True
 class NucGeoLogger():
     def __init__(self, file_loc: str = None, h5_group: h5py.Group = None) -> None:
         self._file = None
@@ -455,7 +473,8 @@ class NucGeoLogger():
         self._initialized = False
 
     def __del__(self):
-        self._file.close()
+        if self._file:
+            self._file.close()
 
     def _initialize(self, qCart_ang):
         self._initialized = True
@@ -484,18 +503,9 @@ class NucGeoLogger():
             shifted = np.array(qCart_ang).reshape((-1, 3)) + com_ang
             H5File._append_dataset(self._h5_dataset, shifted)
         
-class ElectricPQLogger():
+class ElectricPQLogger(BaseLogger):
     def __init__(self, file_loc: str = None, h5_group: h5py.Group = None) -> None:
-        self._file = None
-        if file_loc:
-            self._file = open(file_loc, 'w')
-        self._initialized = False
-        self._h5_dataset = None
-        self._h5_group = h5_group
-
-
-    def __del__(self):
-        self._file.close()
+        super().__init__(file_loc, h5_group)
 
     def _initialize(self, data: LoggerData):
         n_states = len(data.elec_p)
@@ -512,12 +522,11 @@ class ElectricPQLogger():
             n_elms = len(data.elec_p) + len(data.elec_q)
             self._h5_dataset = self._h5_group.create_dataset('electric_pq', shape=(0, n_elms), maxshape=(None, n_elms))
             self._h5_dataset.attrs.create('labels', p_labels + q_labels)
-        self._initialized = True
+        # self._initialized = True
 
     def write(self, data: LoggerData):
+        super().write(data)
         time = data.time
-        if not self._initialized:
-            self._initialize(data)
         if self._file:
             out_str = f'{time:12.6f} '
             for i in range(len(data.elec_p)):
@@ -528,30 +537,17 @@ class ElectricPQLogger():
         if self._h5_dataset:
             H5File._append_dataset(self._h5_dataset, list(data.elec_p) + list(data.elec_q))
 
-class NuclearPLogger():
+class NuclearPLogger(BaseLogger):
     def __init__(self, file_loc: str=None, h5_group: h5py.Group = None) -> None:
-        self._file = None
-        self._write_header = True
-        if file_loc:
-            self._file = open(file_loc, 'w')
-        self._h5_dataset = None
-        self._h5_group = h5_group
-        self._initialized = False
-
-    def __del__(self):
-        if self._file:
-            self._file.close()
+        super().__init__(file_loc, h5_group)
 
     def _initialize(self, data: LoggerData):
-        self._initialized = True
         if self._h5_group:
             tmp_data = np.array(data.nuc_p).reshape((-1, 3))
             self._h5_dataset = self._h5_group.create_dataset('nuclear_P', shape=(0,) + tmp_data.shape, maxshape=(None,) + tmp_data.shape)
 
     def write(self, data: LoggerData):
-        if not self._initialized:
-            self._initialize(data)
-        
+        super().write(data)
         if self._file:
             atoms = data.atoms
             natom = len(atoms)
@@ -567,11 +563,9 @@ class NuclearPLogger():
         if self._h5_dataset:
             H5File._append_dataset(self._h5_dataset, np.array(data.nuc_p).reshape((-1, 3)))
 
-class TimingsLogger():
+class TimingsLogger(BaseLogger):
     def __init__(self, file_loc: str = None, h5_group: h5py.Group = None) -> None:
-        self._file = None
-        self._initialized = False
-
+        super().__init__(file_loc, h5_group)
         labels = ['gradient_0', 'gradient_n', 'nac_0_n', 'nac_n_m', 'total']
         self._descriptions = ['Ground state gradient', 'Excited state gradients', 
                               'Ground-excited NACs', 'Excited-excited NACs', 'Total']
@@ -579,14 +573,8 @@ class TimingsLogger():
         self._totals = {l: 0.0 for l in labels}
         self._n_steps = 0
 
-        if file_loc:
-            self._file = open(file_loc, 'w')
-        self._h5_dataset = None
-        self._h5_group = h5_group
-
-
     def __del__(self):
-        self._file.close()
+        super().__del__()
         self._print_final_sumamry()
 
     def _print_final_sumamry(self):
@@ -605,8 +593,6 @@ class TimingsLogger():
 
     def _initialize(self, data: LoggerData):
         if self._file:
-            #   write file header
-            # self._file.write(f'{"Frame Time":>12s}')
             self._file.write(f'{"Total_QC":>12s}')
             for key, value in data.timings.items():
                 self._file.write(f'{key:>12s}')
@@ -617,13 +603,10 @@ class TimingsLogger():
             self._h5_dataset = self._h5_group.create_dataset('timings', shape=(0, n_elems), maxshape=(None, n_elems))
             self._h5_dataset.attrs.create('labels', list(data.timings.keys()) + list(self._label_to_desc.keys()))
 
-        self._initialized = True
-
     def write(self, data: LoggerData):
-        times = data.timings
-        if not self._initialized:
-            self._initialize(data)
+        super().write(data)
 
+        times = data.timings
         #   compute total
         total = 0.0
         for key, value in times.items():
@@ -668,14 +651,9 @@ class TimingsLogger():
             all_times = list(times.values()) + [g_0, g_n, d_0n, d_nm, total]
             H5File._append_dataset(self._h5_dataset, all_times)
 
-class CorrelationLogger():
+class CorrelationLogger(BaseLogger):
     def __init__(self, file_loc: str = None, h5_group: h5py.Group = None) -> None:
-        self._file = None
-        self._initialized = False
-        if file_loc:
-            self._file = open(file_loc, 'w')
-        self._h5_dataset = None
-        self._h5_group = h5_group
+        super().__init__(file_loc, h5_group)
     
     def _initialize(self, data: LoggerData):
         if data.all_energies is not None:
@@ -697,17 +675,12 @@ class CorrelationLogger():
         if self._h5_group:
             self._h5_dataset = self._h5_group.create_dataset('corr', shape=(0, len(labels)+1), maxshape=(None, len(labels)+1))
             self._h5_dataset.attrs.create('labels', labels + ['Total'])
-        self._initialized = True
-
-    def __del__(self):
-        self._file.close()
 
     def write(self, data: LoggerData):
+        super().write(data)
         p, q = data.elec_p, data.elec_q
         time = data.time
-        if not self._initialized:
-            self._initialize(data)
-
+        
         ### Compute the estimator of electronic state population ###
         nel = len(q)
         pops = np.zeros(nel)
@@ -727,24 +700,12 @@ class CorrelationLogger():
         if self._h5_dataset:
             H5File._append_dataset(self._h5_dataset, pops.tolist() + [total])
 
-class EnergyLogger():
+class EnergyLogger(BaseLogger):
     def __init__(self, file_loc: str=None, h5_group: h5py.Group = None) -> None:
-        self._file = None
-        self._h5_dataset = None
-        self._initialized = False
-        self._total_writes = 0
-        self._n_states = 0
-        if file_loc:
-            self._file = open(file_loc, 'w')
-        self._h5_group = h5_group
+        super().__init__(file_loc, h5_group)
 
-
-    def __del__(self):
-        if self._file:
-            self._file.close()
 
     def _initialize(self, data: LoggerData):
-        
         if data.all_energies is not None:
             labels = [f'S{i}' for i in range(len(data.all_energies))]
         elif labels is None:
@@ -760,30 +721,12 @@ class EnergyLogger():
             self._file.write('\n')
         
         if self._h5_group:
-            # self._h5_group = self._h5_file.create_group('energy')
-            # self._h5_group.create_dataset('time', shape=(0, 1), maxshape=(None, 1))
-            # self._h5_group.create_dataset('total', shape=(0, 1), maxshape=(None, 1))
-            #   as of now, GAMESS does not report all energies, only the ones used in
-            # if data.all_energies is not None:
-            #     for i in range(len(data.all_energies)):
-            #         self._h5_group.create_dataset(f'S{i}', shape=(0, 1), maxshape=(None, 1))
-            # else:
-            #     for l in labels:
-            #         self._h5_group.create_dataset(l, shape=(0, 1), maxshape=(None, 1))
-
-            print(f'{labels=} {data.all_energies=}')
             self._h5_dataset = self._h5_group.create_dataset('energy', shape=(0, len(labels)+1), maxshape=(None, len(labels)+1))
             self._h5_dataset.attrs.create('labels', labels + ['total'])
 
-        
-        self._initialized = True
-
-
     def write(self, data: LoggerData):
-        if not self._initialized:
-            self._initialize(data)
+        super().write(data)
         if self._file:
-            
             out_str = f'{data.time:12.6f} {data.total_E:16.10f}'
             for i in range(len(data.elec_E)):
                 out_str += f' {data.elec_E[i]:16.10f}'
@@ -797,34 +740,11 @@ class EnergyLogger():
             else:
                 H5File._append_dataset(self._h5_dataset, list(data.elec_E) + [data.total_E])
 
-            # H5File._append_dataset(self._h5_dataset['time'], data.time)
-            # H5File._append_dataset(self._h5_dataset['total'], data.total_E)
-
-            # #   as of now, GAMESS does not report all energies, only the ones used in dynamics
-            # if data.all_energies is not None:
-            #     for i, e in enumerate(data.all_energies):
-            #         H5File._append_dataset(self._h5_dataset[f'S{i}'], e)
-            # else:
-            #     for i, l in enumerate(data.state_labels):
-            #         H5File._append_dataset(self._h5_dataset[l], data.elec_E[i])
-
-class GradientLogger():
+class GradientLogger(BaseLogger):
     def __init__(self, file_loc: str = None, h5_group: h5py.Group = None) -> None:
-        self._file = None
-        self._initialized = False
+        super().__init__(file_loc, h5_group)
         self._total_writes = 0
         self._n_states = 0
-        if file_loc:
-            self._file = open(file_loc, 'w')
-        self._h5_dataset = None
-        self._h5_group = h5_group
-
-        
-    def __del__(self):
-        if self._file:
-            self._file.close()
-        # if self._h5_group:
-        #     self._h5_file.to_file_and_dir()
 
     def _initialize(self, data: LoggerData):
         labels = data.state_labels
@@ -840,20 +760,13 @@ class GradientLogger():
             self._h5_dataset = self._h5_group.create_dataset('grad', shape=(0,) + data.grads.shape, maxshape=(None, ) + data.grads.shape)
             self._h5_dataset.attrs.create('labels', labels)
 
-            # self._h5_group = self._h5_file.create_group('grad')
-            # self._h5_group.create_dataset('time', shape=(0, 1), maxshape=(None, 1))
-            # for l in labels:
-            #     self._h5_group.create_dataset(l, shape=(0,) + data.grads[0].shape, maxshape=(None, ) + data.grads[0].shape)
-
-        self._initialized = True
 
     def write(self, data: LoggerData):
+        super().write(data)
+
         grads = data.grads
         time = data.time
         self._n_states = len(grads)
-
-        if not self._initialized:
-            self._initialize(data)    
 
         if self._file:
             np.savetxt(self._file, np.transpose(grads), fmt='%16.10f', 
@@ -863,30 +776,17 @@ class GradientLogger():
         if self._h5_dataset:
             H5File._append_dataset(self._h5_dataset, data.grads)
 
-            # H5File._append_dataset(self._h5_dataset['time'], data.time)
-            # for i, k in enumerate(self._h5_dataset.keys()):
-            #     if k == 'time': continue
-            #     H5File._append_dataset(self._h5_dataset[k], data.grads[i])
-
         self._total_writes += 1
 
-class NACLogger():
+class NACLogger(BaseLogger):
     def __init__(self, file_loc: str, h5_group: h5py.Group = None) -> None:
-        self._file = open(file_loc, 'w')
-        self._initialized = False
+        super().__init__(file_loc, h5_group)
         self._total_writes = 0
         self._n_states = 0
 
-        if file_loc:
-            self._file = open(file_loc, 'w')
-        self._h5_dataset = None
-        self._h5_group = h5_group
-
-    def __del__(self):
-        self._file.close()
 
     def _initialize(self, data: LoggerData):
-        n_NACs = self._n_states
+        n_NACs = len(data.NACs)
 
         state_labels = data.state_labels
         if data.state_labels is None:
@@ -909,16 +809,14 @@ class NACLogger():
             self._h5_dataset.attrs.create('labels', labels)
 
     def write(self, data: LoggerData):
+        super().write(data)
         NACs = data.NACs
         time = data.time
-        self._n_states = len(NACs)
-        if not self._initialized:
-            self._initialize(data)
+        _n_states = len(NACs)
 
-        
         out_data = []
-        for i in range(self._n_states):
-            for j in range(i+1, self._n_states):
+        for i in range(_n_states):
+            for j in range(i+1, _n_states):
                 out_data.append(NACs[i, j])
         if self._file:
             np.savetxt(self._file, np.transpose(out_data), fmt='%15.10f', 
