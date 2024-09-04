@@ -155,7 +155,7 @@ class H5File(h5py.File):
         super().__init__(name, mode, driver, libver, userblock_size, swmr, rdcc_nslots, rdcc_nbytes, rdcc_w0, track_order, fs_strategy, fs_persist, fs_threshold, fs_page_size, page_buf_size, min_meta_keep, min_raw_keep, locking, alignment_threshold, alignment_interval, meta_block_size, **kwds)
 
     @staticmethod
-    def _append_dataset(ds: h5py.Dataset, value):
+    def append_dataset(ds: h5py.Dataset, value):
         ds.resize(ds.shape[0]+1, axis=0)
         ds[-1] = value
 
@@ -287,6 +287,7 @@ class SimulationLogger():
             if hdf5_name == '':
                 hdf5_name = 'electronic'
             self._h5_group = self._h5_file.create_group(hdf5_name)
+            self._h5_group.create_dataset('time', shape=(0,), maxshape=(None,), chunks=True)
 
         self._loggers = []
         if save_energy:
@@ -322,6 +323,11 @@ class SimulationLogger():
         data = LoggerData(time, self.atoms, total_E, elec_E, grads, NACs, timings, elec_p, elec_q, nuc_p, None, self.state_labels, jobs_data, all_energies)
         for logger in self._loggers:
             logger.write(data)
+
+        if self._h5_group:
+            H5File.append_dataset(self._h5_group['time'], data.time)
+            if 'atoms' not in self._h5_group:
+                g = self._h5_group.create_dataset('atoms', data=[data.atoms])
 
         #TODO: add nuc_geo logging here
 
@@ -428,7 +434,7 @@ class TCJobsLogger():
     
 
         group = self._file[self._group_name]
-        H5File._append_dataset(group['geom'], cleaned_batch.results_list[0]['geom'])
+        H5File.append_dataset(group['geom'], cleaned_batch.results_list[0]['geom'])
         for job in cleaned_batch.jobs:
             results = job.results.copy()
             results.pop('geom')
@@ -436,11 +442,11 @@ class TCJobsLogger():
             for key in group[job.name]:
                 if key in ['other', 'timestep']:
                     continue
-                H5File._append_dataset(group[job.name][key], results[key])
+                H5File.append_dataset(group[job.name][key], results[key])
                 results.pop(key)
             other_data = json.dumps(results)
-            H5File._append_dataset(group[job.name]['other'], other_data)
-            H5File._append_dataset(group[job.name]['timestep'], data.time)
+            H5File.append_dataset(group[job.name]['other'], other_data)
+            H5File.append_dataset(group[job.name]['timestep'], data.time)
             
 
         self._file.flush()     
@@ -501,7 +507,7 @@ class NucGeoLogger():
             self._file.flush()
         if self._h5_dataset:
             shifted = np.array(qCart_ang).reshape((-1, 3)) + com_ang
-            H5File._append_dataset(self._h5_dataset, shifted)
+            H5File.append_dataset(self._h5_dataset, shifted)
         
 class ElectricPQLogger(BaseLogger):
     def __init__(self, file_loc: str = None, h5_group: h5py.Group = None) -> None:
@@ -535,7 +541,7 @@ class ElectricPQLogger(BaseLogger):
             self._file.write(f'{out_str}\n')
             self._file.flush()
         if self._h5_dataset:
-            H5File._append_dataset(self._h5_dataset, list(data.elec_p) + list(data.elec_q))
+            H5File.append_dataset(self._h5_dataset, list(data.elec_p) + list(data.elec_q))
 
 class NuclearPLogger(BaseLogger):
     def __init__(self, file_loc: str=None, h5_group: h5py.Group = None) -> None:
@@ -561,7 +567,7 @@ class NuclearPLogger(BaseLogger):
                     data.nuc_p[3*i+2]))
             self._file.flush()
         if self._h5_dataset:
-            H5File._append_dataset(self._h5_dataset, np.array(data.nuc_p).reshape((-1, 3)))
+            H5File.append_dataset(self._h5_dataset, np.array(data.nuc_p).reshape((-1, 3)))
 
 class TimingsLogger(BaseLogger):
     def __init__(self, file_loc: str = None, h5_group: h5py.Group = None) -> None:
@@ -649,7 +655,7 @@ class TimingsLogger(BaseLogger):
 
         if self._h5_dataset:
             all_times = list(times.values()) + [g_0, g_n, d_0n, d_nm, total]
-            H5File._append_dataset(self._h5_dataset, all_times)
+            H5File.append_dataset(self._h5_dataset, all_times)
 
 class CorrelationLogger(BaseLogger):
     def __init__(self, file_loc: str = None, h5_group: h5py.Group = None) -> None:
@@ -698,7 +704,7 @@ class CorrelationLogger(BaseLogger):
             self._file.write(f'{out_str}\n')
             self._file.flush()
         if self._h5_dataset:
-            H5File._append_dataset(self._h5_dataset, pops.tolist() + [total])
+            H5File.append_dataset(self._h5_dataset, pops.tolist() + [total])
 
 class EnergyLogger(BaseLogger):
     def __init__(self, file_loc: str=None, h5_group: h5py.Group = None) -> None:
@@ -736,9 +742,9 @@ class EnergyLogger(BaseLogger):
         if self._h5_dataset:
             if data.all_energies is not None:
                 print(f'{data.all_energies=}')
-                H5File._append_dataset(self._h5_dataset, list(data.all_energies) + [data.total_E,])
+                H5File.append_dataset(self._h5_dataset, list(data.all_energies) + [data.total_E,])
             else:
-                H5File._append_dataset(self._h5_dataset, list(data.elec_E) + [data.total_E])
+                H5File.append_dataset(self._h5_dataset, list(data.elec_E) + [data.total_E])
 
 class GradientLogger(BaseLogger):
     def __init__(self, file_loc: str = None, h5_group: h5py.Group = None) -> None:
@@ -774,7 +780,7 @@ class GradientLogger(BaseLogger):
             self._file.flush()
 
         if self._h5_dataset:
-            H5File._append_dataset(self._h5_dataset, data.grads)
+            H5File.append_dataset(self._h5_dataset, data.grads)
 
         self._total_writes += 1
 
@@ -825,7 +831,7 @@ class NACLogger(BaseLogger):
             self._total_writes += 1
 
         if self._h5_dataset:
-            H5File._append_dataset(self._h5_dataset, out_data)
+            H5File.append_dataset(self._h5_dataset, out_data)
 
 def print_ascii_art():
     art = '''                                                                                     
