@@ -289,7 +289,7 @@ class SimulationLogger():
         if save_energy:
             self._loggers.append(EnergyLogger(os.path.join(dir, 'energy.txt'), self._h5_file))
         if save_grad:
-            self._loggers.append(GradientLogger(os.path.join(dir, 'grad.txt')))
+            self._loggers.append(GradientLogger(os.path.join(dir, 'grad.txt'), self._h5_file))
         if save_nac:
             self._loggers.append(NACLogger(os.path.join(dir, 'nac.txt')))
         if save_corr:
@@ -644,10 +644,8 @@ class EnergyLogger():
     def __del__(self):
         if self._file:
             self._file.close()
-        print(f'{self._h5_group=}')
         if self._h5_group:
             self._h5_file.to_file_and_dir()
-            print(f'{self._h5_group=}')
 
     def _initialize(self, data: LoggerData):
         labels = data.state_labels
@@ -701,32 +699,60 @@ class EnergyLogger():
                     H5File._append_dataset(self._h5_group[l], data.elec_E[i])
 
 class GradientLogger():
-    def __init__(self, file_loc: str) -> None:
-        self._file = open(file_loc, 'w')
+    def __init__(self, file_loc: str, h5_file: H5File = None) -> None:
+        self._file = None
+        self._h5_group = None
+        self._initialized = False
         self._total_writes = 0
-        self._write_header = True
         self._n_states = 0
+        if file_loc:
+            self._file = open(file_loc, 'w')
+        self._h5_file = h5_file
+
         
     def __del__(self):
-        self._file.close()
+        if self._file:
+            self._file.close()
+        if self._h5_group:
+            self._h5_file.to_file_and_dir()
 
-    def _write_header_to_file(self, labels=None):
+    def _initialize(self, data: LoggerData):
+        labels = data.state_labels
         if labels is None:
             labels = [f'S{i}' for i in range(self._n_states)]
-        for i in range(self._n_states):
-            self._file.write('%16s' % labels[i])
-        self._file.write('\n')
+
+        if self._file:
+            for i in range(self._n_states):
+                self._file.write('%16s' % labels[i])
+            self._file.write('\n')
+
+        if self._h5_file:
+            self._h5_group = self._h5_file.create_group('grad')
+            self._h5_group.create_dataset('time', shape=(0, 1), maxshape=(None, 1))
+            for l in labels:
+                self._h5_group.create_dataset(l, shape=(0,) + data.grads[0].shape, maxshape=(None, ) + data.grads[0].shape)
+
+        self._initialized = True
 
     def write(self, data: LoggerData):
         grads = data.grads
         time = data.time
         self._n_states = len(grads)
-        if self._write_header:
-            self._write_header_to_file(data.state_labels)
-            self._write_header = False
-        np.savetxt(self._file, np.transpose(grads), fmt='%16.10f', 
-            header=f'time_step {self._total_writes}\ntime {time}')
-        self._file.flush()
+
+        if not self._initialized:
+            self._initialize(data)    
+
+        if self._file:
+            np.savetxt(self._file, np.transpose(grads), fmt='%16.10f', 
+                header=f'time_step {self._total_writes}\ntime {time}')
+            self._file.flush()
+
+        if self._h5_group:
+            H5File._append_dataset(self._h5_group['time'], data.time)
+            for i, k in enumerate(self._h5_group.keys()):
+                if k == 'time': continue
+                H5File._append_dataset(self._h5_group[k], data.grads[i])
+
         self._total_writes += 1
 
 class NACLogger():
