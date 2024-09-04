@@ -895,7 +895,7 @@ class NACLogger():
         labels = []
         for i in range(n_NACs):
             for j in range(i+1, n_NACs):
-                labels.append(f'{state_labels[i]}_{state_labels[j]} ')
+                labels.append(f'{state_labels[i]}_{state_labels[j]}')
 
         if self._file:
             for label in labels:
@@ -903,7 +903,9 @@ class NACLogger():
             self._file.write('\n')
             self._initialized = True
         if self._h5_group:
-            self._h5_dataset = self._h5_group.create_dataset('nac', shape=(0,) + data.NACs.shape, maxshape=(None, ) + data.NACs.shape)
+            indices = np.triu_indices(data.NACs.shape[0], 1)
+            tmp_data = data.NACs[indices]
+            self._h5_dataset = self._h5_group.create_dataset('nac', shape=(0,) + tmp_data.shape, maxshape=(None, ) + tmp_data.shape)
             self._h5_dataset.attrs.create('labels', labels)
 
     def write(self, data: LoggerData):
@@ -913,18 +915,19 @@ class NACLogger():
         if not self._initialized:
             self._initialize(data)
 
+        
+        out_data = []
+        for i in range(self._n_states):
+            for j in range(i+1, self._n_states):
+                out_data.append(NACs[i, j])
         if self._file:
-            out_data = []
-            for i in range(self._n_states):
-                for j in range(i+1, self._n_states):
-                    out_data.append(NACs[i, j])
             np.savetxt(self._file, np.transpose(out_data), fmt='%15.10f', 
                 header=f'time_step {self._total_writes}\ntime {time}')
             self._file.flush()
             self._total_writes += 1
 
         if self._h5_dataset:
-            H5File._append_dataset(self._h5_dataset, data.NACs)
+            H5File._append_dataset(self._h5_dataset, out_data)
 
 def print_ascii_art():
     art = '''                                                                                     
