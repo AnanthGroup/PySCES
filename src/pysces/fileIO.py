@@ -296,20 +296,20 @@ class SimulationLogger():
         if save_nac:
             self._loggers.append(NACLogger(os.path.join(dir, 'nac.txt'), self._h5_group))
         if save_corr:
-            self._loggers.append(CorrelationLogger(os.path.join(dir, 'corr.txt')))
+            self._loggers.append(CorrelationLogger(os.path.join(dir, 'corr.txt'), self._h5_group))
         if save_timigs:
-            self._loggers.append(TimingsLogger(os.path.join(dir, 'timings.txt')))
+            self._loggers.append(TimingsLogger(os.path.join(dir, 'timings.txt'), self._h5_group))
         if save_elec:
-            self._loggers.append(ElectricPQLogger(os.path.join(dir, 'electric_pq.txt')))
+            self._loggers.append(ElectricPQLogger(os.path.join(dir, 'electric_pq.txt'), self._h5_group))
         if save_p:
-            self._loggers.append(NuclearPLogger(os.path.join(dir, 'nuclear_P.txt')))
+            self._loggers.append(NuclearPLogger(os.path.join(dir, 'nuclear_P.txt'), self._h5_group))
         if save_jobs:
             self._loggers.append(TCJobsLogger(os.path.join(dir, 'jobs_data.yaml')))
 
         self._nuc_geo_logger = None
         if save_geo:
         #     self._loggers.append(NucGeoLogger(os.path.join(dir, 'nuc_geo.xyz')))
-            self._nuc_geo_logger = NucGeoLogger(os.path.join(dir, 'nuc_geo.xyz'))
+            self._nuc_geo_logger = NucGeoLogger(os.path.join(dir, 'nuc_geo.xyz'), self._h5_group)
 
         self.state_labels = None
 
@@ -446,80 +446,131 @@ class TCJobsLogger():
         self._file.flush()
 
 class NucGeoLogger():
-    def __init__(self, file_loc: str) -> None:
-        self._file = open(file_loc, 'w')
+    def __init__(self, file_loc: str = None, h5_group: h5py.Group = None) -> None:
+        self._file = None
+        if file_loc:
+            self._file = open(file_loc, 'w')
+        self._h5_dataset = None
+        self._h5_group = h5_group
+        self._initialized = False
 
     def __del__(self):
         self._file.close()
 
+    def _initialize(self, qCart_ang):
+        self._initialized = True
+        if self._h5_group:
+            tmp_data = np.array(qCart_ang).reshape((-1, 3))
+            self._h5_dataset = self._h5_group.create_dataset('nuclear_Q', shape=(0,)+tmp_data.shape, maxshape=(None,)+tmp_data.shape)
+
     def write(self, total_time: float, atoms, qCart_ang, com_ang=None):
+        if not self._initialized:
+            self._initialize(qCart_ang)
         if com_ang is None:
             com_ang = np.zeros(3)
 
-        natom = len(atoms)
-        self._file.write('%d \n' %natom)
-        self._file.write('%f \n' %total_time)
-        for i in range(natom):
-            self._file.write('{:<5s}{:>12.6f}{:>12.6f}{:>12.6f} \n'.format(
-                atoms[i],
-                qCart_ang[3*i+0] + com_ang[0],
-                qCart_ang[3*i+1] + com_ang[1],
-                qCart_ang[3*i+2] + com_ang[2]))
-        self._file.flush()
+        if self._file:
+            natom = len(atoms)
+            self._file.write('%d \n' %natom)
+            self._file.write('%f \n' %total_time)
+            for i in range(natom):
+                self._file.write('{:<5s}{:>12.6f}{:>12.6f}{:>12.6f} \n'.format(
+                    atoms[i],
+                    qCart_ang[3*i+0] + com_ang[0],
+                    qCart_ang[3*i+1] + com_ang[1],
+                    qCart_ang[3*i+2] + com_ang[2]))
+            self._file.flush()
+        if self._h5_dataset:
+            shifted = np.array(qCart_ang).reshape((-1, 3)) + com_ang
+            H5File._append_dataset(self._h5_dataset, shifted)
         
 class ElectricPQLogger():
-    def __init__(self, file_loc: str) -> None:
-        self._file = open(file_loc, 'w')
-        self._write_header = True
+    def __init__(self, file_loc: str = None, h5_group: h5py.Group = None) -> None:
+        self._file = None
+        if file_loc:
+            self._file = open(file_loc, 'w')
+        self._initialized = False
+        self._h5_dataset = None
+        self._h5_group = h5_group
+
 
     def __del__(self):
         self._file.close()
 
-    def _write_header_to_file(self, n_states):
-        #   write file header
-        self._file.write('%12s ' % 'Time')
-        for i in range(n_states):
-            self._file.write(' %16s' % f'p{i}')
-            self._file.write(' %16s' % f'q{i}')
-        self._file.write('\n')
-        self._write_header = False
+    def _initialize(self, data: LoggerData):
+        n_states = len(data.elec_p)
+        p_labels = [f'p{i}' for i in range(n_states)]
+        q_labels = [f'q{i}' for i in range(n_states)]
+        if self._file:
+            #   write file header
+            self._file.write('%12s ' % 'Time')
+            for i in range(n_states):
+                self._file.write(' %16s' % p_labels[i])
+                self._file.write(' %16s' % q_labels[i])
+            self._file.write('\n')
+        if self._h5_group:
+            n_elms = len(data.elec_p) + len(data.elec_q)
+            self._h5_dataset = self._h5_group.create_dataset('electric_pq', shape=(0, n_elms), maxshape=(None, n_elms))
+            self._h5_dataset.attrs.create('labels', p_labels + q_labels)
+        self._initialized = True
 
     def write(self, data: LoggerData):
         time = data.time
-        if self._write_header:
-            self._write_header_to_file(len(data.elec_p))
-        out_str = f'{time:12.6f} '
-        for i in range(len(data.elec_p)):
-            out_str += f' {data.elec_p[i]:16.10f}'
-            out_str += f' {data.elec_q[i]:16.10f}'
-        self._file.write(f'{out_str}\n')
-        self._file.flush()
+        if not self._initialized:
+            self._initialize(data)
+        if self._file:
+            out_str = f'{time:12.6f} '
+            for i in range(len(data.elec_p)):
+                out_str += f' {data.elec_p[i]:16.10f}'
+                out_str += f' {data.elec_q[i]:16.10f}'
+            self._file.write(f'{out_str}\n')
+            self._file.flush()
+        if self._h5_dataset:
+            H5File._append_dataset(self._h5_dataset, list(data.elec_p) + list(data.elec_q))
 
 class NuclearPLogger():
-    def __init__(self, file_loc: str) -> None:
-        self._file = open(file_loc, 'w')
+    def __init__(self, file_loc: str=None, h5_group: h5py.Group = None) -> None:
+        self._file = None
         self._write_header = True
+        if file_loc:
+            self._file = open(file_loc, 'w')
+        self._h5_dataset = None
+        self._h5_group = h5_group
+        self._initialized = False
 
     def __del__(self):
-        self._file.close()
+        if self._file:
+            self._file.close()
+
+    def _initialize(self, data: LoggerData):
+        self._initialized = True
+        if self._h5_group:
+            tmp_data = np.array(data.nuc_p).reshape((-1, 3))
+            self._h5_dataset = self._h5_group.create_dataset('nuclear_P', shape=(0,) + tmp_data.shape, maxshape=(None,) + tmp_data.shape)
 
     def write(self, data: LoggerData):
-        atoms = data.atoms
-        natom = len(atoms)
-        self._file.write('%d \n' %natom)
-        self._file.write('%f \n' %data.time)
-        for i in range(natom):
-            self._file.write('{:<5s}{:>12.6f}{:>12.6f}{:>12.6f} \n'.format(
-                atoms[i],
-                data.nuc_p[3*i+0],
-                data.nuc_p[3*i+1],
-                data.nuc_p[3*i+2]))
-        self._file.flush()
+        if not self._initialized:
+            self._initialize(data)
+        
+        if self._file:
+            atoms = data.atoms
+            natom = len(atoms)
+            self._file.write('%d \n' %natom)
+            self._file.write('%f \n' %data.time)
+            for i in range(natom):
+                self._file.write('{:<5s}{:>12.6f}{:>12.6f}{:>12.6f} \n'.format(
+                    atoms[i],
+                    data.nuc_p[3*i+0],
+                    data.nuc_p[3*i+1],
+                    data.nuc_p[3*i+2]))
+            self._file.flush()
+        if self._h5_dataset:
+            H5File._append_dataset(self._h5_dataset, np.array(data.nuc_p).reshape((-1, 3)))
 
 class TimingsLogger():
-    def __init__(self, file_loc: str) -> None:
-        self._file = open(file_loc, 'w')
-        self._write_header = True
+    def __init__(self, file_loc: str = None, h5_group: h5py.Group = None) -> None:
+        self._file = None
+        self._initialized = False
 
         labels = ['gradient_0', 'gradient_n', 'nac_0_n', 'nac_n_m', 'total']
         self._descriptions = ['Ground state gradient', 'Excited state gradients', 
@@ -527,6 +578,12 @@ class TimingsLogger():
         self._label_to_desc = dict(zip(labels, self._descriptions))
         self._totals = {l: 0.0 for l in labels}
         self._n_steps = 0
+
+        if file_loc:
+            self._file = open(file_loc, 'w')
+        self._h5_dataset = None
+        self._h5_group = h5_group
+
 
     def __del__(self):
         self._file.close()
@@ -546,16 +603,26 @@ class TimingsLogger():
             print(f'    {description:25s} {v/n_steps:8.2f} s  {100*v/total:5.1f} %')
         print()
 
-    def write(self, data: LoggerData):
-        times = data.timings
-        if self._write_header:
+    def _initialize(self, data: LoggerData):
+        if self._file:
             #   write file header
             # self._file.write(f'{"Frame Time":>12s}')
             self._file.write(f'{"Total_QC":>12s}')
-            for key, value in times.items():
+            for key, value in data.timings.items():
                 self._file.write(f'{key:>12s}')
             self._file.write('\n')
-            self._write_header = False
+
+        if self._h5_group:
+            n_elems = len(data.timings) + len(self._label_to_desc)
+            self._h5_dataset = self._h5_group.create_dataset('timings', shape=(0, n_elems), maxshape=(None, n_elems))
+            self._h5_dataset.attrs.create('labels', list(data.timings.keys()) + list(self._label_to_desc.keys()))
+
+        self._initialized = True
+
+    def write(self, data: LoggerData):
+        times = data.timings
+        if not self._initialized:
+            self._initialize(data)
 
         #   compute total
         total = 0.0
@@ -563,12 +630,13 @@ class TimingsLogger():
             if 'gradient_' in key or 'nac_' in key or 'energy_' in key:
                 total += value
 
-        # Write timings
-        self._file.write(f'{total:12.3f}')
-        for key, value in times.items():
-            self._file.write(f'{value:12.3f}')
-        self._file.write('\n')
-        self._file.flush()
+        if self._file:
+            # Write timings
+            self._file.write(f'{total:12.3f}')
+            for key, value in times.items():
+                self._file.write(f'{value:12.3f}')
+            self._file.write('\n')
+            self._file.flush()
 
         #   print a sumamry for this timestep
         print("Electronic Structure Timings:")
@@ -596,22 +664,40 @@ class TimingsLogger():
         print("")
         self._n_steps += 1
 
+        if self._h5_dataset:
+            all_times = list(times.values()) + [g_0, g_n, d_0n, d_nm, total]
+            H5File._append_dataset(self._h5_dataset, all_times)
 
 class CorrelationLogger():
-    def __init__(self, file_loc: str) -> None:
-        self._file = open(file_loc, 'w')
-        self._write_header = True
+    def __init__(self, file_loc: str = None, h5_group: h5py.Group = None) -> None:
+        self._file = None
+        self._initialized = False
+        if file_loc:
+            self._file = open(file_loc, 'w')
+        self._h5_dataset = None
+        self._h5_group = h5_group
     
-    def _write_header_to_file(self, n_states, labels=None):
-        #   write file header
-        self._file.write('%12s' % 'Time')
-        self._file.write(' %16s' % 'Total')
-        if labels is None:
-            labels = [f'S{i}' for i in range(n_states)]
-        for i in range(n_states):
-            self._file.write(' %16s' % labels[i])
-        self._file.write('\n')
-        self._write_header = False
+    def _initialize(self, data: LoggerData):
+        if data.all_energies is not None:
+            labels = [f'S{i}' for i in range(len(data.all_energies))]
+        elif labels is None:
+            labels = [f'S{i}' for i in range(len(data.elec_E))]
+        else:
+            labels = data.labels
+            
+        if self._file:
+            #   write file header
+            self._file.write('%12s' % 'Time')
+            self._file.write(' %16s' % 'Total')
+            # if labels is None:
+            #     labels = [f'S{i}' for i in range(n_states)]
+            for l in labels:
+                self._file.write(' %16s' % l)
+            self._file.write('\n')
+        if self._h5_group:
+            self._h5_dataset = self._h5_group.create_dataset('corr', shape=(0, len(labels)+1), maxshape=(None, len(labels)+1))
+            self._h5_dataset.attrs.create('labels', labels + ['Total'])
+        self._initialized = True
 
     def __del__(self):
         self._file.close()
@@ -619,8 +705,9 @@ class CorrelationLogger():
     def write(self, data: LoggerData):
         p, q = data.elec_p, data.elec_q
         time = data.time
-        if self._write_header:
-            self._write_header_to_file(len(p), data.state_labels)
+        if not self._initialized:
+            self._initialize(data)
+
         ### Compute the estimator of electronic state population ###
         nel = len(q)
         pops = np.zeros(nel)
@@ -630,11 +717,15 @@ class CorrelationLogger():
                 pops[i] = common_TCF * final_state_TCF
     
         total = np.sum(pops)
-        out_str = f'{time:12.6f} {total:16.10f}'
-        for i in range(len(pops)):
-            out_str += f' {pops[i]:16.10f}'
-        self._file.write(f'{out_str}\n')
-        self._file.flush()
+
+        if self._file:
+            out_str = f'{time:12.6f} {total:16.10f}'
+            for i in range(len(pops)):
+                out_str += f' {pops[i]:16.10f}'
+            self._file.write(f'{out_str}\n')
+            self._file.flush()
+        if self._h5_dataset:
+            H5File._append_dataset(self._h5_dataset, pops.tolist() + [total])
 
 class EnergyLogger():
     def __init__(self, file_loc: str=None, h5_group: h5py.Group = None) -> None:
