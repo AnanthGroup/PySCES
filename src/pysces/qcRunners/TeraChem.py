@@ -319,6 +319,7 @@ class TCRunner():
         if _DEBUG_TRAJ:
             with open(_DEBUG_TRAJ, 'rb') as file:
                 self._debug_traj = pickle.load(file)
+                print("LEN: ", len(self._debug_traj))
         
     def __del__(self):
         self._disconnect_clients()

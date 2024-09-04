@@ -1636,7 +1636,7 @@ def rk4(initq, initp, tStop, H, restart, amu_mat, U, com_ang, AN_mat):
         else:
             tc_runner = TCRunner(tcr_host, tcr_port, atoms, tcr_job_options, server_roots=tcr_server_root, run_options=tcr_state_options, tc_spec_job_opts=tcr_spec_job_opts, tc_initial_job_options=tcr_initial_frame_opts)
             job_batch = tc_runner.run_TC_new_geom(qC/ang2bohr)
-            elecE, grad, nac, trans_dips  = format_output_LSCIVR(job_batch.results_list)
+            all_energies, elecE, grad, nac, trans_dips  = format_output_LSCIVR(job_batch.results_list)
         
         # If nac_hist and tdm_hist array does not exist yet, create it as zeros array
         if nac_hist.size == 0:

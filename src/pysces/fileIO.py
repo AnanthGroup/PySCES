@@ -366,7 +366,7 @@ class TCJobsLogger():
         
     def __del__(self):
         # print(self._file.print_data_structure(self._file))
-        self._file.to_file_and_dir()
+        # self._file.to_file_and_dir()
 
         if self._file is not None:
             self._file.close()
@@ -644,8 +644,8 @@ class EnergyLogger():
     def __del__(self):
         if self._file:
             self._file.close()
-        if self._h5_group:
-            self._h5_file.to_file_and_dir()
+        # if self._h5_group:
+            # self._h5_file.to_file_and_dir()
 
     def _initialize(self, data: LoggerData):
         labels = data.state_labels
@@ -713,8 +713,8 @@ class GradientLogger():
     def __del__(self):
         if self._file:
             self._file.close()
-        if self._h5_group:
-            self._h5_file.to_file_and_dir()
+        # if self._h5_group:
+        #     self._h5_file.to_file_and_dir()
 
     def _initialize(self, data: LoggerData):
         labels = data.state_labels
