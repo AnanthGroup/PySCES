@@ -20,3 +20,4 @@ tests/*/restart.json
 tests/*/restart.out
 tests/*/corr.out
 tests/test_precomp_traj/logs_ref/logs.h5
+tests/test_precomp_traj/electronic
