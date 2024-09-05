@@ -17,6 +17,7 @@ import copy
 import pickle
 from typing import Literal
 import itertools
+import weakref
 
 
 _server_processes = {}
@@ -224,8 +225,23 @@ class TCJobBatch():
         Combines multiple TCJobs into one wrapper
     '''
     def __init__(self, jobs: list[TCJob]) -> None:
-        self.jobs = jobs
+        #   sort by ID
+        id_list = [j.jobID for j in jobs]
+        order = np.argsort(id_list)
+        self.jobs = [jobs[i] for i in order]
+
+    def __repr__(self) -> str:
+        out_str = ''
+        for j in self.jobs:
+            out_str += f'{j}\n'
+        return out_str
     
+    def get_by_id(self, id):
+        for j in self.jobs:
+            if j.jobID == id:
+                return j
+        raise ValueError(f'JobID {id} not found in jobs batch')
+
     @property
     def results_list(self) -> list[dict]:
         return [j.results for j in self.jobs]
@@ -269,6 +285,7 @@ class TCRunner():
         for h, p in zip(hosts, ports):
             if _DEBUG_TRAJ: 
                 self._client_list.append(None)
+                print('DEBUG_TRAJ set, clients will not be opened')
                 break
             client = TCPBClient(host=h, port=p)
             self.wait_until_available(client, max_wait=max_wait)
@@ -319,9 +336,11 @@ class TCRunner():
         if _DEBUG_TRAJ:
             with open(_DEBUG_TRAJ, 'rb') as file:
                 self._debug_traj = pickle.load(file)
-                print("LEN: ", len(self._debug_traj))
-        
-    def __del__(self):
+
+        #   for cleanup
+        self._finalizer = weakref.finalize(self, self._cleanup)
+
+    def _cleanup(self):
         self._disconnect_clients()
         if _SAVE_DEBUG_TRAJ:
             with open(_SAVE_DEBUG_TRAJ, 'wb') as file:
@@ -331,7 +350,7 @@ class TCRunner():
         return self
 
     def __exit__(self, type, value, traceback):
-        self._disconnect_clients()
+        self._cleanup()
 
     def _disconnect_clients(self):
         if _DEBUG_TRAJ:
@@ -372,6 +391,7 @@ class TCRunner():
             for n in range(len(lines)):
                 lines[n] = lines[n][0:-1]
             results['tc.out'] = lines
+            print("### APPENDED TC.OUT ###")
         else:
             print("Warning: Output file not found at ", output_file)
         return results
@@ -508,17 +528,17 @@ class TCRunner():
             print('Started new TC Server: re-running current step')
             job_batch = self.run_TC_new_geom(geom)
 
-        if _SAVE_DEBUG_TRAJ:
-            print("APPENDING DEBUG TRAJ")
-            self._debug_traj.append(job_batch)
+        # if _SAVE_DEBUG_TRAJ:
+        #     print("APPENDING DEBUG TRAJ")
+        #     self._debug_traj.append(job_batch)
                 
         return job_batch
 
     def _run_TC_new_geom_kernel(self, geom):
 
-        if self._debug_traj and not _SAVE_DEBUG_TRAJ:
-            time.sleep(0.025)
-            return self._debug_traj.pop(0)
+        # if self._debug_traj and not _SAVE_DEBUG_TRAJ:
+        #     time.sleep(0.025)
+        #     return self._debug_traj.pop(0)
 
         self._n_calls += 1
         client = self._client
@@ -667,10 +687,26 @@ class TCRunner():
 
         job_batch = self._send_jobs_to_clients(jobs_to_run)
         self._frame_counter += 1
-        self._prev_jobs = [job for job_list in jobs_to_run for job in job_list]
+        # self._prev_jobs = [job for job_list in jobs_to_run for job in job_list]
+        self._prev_jobs = job_batch.jobs
         return job_batch
 
-    def _send_jobs_to_clients(self, jobs_to_run: list[TCJob]) -> tuple[TCJobBatch, dict]:
+    def _send_jobs_to_clients(self, jobs_to_run: list[list[TCJob]]) -> tuple[TCJobBatch, dict]:
+        
+
+        if self._debug_traj and not _SAVE_DEBUG_TRAJ:
+            completed_batch = self._debug_traj.pop(0)
+            n_comp = len(completed_batch.jobs)         
+            n_req = 0
+            for i in range(len(jobs_to_run)):
+                for j in range(len(jobs_to_run[i])):
+                    jobs_to_run[i][j] = completed_batch.get_by_id(jobs_to_run[i][j].jobID)
+                    n_req += 1
+            if n_comp != n_req:
+                raise ValueError(f'DEBUG MODE: Number of jobs requested ({n_req}) does not match the next batch of jobs in the trajectory ({n_comp})')
+            time.sleep(0.025)
+            return completed_batch
+
         n_clients = len(self._client_list)
 
         #   if only one client is being used, don't open up threads, easier to debug
@@ -695,9 +731,14 @@ class TCRunner():
             for j in jobs:
                 all_jobs.append(j)
 
+        #   group the completed jobs into a batch
         job_batch = TCJobBatch(all_jobs)
         self._prev_results = job_batch.results_list
         self.set_avg_max_times(job_batch.timings)
+
+        if _SAVE_DEBUG_TRAJ:
+            print("APPENDING DEBUG TRAJ ", job_batch)
+            self._debug_traj.append(job_batch)
 
         return job_batch
 
@@ -724,12 +765,15 @@ class TCRunner():
 
 
         if not _DEBUG:
-            _run_jobs_on_client(self._client_list[0], num_deriv_jobs, self._server_root_list[0], 0, self._prev_results)
+            # _run_jobs_on_client(self._client_list[0], num_deriv_jobs, self._server_root_list[0], 0, self._prev_results)
+            # print('NUM DERIV JOBS: ', num_deriv_jobs)
+            batch = self._send_jobs_to_clients([num_deriv_jobs])
         else:
             if os.path.isfile('_num_deriv_jobs.pkl'):
                 with open('_num_deriv_jobs.pkl', 'rb') as file: num_deriv_jobs = pickle.load(file)
             else:
                 _run_jobs_on_client(self._client_list[0], num_deriv_jobs, self._server_root_list[0], 0, self._prev_results)
+                self._send_jobs_to_clients(num_deriv_jobs)
                 with open('_num_deriv_jobs.pkl', 'wb') as file: pickle.dump(num_deriv_jobs, file)        
 
         if overlap:
@@ -828,8 +872,9 @@ def _correct_signs_from_charges(job: TCJob, ref_job: TCJob):
     elif f'{exc_type}_transition_dipoles' in job.results:
         dipole_key = f'{exc_type}_transition_dipoles' 
 
-    charges_orig = np.array(job.results.get(f'{exc_type}_tr_resp_charges', None))
-    charges_ref = np.array(ref_job.results.get(f'{exc_type}_tr_resp_charges', None))
+    charges_key = f'{exc_type}_tr_resp_charges'
+    charges_orig = np.array(job.results.get(charges_key, None))
+    charges_ref = np.array(ref_job.results.get(charges_key, None))
     if charges_orig is None or charges_ref is None:
         return
 
@@ -844,17 +889,10 @@ def _correct_signs_from_charges(job: TCJob, ref_job: TCJob):
 
     #   we exhaustively search for the combination of sign flips that minimizes
     #   the agreement with the reference job. This is not a problem for only a
-    #   small number of states, but will quickly become expensive to many states
+    #   small number of states, but will quickly become expensive with many states
     for c in combos:
         c_unique = set(c)
 
-        #   don't include cases where the ground state is negated
-        # if 0 in c:
-        #     continue
-
-        #   don't use repeated combos
-        # if c_unique in used_signs:
-        #     continue
         used_signs.append(c_unique)
 
         #   each indix indicates a the state that is negated
@@ -870,16 +908,8 @@ def _correct_signs_from_charges(job: TCJob, ref_job: TCJob):
                 q_ref = charges_ref[count]
                 arg_max = np.argmax(np.abs(q_new))
                 RRMSE += np.sqrt(np.mean((q_new - q_ref)**2) / np.mean(q_ref**2))
-
-                # print(count, i, j, signs, q_ref[arg_max], q_new[arg_max])
-                # if signs.tolist() == [-1,-1,-1,1]:
-                #     for x, y in zip(q_ref, q_new):
-                #         print(x, y)
-                #     print("CURRENT RRMSE: ", RRMSE)
-
                 count += 1
-        # print(RRMSE)
-        # print()
+
         min_RRMSE_all.append((signs, RRMSE))
         if RRMSE < min_RRMSE:
             min_signs = signs.copy()
@@ -893,11 +923,16 @@ def _correct_signs_from_charges(job: TCJob, ref_job: TCJob):
             ref_d, job_d = ref_job.results[dipole_key][i], job.results[dipole_key][i]
             print(fmt_str.format(*ref_d, *job_d, np.dot(ref_d, job_d)))
 
+    #   correct the dipoles and charges
     count = 0
     for i in range(0, n_states):
         for j in range(i+1, n_states):
             dipole = np.array(job.results[dipole_key][count])
             job.results[dipole_key][count] = dipole*min_signs[i]*min_signs[j]
+            
+            charges = np.array(job.results[charges_key][count])
+            job.results[charges_key][count] = charges*min_signs[i]*min_signs[j]
+            
             count += 1
 
     if _debug_print:

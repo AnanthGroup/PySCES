@@ -3,15 +3,9 @@ import json
 import numpy as np
 import h5py
 from copy import deepcopy
+import yaml
+from pysces.qcRunners import TeraChem as TC
 
-_TC_AVAIL = False
-try:
-    import yaml
-    from pysces.qcRunners import TeraChem as TC
-    
-    _TC_AVAIL=True
-except:
-    pass
 
 def read_restart(file_loc: str='restart.out', ndof: int=0, integrator: str='RK4') -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, float, float]:
     '''
