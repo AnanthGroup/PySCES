@@ -1573,7 +1573,6 @@ def rk4(initq, initp, tStop, H, restart, amu_mat, U, com_ang, AN_mat):
             job_batch = tc_runner.run_TC_new_geom(qC/ang2bohr)
             all_energies, elecE, grad, nac, trans_dips = format_output_LSCIVR(job_batch.results_list)
 
-
         # Total initial energy at t=0
         init_energy = get_energy(au_mas, q, p, elecE)
         # with open(os.path.join(__location__, 'energy.out'), 'a') as g:
@@ -1590,29 +1589,6 @@ def rk4(initq, initp, tStop, H, restart, amu_mat, U, com_ang, AN_mat):
 
         q, p, nac_hist, tdm_hist, init_energy, initial_time = read_restart(file_loc=restart_file_in, ndof=ndof)
         t = initial_time
-
-        ## Read the restart file
-        #q, p = np.zeros(ndof), np.zeros(ndof)
-        #F = np.zeros((2,ndof))
-        #with open(os.path.join(__location__, 'restart.out'), 'r') as ff:
-        #        ff.readline() 
-        #        for i in range(ndof):
-        #            x = ff.readline().split()
-        #            q[i], p[i] = float(x[0]), float(x[1]) # Mapping variables already in Cartesian coordinate
-        #        [ff.readline() for i in range(2)]
-
-        #        init_energy = float(ff.readline()) # Total energy
-        #        [ff.readline() for i in range(2)]
-
-        #        initial_time = float(ff.readline()) # Total simulation time at the beginning of restart run
-        #        t = initial_time   
-        #        [ff.readline() for i in range(2)]
-
-        #        nac_hist_shape = tuple(map(int, ff.readline().strip().split()))  
-        #        flat_nac_hist = [float(num) for num in ff.readline().strip().split()]  
-        #        nac_hist = np.array(flat_nac_hist).reshape(nac_hist_shape)  
-        #        print("nac_hist",nac_hist)
-                
     
         qC, pC = q[nel:], p[nel:]
         y = np.concatenate((q, p))
@@ -1758,24 +1734,6 @@ def rk4(initq, initp, tStop, H, restart, amu_mat, U, com_ang, AN_mat):
         for i in range(ndof):
             gg.write('{:>16.10f}{:>16.10f} \n'.format(coord[0,i,-1], coord[1,i,-1]))
         gg.write('\n')
-
-    #       # Write the ES variables at the final step
-    #       gg.write('Energies (a.u.) at the last update: \n')
-    #       form = ''
-    #       for i in range(nel):
-    #           form += '{:>16.10f}'
-    #        form += '\n'
-    #       gg.write(form.format(*elecE))
-    #       gg.write('\n')
-    #
-    #       gg.write('Gradients (a.u.) at the last update: \n')
-    #       form = ''
-    #       for i in range(nnuc):
-    #           form += '{:>16.10f}'
-    #       form += '\n'
-    #       for i in range(nel):
-    #          gg.write(form.format(*grad[i]))
-    #       gg.write('\n')
 
         # Record the energy and the total time
         gg.write('Energy at the last time step \n')
