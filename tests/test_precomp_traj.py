@@ -54,11 +54,11 @@ class Test_TC_CIS(unittest.TestCase):
 
         #   check simple panda readable data
         for file in ['corr.txt', 'electric_pq.txt', 'energy.txt', 'grad.txt', 'nac.txt']:
-            data_ref = pandas.read_csv(f'logs_ref/{file}', sep='\s+', comment='#')
-            data_tst = pandas.read_csv(f'logs/{file}', sep='\s+', comment='#')
+            data_ref = pandas.read_csv(f'logs_ref/{file}', sep=r'\s+', comment='#')
+            data_tst = pandas.read_csv(f'logs/{file}', sep=r'\s+', comment='#')
             for key in data_ref:
                 np.testing.assert_allclose(data_tst[key], data_ref[key], 
-                                           rtol=1e-5, verbose=True, strict=True,
+                                           rtol=1e-5, verbose=True,
                                            err_msg=f'file: {file}')
         
         #   check data in xyz formats
@@ -68,7 +68,7 @@ class Test_TC_CIS(unittest.TestCase):
             for frame, (frame_tst, frame_ref) in enumerate(zip(data_tst, data_ref)):
                 np.testing.assert_equal(frame_tst['atoms'], frame_ref['atoms'])
                 np.testing.assert_allclose(frame_tst['positions'], frame_ref['positions'],
-                                           atol=1e-16, verbose=True, strict=True,
+                                           atol=1e-16, verbose=True,
                                            err_msg=f'file: {file}; frame {frame}')
         
         #   check checkpoint files

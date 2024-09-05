@@ -217,7 +217,6 @@ class H5File(h5py.File):
                     json.dump(attribs, file, indent=4)
 
         elif isinstance(data, h5py.Dataset):
-            
             file_name = data.name
             #   paths can not be at root
             if file_name[0] == '/':
@@ -321,7 +320,9 @@ class SimulationLogger():
         if self._h5_group:
             H5File.append_dataset(self._h5_group['time'], data.time)
             if 'atoms' not in self._h5_group:
-                g = self._h5_group.create_dataset('atoms', data=[data.atoms])
+                out_data = [np.void(str.encode(x)) for x in data.atoms]
+                out_data = np.array(data.atoms, dtype='S10')
+                # g = self._h5_group.create_dataset('atoms', data=out_data)
 
         #TODO: add nuc_geo logging here
 
@@ -357,9 +358,6 @@ class TCJobsLogger():
     def __init__(self, file_loc: str, file: h5py.File =None) -> None:
         self._file_loc = file_loc
         self._file: h5py.File = file
-
-        if not _TC_AVAIL:
-            raise ImportError('Could not import TeraChem Runner: TCJobsLogger not available for use')
 
         self._data_fields = [
             'energy', 'gradient', 'dipole_moment', 'dipole_vector', 'nacme', 'cis_', 'cas_'
@@ -744,15 +742,15 @@ class GradientLogger(BaseLogger):
     def __init__(self, file_loc: str = None, h5_group: h5py.Group = None) -> None:
         super().__init__(file_loc, h5_group)
         self._total_writes = 0
-        self._n_states = 0
 
     def _initialize(self, data: LoggerData):
         labels = data.state_labels
+        n_states = len(data.grads)
         if labels is None:
-            labels = [f'S{i}' for i in range(self._n_states)]
+            labels = [f'S{i}' for i in range(n_states)]
 
         if self._file:
-            for i in range(self._n_states):
+            for i in range(n_states):
                 self._file.write('%16s' % labels[i])
             self._file.write('\n')
 
@@ -766,7 +764,6 @@ class GradientLogger(BaseLogger):
 
         grads = data.grads
         time = data.time
-        self._n_states = len(grads)
 
         if self._file:
             np.savetxt(self._file, np.transpose(grads), fmt='%16.10f', 

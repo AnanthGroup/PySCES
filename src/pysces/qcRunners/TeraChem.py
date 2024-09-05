@@ -698,9 +698,11 @@ class TCRunner():
             completed_batch = self._debug_traj.pop(0)
             n_comp = len(completed_batch.jobs)         
             n_req = 0
+
             for i in range(len(jobs_to_run)):
                 for j in range(len(jobs_to_run[i])):
-                    jobs_to_run[i][j] = completed_batch.get_by_id(jobs_to_run[i][j].jobID)
+                    # jobs_to_run[i][j] = completed_batch.get_by_id(jobs_to_run[i][j].jobID)
+                    jobs_to_run[i][j] = completed_batch.jobs[j]
                     n_req += 1
             if n_comp != n_req:
                 raise ValueError(f'DEBUG MODE: Number of jobs requested ({n_req}) does not match the next batch of jobs in the trajectory ({n_comp})')
