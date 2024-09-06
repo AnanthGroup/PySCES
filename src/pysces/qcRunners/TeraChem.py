@@ -273,6 +273,10 @@ class TCRunner():
         if isinstance(server_roots, str):
             server_roots = [server_roots]
 
+        #   check that the right number of servers are provided
+        if len(hosts) != len(ports) != len(server_roots):
+            raise ValueError('Number of servers must match the number of port numbers and root locations')
+
         #   set up the servers
         if start_new:
             hosts = start_TC_server(ports)
