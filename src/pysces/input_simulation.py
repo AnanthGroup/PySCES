@@ -13,7 +13,7 @@ import sys, os
 import shutil
 from pysces import input_simulation as opts
 from subprocess import Popen
-from pysces.fileIO import print_ascii_art
+from typing import Callable
 
 
 ########## DEFAULT SETTINGS ##########
@@ -57,7 +57,7 @@ restart = 0
 restart_file_in = 'restart.out'
 
 #   type of QC runner, either 'gamess' or 'terachem'
-QC_RUNNER = 'gamess'
+QC_RUNNER: str | Callable[[list], int] = 'gamess'
 #QC_RUNNER = 'terachem'
 
 #   TeraChem runner options
@@ -95,6 +95,9 @@ logging_dir = 'logs'
 
 #   HDF5 File logging
 hdf5_logging = False
+
+#   additional loggers
+extra_loggers = []
 
 ########## END DEFAULT SETTINGS ##########
 

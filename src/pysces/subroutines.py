@@ -1512,9 +1512,9 @@ def rk4(initq, initp, tStop, H, restart, amu_mat, U, com_ang, AN_mat):
         from pysces.qcRunners.TeraChem import TCRunner, TCJobBatch, format_output_LSCIVR
         logger.state_labels = [f'S{x}' for x in tcr_state_options['grads']]
     
-    trans_dips = None
+    trans_dips   = None
     all_energies = None
-    job_batch: TCJobBatch
+    timings      = {}
     proceed      = True
     input_name   = 'cas'
     au_mas = np.diag(amu_mat) * amu2au # masses of atoms in atomic unit (vector)
@@ -1568,10 +1568,13 @@ def rk4(initq, initp, tStop, H, restart, amu_mat, U, com_ang, AN_mat):
                 proceed = False
             if not proceed:
                 sys.exit("Electronic structure calculation failed at initial time. Exitting.")
-        else:
+        elif QC_RUNNER == 'terachem':
             tc_runner = TCRunner(tcr_host, tcr_port, atoms, tcr_job_options, server_roots=tcr_server_root, run_options=tcr_state_options, tc_spec_job_opts=tcr_spec_job_opts, tc_initial_job_options=tcr_initial_frame_opts, start_new=False)
             job_batch = tc_runner.run_TC_new_geom(qC/ang2bohr)
+            timings = job_batch.timings
             all_energies, elecE, grad, nac, trans_dips = format_output_LSCIVR(job_batch.results_list)
+        else:
+            timings, all_energies, elecE, grad, nac, trans_dips = QC_RUNNER.run_new_geom(qC/ang2bohr)
 
         # Total initial energy at t=0
         init_energy = get_energy(au_mas, q, p, elecE)
@@ -1609,10 +1612,13 @@ def rk4(initq, initp, tStop, H, restart, amu_mat, U, com_ang, AN_mat):
                 proceed = False
             if not proceed:
                 sys.exit("Electronic structure calculation failed at initial time. Exitting.")
-        else:
+        elif QC_RUNNER == 'terachem':
             tc_runner = TCRunner(tcr_host, tcr_port, atoms, tcr_job_options, server_roots=tcr_server_root, run_options=tcr_state_options, tc_spec_job_opts=tcr_spec_job_opts, tc_initial_job_options=tcr_initial_frame_opts)
-            job_batch = tc_runner.run_TC_new_geom(qC/ang2bohr)
+            job_batch: TCJobBatch = tc_runner.run_TC_new_geom(qC/ang2bohr)
+            timings = job_batch.timings
             all_energies, elecE, grad, nac, trans_dips  = format_output_LSCIVR(job_batch.results_list)
+        else:
+            timings, all_energies, elecE, grad, nac, trans_dips = QC_RUNNER.run_new_geom(qC/ang2bohr)
         
         # If nac_hist and tdm_hist array does not exist yet, create it as zeros array
         if nac_hist.size == 0:
@@ -1632,7 +1638,7 @@ def rk4(initq, initp, tStop, H, restart, amu_mat, U, com_ang, AN_mat):
     # pops = compute_CF_single(q[0:nel], p[0:nel])
     logger.atoms = atoms
     # qc_timings['Wall_Time'] = 0.0
-    logger.write(t, init_energy, elecE,  grad, nac, job_batch.timings, elec_p=p[0:nel], elec_q=q[0:nel], nuc_p=p[nel:], jobs_data=job_batch, all_energies=all_energies)
+    logger.write(t, init_energy, elecE,  grad, nac, timings, elec_p=p[0:nel], elec_q=q[0:nel], nuc_p=p[nel:], jobs_data=job_batch, all_energies=all_energies)
 
     opt['guess'] = 'moread'
     X,Y = [],[]
@@ -1680,9 +1686,13 @@ def rk4(initq, initp, tStop, H, restart, amu_mat, U, com_ang, AN_mat):
                 flag_orb = read_gms_dat(input_name)
                 if flag_orb == 1:
                     proceed = False
-            else:
+            elif QC_RUNNER == 'terachem':
                 job_batch = tc_runner.run_TC_new_geom(qC/ang2bohr)
+                timings = job_batch.timings
                 all_energies, elecE, grad, nac, trans_dips  = format_output_LSCIVR(job_batch.results_list)
+            else:
+                timings, all_energies, elecE, grad, nac, trans_dips = QC_RUNNER.run_new_geom(qC/ang2bohr)
+            
             #correct nac sign
             nac, nac_hist, tdm_hist = correct_nac_sign(nac,nac_hist,trans_dips,tdm_hist)
 
@@ -1704,16 +1714,8 @@ def rk4(initq, initp, tStop, H, restart, amu_mat, U, com_ang, AN_mat):
 
             # Record nuclear geometry in angstrom
             record_nuc_geo(restart, t, atoms, qC, com_ang, logger)
-
-            # Record the electronic state energies
-            # with open(os.path.join(__location__, 'energy.out'), 'a') as g:
-            #     g.write(total_format.format(t, new_energy, *elecE))
-
-            #   New logging information
-            # pops = compute_CF_single(y[0:nel], y[ndof:ndof+nel])
-            # end_time = time.time()
-            # qc_timings['Wall_Time'] = end_time - start_time
-            logger.write(t, total_E=new_energy, elec_E=elecE,  grads=grad, NACs=nac, timings=job_batch.timings, elec_q=y[0:nel], elec_p=y[ndof:ndof+nel], nuc_p=y[-natom*3:], jobs_data=job_batch, all_energies=all_energies)
+        
+            logger.write(t, total_E=new_energy, elec_E=elecE,  grads=grad, NACs=nac, timings=timings, elec_q=y[0:nel], elec_p=y[ndof:ndof+nel], nuc_p=y[-natom*3:], jobs_data=job_batch, all_energies=all_energies)
             write_restart('restart.json', [Y[-1][:ndof], Y[-1][ndof:]], nac_hist, tdm_hist, new_energy, t, nel, 'rk4')
 
             if t == tStop:
@@ -1798,28 +1800,38 @@ def compute_CF(X, Y):
 
    return()
 
-'''
-Check which sign for the nac is expected and correct artificial sign flips
-'''
-def correct_nac_sign(nac, nac_hist, tdm, tdm_hist, hist_length=None, debug=False):
-    # Predict d(t) from d(t-1),d(t-2) with a linear extrapolation 
-    #   The line through the points (-2,k),(-1,l)
-    #   is p(x) = (l-k)*x + 2*l - k
-    #   Extrapolation to the next time step yields
-    #   p(0) = 2*l - k
-    # Do that for all NACs and all vector components
-    # If available, countercheck if transition dipole moment has also flipped sign
-    # One can also do a higher degree polynomial or choose more points, which uses numpy polyfit then.
-    # Right now, the degree is hard coded to 1 with 2 history points
 
-    # If there is not history, do not correct artificial sign flips
-    #if len(nac_hist) == 0:
-    #    return nac, []
-    # if tdm is not None:
-    #     use_tdm = True
-    # else:
-    #     use_tdm = False
+def correct_nac_sign(nac: np.ndarray, nac_hist: np.ndarray, tdm: np.ndarray, tdm_hist: np.ndarray, hist_length=None, debug=False):
+    '''Check which sign for the nac is expected and correct artificial sign flips
 
+    Parameters
+    ----------
+    nac: np.ndarray, shape ()
+    
+    Notes
+    -----
+
+    Predict d(t) from d(t-1),d(t-2) with a linear extrapolation 
+    The line through the points (-2,k),(-1,l)
+    is p(x) = (l-k)*x + 2*l - k
+    Extrapolation to the next time step yields
+    p(0) = 2*l - k
+    Do that for all NACs and all vector components
+    If available, countercheck if transition dipole moment has also flipped sign
+    One can also do a higher degree polynomial or choose more points, which uses numpy polyfit then.
+    Right now, the degree is hard coded to 1 with 2 history points
+
+    If there is not history, do not correct artificial sign flips
+    if len(nac_hist) == 0:
+    return nac, []
+    if tdm is not None:
+        use_tdm = True
+    else:
+        use_tdm = False
+    '''
+
+    print(f'{nac.shape=}')
+    print(f'{nac_hist.shape=}')
 
     if tdm is None:
         use_tdm = False

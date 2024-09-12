@@ -4,7 +4,8 @@ import numpy as np
 import h5py
 from copy import deepcopy
 import yaml
-from pysces.qcRunners import TeraChem as TC
+from .qcRunners import TeraChem as TC
+from .input_simulation import extra_loggers
 
 
 def read_restart(file_loc: str='restart.out', ndof: int=0, integrator: str='RK4') -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, float, float]:
@@ -275,6 +276,7 @@ class SimulationLogger():
         self.atoms = atoms
 
         self._h5_file = None
+        self._h5_group = None
         if hdf5:
             self._h5_file = H5File(os.path.join(dir, 'logs.h5'), 'w')
             if hdf5_name == '':
@@ -304,6 +306,10 @@ class SimulationLogger():
         if save_geo:
         #     self._loggers.append(NucGeoLogger(os.path.join(dir, 'nuc_geo.xyz')))
             self._nuc_geo_logger = NucGeoLogger(os.path.join(dir, 'nuc_geo.xyz'), self._h5_group)
+
+        #   append additionally specified loggers
+        for logger in extra_loggers:
+            self._loggers.append(logger(self._h5_file))
 
         self.state_labels = None
 
@@ -599,7 +605,8 @@ class TimingsLogger(BaseLogger):
         if self._h5_group:
             n_elems = len(data.timings) + len(self._label_to_desc)
             self._h5_dataset = self._h5_group.create_dataset('timings', shape=(0, n_elems), maxshape=(None, n_elems))
-            self._h5_dataset.attrs.create('labels', list(data.timings.keys()) + list(self._label_to_desc.keys()))
+            all_labels = list(data.timings.keys()) + list(self._label_to_desc.keys())
+            self._h5_dataset.attrs.create('labels', all_labels)
 
     def write(self, data: LoggerData):
         super().write(data)
