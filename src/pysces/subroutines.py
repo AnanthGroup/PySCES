@@ -143,12 +143,12 @@ class SignFlipper():
         else:
             # for scientific purposes only
             # uses the whole history
-            timesteps = np.arange(hist_length)
-            for i in range(0, nel):
-                for j in range(0, nel):
+            timesteps = np.arange(self.hist_length)
+            for i in range(0, self.n_states):
+                for j in range(0, self.n_states):
                     for ix in range(0,nac.shape[2]):
                         coefficients = np.polyfit(timesteps, self.nac_hist[i,j,ix,:], polynom_degree)
-                        nac_expol[i,j,ix] = np.polyval(coefficients,hist_length)
+                        nac_expol[i,j,ix] = np.polyval(coefficients,self.hist_length)
 
         # Do similar with transition dipole moment
         if use_tdm:
@@ -156,12 +156,12 @@ class SignFlipper():
             if (polynom_degree == 1):
                 tdm_expol = 2.0*self.tdm_hist[:,:,:,-1] - 1.0*self.tdm_hist[:,:,:,-2]
             else:
-                timesteps = np.arange(hist_length)
-                for i in range(0, nel):
-                    for j in range(0, nel):
+                timesteps = np.arange(self.hist_length)
+                for i in range(0, self.n_states):
+                    for j in range(0, self.n_states):
                         for ix in range(0,3):
                             coefficients = np.polyfit(timesteps,self.tdm_hist[i,j,ix,:], polynom_degree)
-                            tdm_expol[i,j,ix] = np.polyval(coefficients,hist_length)
+                            tdm_expol[i,j,ix] = np.polyval(coefficients,self.hist_length)
 
 
         # check whether the TC/GAMESS vector goes in the same or opposite direction
@@ -1704,6 +1704,7 @@ def rk4(initq, initp, tStop, H, restart, amu_mat, U, com_ang, AN_mat):
     timings      = {}
     proceed      = True
     input_name   = 'cas'
+    job_batch    = None
     au_mas = np.diag(amu_mat) * amu2au # masses of atoms in atomic unit (vector)
 
     # Format descriptor depending on the number of electronic states
