@@ -661,12 +661,13 @@ class CorrelationLogger(BaseLogger):
         super().__init__(file_loc, h5_group)
     
     def _initialize(self, data: LoggerData):
-        if data.all_energies is not None:
-            labels = [f'S{i}' for i in range(len(data.all_energies))]
-        elif labels is None:
+        # if data.all_energies is not None:
+        #     labels = [f'S{i}' for i in range(len(data.all_energies))]
+        # elif labels is None:
+        if data.state_labels is None:
             labels = [f'S{i}' for i in range(len(data.elec_E))]
         else:
-            labels = data.labels
+            labels = data.state_labels
             
         if self._file:
             #   write file header
@@ -713,10 +714,10 @@ class EnergyLogger(BaseLogger):
     def _initialize(self, data: LoggerData):
         if data.all_energies is not None:
             labels = [f'S{i}' for i in range(len(data.all_energies))]
-        elif labels is None:
+        elif data.state_labels is None:
             labels = [f'S{i}' for i in range(len(data.elec_E))]
         else:
-            labels = data.labels
+            labels = data.state_labels
 
         if self._file:
             self._file.write('%12s' % 'Time')
@@ -733,8 +734,12 @@ class EnergyLogger(BaseLogger):
         super().write(data)
         if self._file:
             out_str = f'{data.time:12.6f} {data.total_E:16.10f}'
-            for i in range(len(data.elec_E)):
-                out_str += f' {data.elec_E[i]:16.10f}'
+            if data.all_energies is not None:
+                energies = data.all_energies
+            else:
+                energies = data.elec_E
+            for e in energies:
+                out_str += f' {e:16.10f}'
             self._file.write(f'{out_str}\n')
             self._file.flush()
         

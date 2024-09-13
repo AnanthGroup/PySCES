@@ -161,7 +161,12 @@ def _check_settings():
             opts.q0 = [0.0]*opts.nel
             opts.p0 = [0.0]*opts.nel
      
-    opts.ndof = opts.nel + opts.nnuc 
+    opts.ndof = opts.nel + opts.nnuc
+
+    #   check restart file
+    if opts.restart == 1 and (not os.path.isfile(restart_file_in)):
+        print('WARNING: Restart file not found: defaulting to initial condition generation')
+        opts.restart = 0
        
 def _set_seed():
     '''
