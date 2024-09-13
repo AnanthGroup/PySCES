@@ -16,7 +16,6 @@ import pandas
 from pysces.input_gamess import * 
 from pysces.subroutines import *
 from pysces.fileIO import print_ascii_art
-# __location__ = os.path.realpath(os.path.join(os.getcwd(), os.path.dirname(__file__)))
 __location__ = ''
 
 from pysces.input_simulation import * 
