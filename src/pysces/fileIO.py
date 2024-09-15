@@ -745,7 +745,6 @@ class EnergyLogger(BaseLogger):
         
         if self._h5_dataset:
             if data.all_energies is not None:
-                print(f'{data.all_energies=}')
                 H5File.append_dataset(self._h5_dataset, list(data.all_energies) + [data.total_E,])
             else:
                 H5File.append_dataset(self._h5_dataset, list(data.elec_E) + [data.total_E])
@@ -791,7 +790,6 @@ class NACLogger(BaseLogger):
     def __init__(self, file_loc: str, h5_group: h5py.Group = None) -> None:
         super().__init__(file_loc, h5_group)
         self._total_writes = 0
-        self._n_states = 0
 
 
     def _initialize(self, data: LoggerData):
@@ -799,7 +797,7 @@ class NACLogger(BaseLogger):
 
         state_labels = data.state_labels
         if data.state_labels is None:
-            state_labels = [f'S{i}' for i in range(self._n_states)]
+            state_labels = [f'S{i}' for i in range(n_NACs)]
 
         labels = []
         for i in range(n_NACs):

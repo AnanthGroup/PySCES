@@ -190,6 +190,9 @@ class TCJob():
         self.time = 0.0
         self._results = {}
 
+        if job_type not in ['energy', 'gradient', 'coupling']:
+            raise ValueError('TCJob job_type must be either "energy", "gradient", or "coupling"')
+
         assert self.excited_type in ('cas', 'cis')
 
         TCJob.__job_counter += 1
@@ -241,6 +244,17 @@ class TCJobBatch():
             if j.jobID == id:
                 return j
         raise ValueError(f'JobID {id} not found in jobs batch')
+    
+    def get_by_type(self, job_type: Literal['energy', 'gradient', 'coupling']):
+        if job_type not in ['energy', 'gradient', 'coupling']:
+            raise ValueError('TCJob job_type must be either "energy", "gradient", or "coupling"')
+        jobs = [x for x in self.jobs if x.job_type == job_type]
+        return TCJobBatch(jobs)
+    
+    def sorted_jobs_by_state(self):
+        states = [x.state for x in self.jobs]
+        order = np.argsort(states)
+        return [self.jobs[n] for n in order]
 
     @property
     def results_list(self) -> list[dict]:
@@ -867,7 +881,7 @@ def _correct_signs_from_charges(job: TCJob, ref_job: TCJob):
     elif 'cis_tr_resp_charges' in job.results:
         exc_type = 'cis'
     else:
-        warnings.warn('cas_tr_resp_charges or cis_tr_resp_charges not found in job results, cannot correct transition charges')
+        warnings.warn(f'cas_tr_resp_charges or cis_tr_resp_charges not found in job {job}, cannot correct transition charges')
         return
 
     #   Get the correct dipole key. Some CAS jobs don't have an 's' at the end
@@ -879,13 +893,10 @@ def _correct_signs_from_charges(job: TCJob, ref_job: TCJob):
         dipole_key = f'{exc_type}_transition_dipoles' 
 
     charges_key = f'{exc_type}_tr_resp_charges'
-    charges_orig = np.array(job.results.get(charges_key, None))
-    charges_ref = np.array(ref_job.results.get(charges_key, None))
-    if charges_orig is None or charges_ref is None:
-        return
-
-    # for line in job.results['tc.out']:
-    #     print(line)
+    charges_orig = np.array(job.results.get(charges_key, []))
+    charges_ref = np.array(ref_job.results.get(charges_key, []))
+    if charges_ref.shape[0] == 0:
+        raise ValueError(f'{charges_key} not found in reference job')
 
     min_RRMSE_all = []
     min_RRMSE = 1e20
@@ -923,24 +934,24 @@ def _correct_signs_from_charges(job: TCJob, ref_job: TCJob):
 
 
     if _debug_print:
+        print('Min Signs: ', min_signs)
         print("Transition dipoles BEFORE sign corrections")
         for i in range(len(job.results[dipole_key])):
             fmt_str = '{:10.6f} '*3 + '|' + '{:10.6f} '*3 + '|' + '{:10.6f}'
             ref_d, job_d = ref_job.results[dipole_key][i], job.results[dipole_key][i]
             print(fmt_str.format(*ref_d, *job_d, np.dot(ref_d, job_d)))
 
-    #   correct the dipoles and charges
-    count = 0
-    for i in range(0, n_states):
-        for j in range(i+1, n_states):
-            dipole = np.array(job.results[dipole_key][count])
-            job.results[dipole_key][count] = dipole*min_signs[i]*min_signs[j]
-            
-            charges = np.array(job.results[charges_key][count])
-            job.results[charges_key][count] = charges*min_signs[i]*min_signs[j]
-            
-            count += 1
-
+    #   correct the transition charges, dipoles, and dipole derivatives
+    for key in [dipole_key, charges_key, 'cis_transition_dipole_deriv']:
+        count = 0
+        if key not in job.results:
+            continue
+        for i in range(0, n_states):
+            for j in range(i+1, n_states):
+                orig_val = np.array(job.results[key][count])
+                job.results[key][count] = orig_val*min_signs[i]*min_signs[j]
+                count += 1
+                
     if _debug_print:
         print("Transition dipoles AFTER sign corrections")
         print("minimum RRMSE: ", min_RRMSE, min_signs)

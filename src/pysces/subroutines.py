@@ -170,7 +170,7 @@ class SignFlipper():
         # if the angle is > 90 degree -> np.sign(dot_product)==-1 -> flip
         message = ''
         for i in range(0, nel):
-            for j in range(i, nel):
+            for j in range(i+1, nel):
                 flip_detected = False
                 nac_dot_product = np.dot(nac[i,j,:],nac_expol[i,j,:])
                 # if tdm is available: check if it also flips sign. if not, no correction
@@ -191,6 +191,7 @@ class SignFlipper():
                     sign = np.sign(nac_dot_product)
                     if sign < 0:
                         flip_detected = True
+
                     nac[i,j,:] = sign*nac[i,j,:]
                     nac[j,i,:] = sign*nac[j,i,:]
 
