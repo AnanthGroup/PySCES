@@ -59,7 +59,7 @@ class Test_TC_CIS(unittest.TestCase):
 
     def cleanup(self):
         #   clean up
-        for file in ['progress.out', 'corr.out', 'restart.json', 'restart.o', 'cas.dat', 'cas.inp', 'cas_old.inp', 'cas.out']:
+        for file in ['progress.out', 'corr.out', 'restart.json', 'restart.out', 'cas.dat', 'cas.inp', 'cas_old.inp', 'cas.out']:
             if os.path.isfile(file):
                 os.remove(file)
         for file in os.listdir('logs'):

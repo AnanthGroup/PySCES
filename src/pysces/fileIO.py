@@ -37,8 +37,28 @@ def read_restart(file_loc: str='restart.out', ndof: int=0, integrator: str='RK4'
                 Total elapsed time
     '''
     if integrator.lower() == 'rk4':
+
+        def _read_array_data(ff):
+            shape = [int(x) for x in next(ff).split()]
+            lines = []
+            n_spaces = int(np.prod(shape[0:-2]))
+            n_lines =  int(np.prod(shape[0:-1])) + n_spaces
+            for i in range(n_lines):
+                vals = next(ff).split()
+                if len(vals) == 0:
+                    continue
+                lines.append([float(x) for x in vals])
+            data = np.reshape(lines, shape)
+            return data
+
+
         extension = os.path.splitext(file_loc)[-1]
         if extension == '.out':
+            nac_hist = np.array([])
+            nac_mat = np.array([])
+            elecE = np.array([])
+            grads = np.array([])
+            nac_mat = np.array([])
             if ndof <= 0:
                 raise ValueError('`ndof` must be supplied when using .out restart files')
             #   original output file data
@@ -54,9 +74,19 @@ def read_restart(file_loc: str='restart.out', ndof: int=0, integrator: str='RK4'
                 [ff.readline() for i in range(2)]
 
                 initial_time = float(ff.readline()) # Total simulation time at the beginning of restart run
-                t = initial_time  
+                t = initial_time 
 
-            return q, p, np.array([]), np.array([]), init_energy, t
+                for line in ff:
+                    if 'NAC History' in line:
+                        nac_hist = _read_array_data(ff)
+                    if 'NAC Matrix' in line:
+                        nac_mat = _read_array_data(ff)
+                    if 'Gradients' in line:
+                        grads = _read_array_data(ff)
+                    if 'Electronic Energies' in line:
+                        elecE = _read_array_data(ff)    
+
+            return q, p, nac_hist, np.array([]), init_energy, t, elecE, grads, nac_mat
 
         elif extension == '.json':
             #  json data format
@@ -76,14 +106,19 @@ def read_restart(file_loc: str='restart.out', ndof: int=0, integrator: str='RK4'
 
             combo_q = np.array(elec_q + nucl_q)
             combo_p = np.array(elec_p + nucl_p)
-            return combo_q, combo_p, nac_hist, tdm_hist, energy, time
+
+            elecE = np.array(data.get('elec_E', np.array([])))
+            grads = np.array(data.get('grads', np.array([])))
+            nac_mat = np.array(data.get('nac_mat', np.array([])))
+
+            return combo_q, combo_p, nac_hist, tdm_hist, energy, time, elecE, grads, nac_mat
 
         else:
             exit(f'ERROR: File extension "{extension}" is not a valid restart file')
     else:
         exit(f'ERROR: only RK4 is implimented fileIO')
 
-def write_restart(file_loc: str, coord: list | np.ndarray, nac_hist: np.ndarray, tdm_hist: np.ndarray, energy: float, time: float, n_states: int, integrator='rk4'):
+def write_restart(file_loc: str, coord: list | np.ndarray, nac_hist: np.ndarray, tdm_hist: np.ndarray, energy: float, time: float, n_states: int, integrator='rk4', elecE: float=np.empty(0), grads: np.ndarray = np.empty(0), nac_mat: np.ndarray=np.empty(0)):
     '''
         Writes a restart file for restarting a simulation from the previous conditions
 
@@ -114,22 +149,41 @@ def write_restart(file_loc: str, coord: list | np.ndarray, nac_hist: np.ndarray,
         if extension == '.out':
             #   original output file data
             with open(file_loc, 'w') as gg:
-                ndof = len(coord)
+                ndof = len(coord[0])
                 # Write the coordinates
                 gg.write('Coordinates (a.u.) at the last update: \n')
                 for i in range(ndof):
-                    gg.write('{:>16.10f}{:>16.10f} \n'.format(coord[0,i,-1], coord[1,i,-1]))
+                    gg.write('{:>16.10f}{:>16.10f} \n'.format(coord[0][i], coord[1][i]))
                 gg.write('\n')
 
                 # Record the energy and the total time
                 gg.write('Energy at the last time step \n')
-                gg.write('{:>16.10f} \n'.format(energy[-1]))
+                gg.write('{:>16.10f} \n'.format(energy))
                 gg.write('\n')
 
                 # Record the total time
                 gg.write('Total time in a.u. \n')
                 gg.write('{:>16.10f} \n'.format(time))
                 gg.write('\n')
+
+                def write_array_data(data_name, data):
+                    if data.size > 0:
+                        gg.write(f'{data_name}:\n')
+                        gg.write(' '.join(map(str, data.shape)) + '\n')
+                        if data.ndim == 1:
+                            gg.write(' '.join(map(str, data)) + '\n\n')
+                        else:
+                            for outer_col in data.reshape((-1,) + data.shape[-2:]):
+                                for row in outer_col:
+                                    gg.write(' '.join(map(str, row)) + '\n')
+                                gg.write('\n')
+                        # gg.write(np.array2string(data, separator=' ').replace('[', '').replace(']', '') + '\n')
+
+                write_array_data('NAC History', nac_hist)
+                write_array_data('NAC Matrix', nac_mat)
+                write_array_data('Gradients', grads)
+                write_array_data('Electronic Energies', elecE)
+
 
         elif extension == '.json':
             coord = np.array(coord).tolist()
@@ -140,6 +194,9 @@ def write_restart(file_loc: str, coord: list | np.ndarray, nac_hist: np.ndarray,
             data['nucl_p'] = coord[1][n_states:]
             data['nac_hist'] = np.array(nac_hist).tolist()
             data['tdm_hist'] = np.array(tdm_hist).tolist()
+            data['elec_E'] = np.array(elecE).tolist()
+            data['grads'] = np.array(grads).tolist()
+            data['nac_mat'] = np.array(nac_mat).tolist()
             with open(file_loc, 'w') as file:
                 json.dump(data, file, indent=2)
     else:

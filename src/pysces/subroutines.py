@@ -1710,13 +1710,10 @@ def rk4(initq, initp, tStop, H, restart, amu_mat, U, com_ang, AN_mat):
     proceed      = True
     input_name   = 'cas'
     job_batch    = None
-    au_mas = np.diag(amu_mat) * amu2au # masses of atoms in atomic unit (vector)
-
-    # Format descriptor depending on the number of electronic states
-    total_format = '{:>12.4f}{:>12.5f}' # "time" "total"
-    for i in range(nel):
-            total_format += '{:>12.5f}' # "elec1" "elec2" ...
-    total_format += '\n'
+    au_mas       = np.diag(amu_mat) * amu2au # masses of atoms in atomic unit (vector)
+    t            = 0.0
+    initial_time = 0.0
+    q, p         = np.zeros(ndof), np.zeros(ndof)  # collections of all mapping variables
 
     #   very first step does not need a GAMESS guess
     opt['guess'] = ''
@@ -1729,9 +1726,7 @@ def rk4(initq, initp, tStop, H, restart, amu_mat, U, com_ang, AN_mat):
     with open(os.path.join(__location__, 'progress.out'), 'a') as f:
         f.write("Initial property evaluation started.\n")
     if restart == 0:
-        t       = 0.0
-        initial_time = 0.0
-        q, p    = np.zeros(ndof), np.zeros(ndof)          # collections of all mapping variables
+
         q[:nel], p[:nel] = initq[:nel], initp[:nel]
         qN, pN  = initq[nel:], initp[nel:]                # collections of nuclear variables in normal coordinate
         qC, pC  = rotate_norm_to_cart(qN, pN, U, amu_mat) # collections of nuclear variables in Cartesian coordinate
@@ -1776,7 +1771,7 @@ def rk4(initq, initp, tStop, H, restart, amu_mat, U, com_ang, AN_mat):
     elif restart == 1:
         opt['guess'] = 'moread'
 
-        q, p, nac_hist, tdm_hist, init_energy, initial_time = read_restart(file_loc=restart_file_in, ndof=ndof)
+        q, p, nac_hist, tdm_hist, init_energy, initial_time, elecE, grad, nac = read_restart(file_loc=restart_file_in, ndof=ndof)
         t = initial_time
     
         qC, pC = q[nel:], p[nel:]
@@ -1784,8 +1779,6 @@ def rk4(initq, initp, tStop, H, restart, amu_mat, U, com_ang, AN_mat):
 
         # Get atom labels
         atoms = get_atom_label()
-
-        # write_restart('restart_init.json', [y[:ndof], y[ndof:]], init_energy, t, nel, 'rk4')
 
         if QC_RUNNER == 'gamess':
             # Call GAMESS to compute E, dE/dR, and NAC
@@ -1889,43 +1882,20 @@ def rk4(initq, initp, tStop, H, restart, amu_mat, U, com_ang, AN_mat):
             record_nuc_geo(restart, t, atoms, qC, com_ang, logger)
         
             logger.write(t, total_E=new_energy, elec_E=elecE,  grads=grad, NACs=nac, timings=timings, elec_q=y[0:nel], elec_p=y[ndof:ndof+nel], nuc_p=y[-natom*3:], jobs_data=job_batch, all_energies=all_energies)
-            write_restart('restart.json', [Y[-1][:ndof], Y[-1][ndof:]], sign_flipper.nac_hist, sign_flipper.tdm_hist, new_energy, t, nel, 'rk4')
+            write_restart(restart_file_out, [Y[-1][:ndof], Y[-1][ndof:]], sign_flipper.nac_hist, sign_flipper.tdm_hist, new_energy, t, nel, 'rk4', elecE, grad, nac)
 
             if t == tStop:
                 with open(os.path.join(__location__, 'progress.out'), 'a') as f:
                     f.write('Propagated to the final time step.\n')
+
+    write_restart(restart_file_out, [Y[-1][:ndof], Y[-1][ndof:]], sign_flipper.nac_hist, sign_flipper.tdm_hist, new_energy, t, nel, 'rk4', elecE, grad, nac)
 
     coord = np.zeros((2,ndof,len(Y)))
     for i in range(len(Y)):
         coord[0,:,i] = Y[i][:ndof]
         coord[1,:,i] = Y[i][ndof:]
 
-    ############################
-    ### Write a restart file ###
-    ############################
-    with open(os.path.join(__location__, 'restart.out'), 'w') as gg:
-        # Write the coordinates
-        gg.write('Coordinates (a.u.) at the last update: \n')
-        for i in range(ndof):
-            gg.write('{:>16.10f}{:>16.10f} \n'.format(coord[0,i,-1], coord[1,i,-1]))
-        gg.write('\n')
-
-        # Record the energy and the total time
-        gg.write('Energy at the last time step \n')
-        gg.write('{:>16.10f} \n'.format(energy[-1]))
-        gg.write('\n')
-
-        # Record the total time
-        gg.write('Total time in a.u. \n')
-        gg.write('{:>16.10f} \n'.format(t))
-        gg.write('\n')
-
-        if len(sign_flipper.nac_hist) > 0:
-            gg.write('NAC History:\n')
-            gg.write(' '.join(map(str, sign_flipper.nac_hist.shape)) + '\n')
-            gg.write(np.array2string(sign_flipper.nac_hist, separator=',').replace('[', '').replace(']', '') + '\n')
-
-    return(np.array(X), coord, initial_time)
+    return (np.array(X), coord, initial_time)
 
 def compute_CF_single(q, p):
    ### Compute the estimator of electronic state population ###
