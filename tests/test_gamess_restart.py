@@ -92,12 +92,6 @@ class Test_TC_CIS(unittest.TestCase):
         for dir_name in ['logs', 'logs_1', 'logs_2', 'logs_combo']:
             if os.path.isdir(dir_name):
                 shutil.rmtree(dir_name)
-        # for file in os.listdir('logs'):
-        #     if os.path.isfile(os.path.join('logs', file)):
-        #         os.remove(os.path.join('logs', file))
-        # if os.path.isdir('logs'):
-        #     os.removedirs('logs')
-
 
                 
 if __name__ == '__main__':
