@@ -114,13 +114,6 @@ def input_local_settings():
 
         try:
             exec(local_lines, globals())
-            print('GLOBALS')
-            for k, v in globals().items():
-                print(k, v)
-            print()
-            print('LOCALS')
-            for k, v in locals.items():
-                print(k, v)
 
         except Exception as e:
             print("Error loading local settings: ", e)
