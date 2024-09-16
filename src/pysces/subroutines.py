@@ -756,6 +756,9 @@ def write_subm_script(input_name):
 ### Call GAMESS NACME calculation ###
 #####################################
 def run_gms_cas(input_name, opt, atoms, AN_mat, qCart, submit_script_loc=None):
+    
+    print('Running GAMESS')
+
     # Convert Bohr into Angstrom
     qCart_ang = qCart/ang2bohr
     
@@ -1714,6 +1717,7 @@ def rk4(initq, initp, tStop, H, restart, amu_mat, U, com_ang, AN_mat):
     t            = 0.0
     initial_time = 0.0
     q, p         = np.zeros(ndof), np.zeros(ndof)  # collections of all mapping variables
+    elecE, grad, nac = np.empty(0), np.empty(0), np.empty(0)
 
     #   very first step does not need a GAMESS guess
     opt['guess'] = ''
@@ -1722,10 +1726,21 @@ def rk4(initq, initp, tStop, H, restart, amu_mat, U, com_ang, AN_mat):
     # hist_length = 2 #this is the only implemented length
     sign_flipper = SignFlipper(nel, 2, nnuc, 'LSC')
 
-    ### Initial-time property calculation ###
-    with open(os.path.join(__location__, 'progress.out'), 'a') as f:
-        f.write("Initial property evaluation started.\n")
-    if restart == 0:
+    # Get atom labels
+    atoms = get_atom_label()
+    logger.atoms = atoms
+
+
+    if restart == 1:
+        q, p, nac_hist, tdm_hist, init_energy, initial_time, elecE, grad, nac, com = read_restart(file_loc=restart_file_in, ndof=ndof)
+        t = initial_time
+        qC, pC = q[nel:], p[nel:]
+        y = np.concatenate((q, p))
+        if com is not None:
+
+            com_ang = com
+
+    elif restart == 0:
 
         q[:nel], p[:nel] = initq[:nel], initp[:nel]
         qN, pN  = initq[nel:], initp[nel:]                # collections of nuclear variables in normal coordinate
@@ -1733,12 +1748,7 @@ def rk4(initq, initp, tStop, H, restart, amu_mat, U, com_ang, AN_mat):
         q[nel:], p[nel:] = qC, pC
         y = np.concatenate((q, p))
 
-        # Get atom labels
-        atoms = get_atom_label()
-
-        # Write initial nuclear geometry in the output file
-        record_nuc_geo(restart, t, atoms, qC, com_ang, logger)
-
+    if restart == 0 or len(elecE) == 0 or len(grad) == 0 or len(nac) == 0:
         if QC_RUNNER == 'gamess':
             # Update geo_gamess with qC
             update_geo_gamess(atoms, AN_mat, qC)
@@ -1764,47 +1774,14 @@ def rk4(initq, initp, tStop, H, restart, amu_mat, U, com_ang, AN_mat):
         # Total initial energy at t=0
         init_energy = get_energy(au_mas, q, p, elecE)
 
-        # Create nac history for sign-flip extrapolation
-        sign_flipper.set_history(nac, np.empty(0), trans_dips, np.empty(0))
+        # Record nuclear geometry in angstrom
+        record_nuc_geo(restart, t, atoms, qC, com_ang, logger)
 
+        logger.write(t, init_energy, elecE,  grad, nac, timings, elec_p=p[0:nel], elec_q=q[0:nel], nuc_p=p[nel:], jobs_data=job_batch, all_energies=all_energies)
+
+    # Create nac history for sign-flip extrapolation
+    sign_flipper.set_history(nac, np.empty(0), trans_dips, np.empty(0))
    
-    elif restart == 1:
-        opt['guess'] = 'moread'
-
-        q, p, nac_hist, tdm_hist, init_energy, initial_time, elecE, grad, nac = read_restart(file_loc=restart_file_in, ndof=ndof)
-        t = initial_time
-    
-        qC, pC = q[nel:], p[nel:]
-        y = np.concatenate((q, p))
-
-        # Get atom labels
-        atoms = get_atom_label()
-
-        if QC_RUNNER == 'gamess':
-            # Call GAMESS to compute E, dE/dR, and NAC
-            run_gms_cas(input_name, opt, atoms, AN_mat, qC, sub_script)
-            elecE, grad, nac, flag_grad, flag_nac = read_gms_out(input_name)
-            if any([el == 1  for el in flag_grad]) or flag_nac == 1:
-                proceed = False
-            flag_orb = read_gms_dat(input_name)
-            if flag_orb == 1:
-                proceed = False
-            if not proceed:
-                sys.exit("Electronic structure calculation failed at initial time. Exitting.")
-        elif QC_RUNNER == 'terachem':
-            tc_runner = TCRunner(tcr_host, tcr_port, atoms, tcr_job_options, server_roots=tcr_server_root, run_options=tcr_state_options, tc_spec_job_opts=tcr_spec_job_opts, tc_initial_job_options=tcr_initial_frame_opts)
-            job_batch: TCJobBatch = tc_runner.run_TC_new_geom(qC/ang2bohr)
-            timings = job_batch.timings
-            all_energies, elecE, grad, nac, trans_dips  = format_output_LSCIVR(job_batch.results_list)
-        else:
-            timings, all_energies, elecE, grad, nac, trans_dips = QC_RUNNER.run_new_geom(qC/ang2bohr)
-        
-        # # If nac_hist and tdm_hist array does not exist yet, create it as zeros array
-        sign_flipper.set_history(nac, nac_hist, trans_dips, tdm_hist)
-        nac = sign_flipper.correct_nac_sign(nac, trans_dips)
-
-    logger.atoms = atoms
-    logger.write(t, init_energy, elecE,  grad, nac, timings, elec_p=p[0:nel], elec_q=q[0:nel], nuc_p=p[nel:], jobs_data=job_batch, all_energies=all_energies)
 
     opt['guess'] = 'moread'
     X,Y = [],[]
@@ -1882,13 +1859,13 @@ def rk4(initq, initp, tStop, H, restart, amu_mat, U, com_ang, AN_mat):
             record_nuc_geo(restart, t, atoms, qC, com_ang, logger)
         
             logger.write(t, total_E=new_energy, elec_E=elecE,  grads=grad, NACs=nac, timings=timings, elec_q=y[0:nel], elec_p=y[ndof:ndof+nel], nuc_p=y[-natom*3:], jobs_data=job_batch, all_energies=all_energies)
-            write_restart(restart_file_out, [Y[-1][:ndof], Y[-1][ndof:]], sign_flipper.nac_hist, sign_flipper.tdm_hist, new_energy, t, nel, 'rk4', elecE, grad, nac)
+            write_restart(restart_file_out, [Y[-1][:ndof], Y[-1][ndof:]], sign_flipper.nac_hist, sign_flipper.tdm_hist, new_energy, t, nel, 'rk4', elecE, grad, nac, com_ang)
 
             if t == tStop:
                 with open(os.path.join(__location__, 'progress.out'), 'a') as f:
                     f.write('Propagated to the final time step.\n')
 
-    write_restart(restart_file_out, [Y[-1][:ndof], Y[-1][ndof:]], sign_flipper.nac_hist, sign_flipper.tdm_hist, new_energy, t, nel, 'rk4', elecE, grad, nac)
+    write_restart(restart_file_out, [Y[-1][:ndof], Y[-1][ndof:]], sign_flipper.nac_hist, sign_flipper.tdm_hist, new_energy, t, nel, 'rk4', elecE, grad, nac, com_ang)
 
     coord = np.zeros((2,ndof,len(Y)))
     for i in range(len(Y)):

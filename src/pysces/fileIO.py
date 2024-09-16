@@ -59,6 +59,7 @@ def read_restart(file_loc: str='restart.out', ndof: int=0, integrator: str='RK4'
             elecE = np.array([])
             grads = np.array([])
             nac_mat = np.array([])
+            com = None
             if ndof <= 0:
                 raise ValueError('`ndof` must be supplied when using .out restart files')
             #   original output file data
@@ -74,9 +75,11 @@ def read_restart(file_loc: str='restart.out', ndof: int=0, integrator: str='RK4'
                 [ff.readline() for i in range(2)]
 
                 initial_time = float(ff.readline()) # Total simulation time at the beginning of restart run
-                t = initial_time 
+                t = initial_time
 
                 for line in ff:
+                    if 'COM' in line:
+                        com = [float(x) for x in ff.readline().split()]
                     if 'NAC History' in line:
                         nac_hist = _read_array_data(ff)
                     if 'NAC Matrix' in line:
@@ -86,7 +89,7 @@ def read_restart(file_loc: str='restart.out', ndof: int=0, integrator: str='RK4'
                     if 'Electronic Energies' in line:
                         elecE = _read_array_data(ff)    
 
-            return q, p, nac_hist, np.array([]), init_energy, t, elecE, grads, nac_mat
+            return q, p, nac_hist, np.array([]), init_energy, t, elecE, grads, nac_mat, com
 
         elif extension == '.json':
             #  json data format
@@ -107,18 +110,19 @@ def read_restart(file_loc: str='restart.out', ndof: int=0, integrator: str='RK4'
             combo_q = np.array(elec_q + nucl_q)
             combo_p = np.array(elec_p + nucl_p)
 
+            com = np.array(data.get('com', np.array([])))
             elecE = np.array(data.get('elec_E', np.array([])))
             grads = np.array(data.get('grads', np.array([])))
             nac_mat = np.array(data.get('nac_mat', np.array([])))
 
-            return combo_q, combo_p, nac_hist, tdm_hist, energy, time, elecE, grads, nac_mat
+            return combo_q, combo_p, nac_hist, tdm_hist, energy, time, elecE, grads, nac_mat, com
 
         else:
             exit(f'ERROR: File extension "{extension}" is not a valid restart file')
     else:
         exit(f'ERROR: only RK4 is implimented fileIO')
 
-def write_restart(file_loc: str, coord: list | np.ndarray, nac_hist: np.ndarray, tdm_hist: np.ndarray, energy: float, time: float, n_states: int, integrator='rk4', elecE: float=np.empty(0), grads: np.ndarray = np.empty(0), nac_mat: np.ndarray=np.empty(0)):
+def write_restart(file_loc: str, coord: list | np.ndarray, nac_hist: np.ndarray, tdm_hist: np.ndarray, energy: float, time: float, n_states: int, integrator='rk4', elecE: float=np.empty(0), grads: np.ndarray = np.empty(0), nac_mat: np.ndarray=np.empty(0), com=None):
     '''
         Writes a restart file for restarting a simulation from the previous conditions
 
@@ -179,6 +183,8 @@ def write_restart(file_loc: str, coord: list | np.ndarray, nac_hist: np.ndarray,
                                 gg.write('\n')
                         # gg.write(np.array2string(data, separator=' ').replace('[', '').replace(']', '') + '\n')
 
+                gg.write('COM: \n')
+                gg.write(' '.join(map(str, com)) + '\n\n')
                 write_array_data('NAC History', nac_hist)
                 write_array_data('NAC Matrix', nac_mat)
                 write_array_data('Gradients', grads)
@@ -197,6 +203,7 @@ def write_restart(file_loc: str, coord: list | np.ndarray, nac_hist: np.ndarray,
             data['elec_E'] = np.array(elecE).tolist()
             data['grads'] = np.array(grads).tolist()
             data['nac_mat'] = np.array(nac_mat).tolist()
+            data['com'] = np.array(com).tolist()
             with open(file_loc, 'w') as file:
                 json.dump(data, file, indent=2)
     else:
