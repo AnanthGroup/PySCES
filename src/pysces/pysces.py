@@ -22,7 +22,13 @@ from pysces.input_simulation import *
 
 def main():
     print_ascii_art()
+    input_local_settings()
     print_settings()
+
+    # TODO: Temporary fix for the global variables
+    for k, v in opts.__dict__.items():
+        globals()[k] = v
+    set_subroutine_globals()
 
 
     ###################################

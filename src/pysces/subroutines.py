@@ -43,6 +43,10 @@ ang2bohr = 1.8897259886         # angstroms to bohr
 k2autmp  = kb/eh2j              # Kelvin to atomic unit temperature
 beta     = 1.0/(temp * k2autmp) # inverse temperature in atomic unit
 
+# TODO: Temporary fix for the global variables
+def set_subroutine_globals():
+    for k, v in opts.__dict__.items():
+        globals()[k] = v
 
 class SignFlipper():
     def __init__(self, n_states: int, hist_length: int, n_nuc: int, name: str='UNK') -> None:
@@ -247,8 +251,8 @@ def get_geo_hess():
     elif mol_input_format == "gamess":
         amu_mat, xyz_ang, frq, redmas, L, U, com_ang, atom_number_mat = get_geo_hess_gamess()
     else:
-        print("Error: get_geo_hess ran in undefined 'mol_input_format' case")        
-        exit()
+        raise ValueError('mol_input_format must be either "terachem" or "gamess"; got "{}"'.format(mol_input_format))
+
     return(amu_mat, xyz_ang, frq, redmas, L, U, com_ang, atom_number_mat)
 
 def get_geo_hess_terachem():

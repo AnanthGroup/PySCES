@@ -101,9 +101,36 @@ extra_loggers = []
 
 ########## END DEFAULT SETTINGS ##########
 
+def input_local_settings():
+    '''
+        Load in settings from the local input file
+    '''
+    if os.path.isfile('input_simulation_local.py'):
+        print("Loading local settings")
+        local_lines = []
+        with open('input_simulation_local.py', 'r') as f:
+            local_lines = f.read()
+        locals = {}
+
+        try:
+            exec(local_lines, globals())
+            print('GLOBALS')
+            for k, v in globals().items():
+                print(k, v)
+            print()
+            print('LOCALS')
+            for k, v in locals.items():
+                print(k, v)
+
+        except Exception as e:
+            print("Error loading local settings: ", e)
+            return
 
 
-def _check_settings():
+    _check_settings(locals)
+    _set_seed()
+
+def _check_settings(local: dict):
     opts.nnuc = 3*opts.natom # number of nuclear DOFs
     opts.ndof = opts.nel + opts.nnuc 
 
@@ -167,6 +194,9 @@ def _check_settings():
     if opts.restart == 1 and (not os.path.isfile(restart_file_in)):
         print('WARNING: Restart file not found: defaulting to initial condition generation')
         opts.restart = 0
+
+    for k, v in opts.__dict__.items():
+        globals()[k] = v
        
 def _set_seed():
     '''
@@ -179,17 +209,6 @@ def _set_seed():
         random.seed(input_seed)
         np.random.seed(input_seed)
 
-#   load in local settings, which will overwrite the default ones above
-try:
-    sys.path.append(os.path.abspath(os.path.curdir))
-    print("Importing local settings")
-    from input_simulation_local import * 
-    import input_simulation_local as local_opts
-    local = local_opts.__dict__
-except Exception as e:
-    print("Using default settings: ", e)
-    from pysces.input_simulation import * 
-    local = {}
 
 def print_settings():
     print()
@@ -204,6 +223,7 @@ def print_settings():
 
     print(f'Normal mode frequency scaling:      {frq_scale}')
     print(f'Electronic structure runner:        {QC_RUNNER}')
+    print(f'Molecule input format:              {mol_input_format}')
     print(f'Restart file will be written to     {restart_file_in}')
     print(f'current working directory:          {os.path.abspath(os.path.curdir)}')
     print(f'Logs will be written to:            {logging_dir}')
@@ -224,5 +244,5 @@ def print_settings():
     # print(fmt_string.format("Type fo integrator", integrator))
     # print(fmt_string.format("Maximum simulation time", integrator))
 
-_check_settings()
-_set_seed()
+# _check_settings()
+# _set_seed()
