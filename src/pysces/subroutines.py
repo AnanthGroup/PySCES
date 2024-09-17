@@ -1737,11 +1737,11 @@ def rk4(initq, initp, tStop, H, restart, amu_mat, U, com_ang, AN_mat):
         qC, pC = q[nel:], p[nel:]
         y = np.concatenate((q, p))
         if com is not None:
-
             com_ang = com
+        if QC_RUNNER == 'terachem':
+            tc_runner = TCRunner(tcr_host, tcr_port, atoms, tcr_job_options, server_roots=tcr_server_root, run_options=tcr_state_options, tc_spec_job_opts=tcr_spec_job_opts, tc_initial_job_options=tcr_initial_frame_opts, start_new=False)
 
     elif restart == 0:
-
         q[:nel], p[:nel] = initq[:nel], initp[:nel]
         qN, pN  = initq[nel:], initp[nel:]                # collections of nuclear variables in normal coordinate
         qC, pC  = rotate_norm_to_cart(qN, pN, U, amu_mat) # collections of nuclear variables in Cartesian coordinate

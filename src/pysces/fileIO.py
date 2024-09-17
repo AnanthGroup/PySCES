@@ -374,6 +374,8 @@ class TCJobsLogger():
 
             #   couldn't figure out how to initialize with an empty shape when using strings,
             #   so I just resized afterwards
+            ds = group.create_dataset(name='tc.out', shape=(1,1), maxshape=(None, 1), data='')
+            ds.resize((0, 1))
             ds = group.create_dataset(name='other', shape=(1,1), maxshape=(None, 1), data='')
             ds.resize((0, 1))
 
@@ -412,15 +414,17 @@ class TCJobsLogger():
             results.pop('geom')
             results.pop('atoms')
             for key in group[job.name]:
-                if key in ['other', 'timestep']:
+                if key in ['other', 'timestep', 'tc.out']:
                     continue
                 H5File.append_dataset(group[job.name][key], results[key])
                 results.pop(key)
+            H5File.append_dataset(group[job.name]['tc.out'], json.dumps(results['tc.out']))
+            H5File.append_dataset(group[job.name]['timestep'], data.time)
+
+            #   everything else goes into 'other'
             other_data = json.dumps(results)
             H5File.append_dataset(group[job.name]['other'], other_data)
-            H5File.append_dataset(group[job.name]['timestep'], data.time)
             
-
         self._file.flush()     
     
 

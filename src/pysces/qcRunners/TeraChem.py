@@ -158,12 +158,12 @@ def compute_job_sync(client: TCPBClient, jobType="energy", geom=None, unitType="
     print("Submitting Job...")
     accepted = client.send_job_async(jobType, geom, unitType, **kwargs)
     while accepted is False:
-        time.sleep(0.5)
+        time.sleep(0.25)
         accepted = client.send_job_async(jobType, geom, unitType, **kwargs)
 
     completed = client.check_job_complete()
     while completed is False:
-        time.sleep(0.5)
+        time.sleep(0.25)
         client._send_msg(pb.STATUS, None)
         status = client._recv_msg(pb.STATUS)
 
@@ -187,7 +187,8 @@ class TCJob():
         self.job_type = job_type
         self.state = state
         self.name = name
-        self.time = 0.0
+        self.start_time = 0
+        self.end_time = 0
         self._results = {}
 
         if job_type not in ['energy', 'gradient', 'coupling']:
@@ -205,6 +206,10 @@ class TCJob():
         out_str += f'jobID={self.jobID}, complete={self.complete}'
         out_str += ')'
         return out_str
+
+    @property
+    def total_time(self):
+        return self.end_time - self.start_time
 
     @property
     def complete(self):
@@ -262,8 +267,11 @@ class TCJobBatch():
     
     @property
     def timings(self) -> dict:
-        timings = {j.name: j.time for j in self.jobs}
-        timings['Wall_Time'] = np.sum(list(timings.values()))
+        timings = {j.name: j.total_time for j in self.jobs}
+        min_time = np.min([j.start_time for j in self.jobs])
+        max_time = np.max([j.end_time for j in self.jobs])
+        timings['Wall_Time'] = max_time - min_time
+        # timings['Wall_Time'] = np.sum(list(timings.values()))
         return timings
 
 class TCRunner():
@@ -498,7 +506,7 @@ class TCRunner():
             accepted = self._client.send_job_async(jobType, geom, unitType, **kwargs)
             while accepted is False:
                 start_time = time.time()
-                time.sleep(0.5)
+                time.sleep(0.25)
                 accepted = self._client.send_job_async(jobType, geom, unitType, **kwargs)
                 end_time = time.time()
                 total_time += (end_time - start_time)
@@ -509,7 +517,7 @@ class TCRunner():
             completed = self._client.check_job_complete()
             while completed is False:
                 start_time = time.time()
-                time.sleep(0.5)
+                time.sleep(0.25)
                 completed = self._client.check_job_complete()
                 
                 # if self._n_calls == 2:
@@ -553,11 +561,6 @@ class TCRunner():
         return job_batch
 
     def _run_TC_new_geom_kernel(self, geom):
-
-        # if self._debug_traj and not _SAVE_DEBUG_TRAJ:
-        #     time.sleep(0.025)
-        #     return self._debug_traj.pop(0)
-
         self._n_calls += 1
         client = self._client
         atoms = self._atoms
@@ -977,14 +980,12 @@ def _run_jobs_on_client(client: TCPBClient, jobs: list[TCJob], server_root, clie
         geom = j.geom
         job_opts =  j.opts
         job_type =  j.job_type
+        j.start_time = time.time()
 
         _set_guess(job_opts, j.excited_type, all_results + prev_results, j.state, client, server_root)
         print(f"\nRunning {job_name} on client ID {client_ID}")
         # if 'cisrestart' in job_opts:
         #     job_opts['cisrestart'] = f"{job_opts['cisrestart']}_{client.host}_{client.port}"
-
-        start = time.time()
-        # results = client.compute_job_sync(job_type, geom, 'angstrom', **job_opts)
 
         max_tries = 2
         try_count = 0
@@ -998,13 +999,15 @@ def _run_jobs_on_client(client: TCPBClient, jobs: list[TCJob], server_root, clie
                 if try_count == max_tries:
                     try_again = False
                     print("Server error recieved; will not try again")
+                    print(e)
                     exit()
                 else:
                     try_again = True
                     print("Server error recieved; trying to run job once more")
-                    time.sleep(30)
-        j.time = time.time() - start
-        # times[job_name] = time.time() - start
+                    print(e)
+                    time.sleep(20)
+        # j.total_time = time.time() - start
+        j.end_time = time.time()
         results['run'] = job_type
         TCRunner.append_output_file(results, server_root)
         results.update(job_opts)
