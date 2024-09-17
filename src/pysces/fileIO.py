@@ -241,7 +241,8 @@ class SimulationLogger():
         self._h5_file = None
         self._h5_group = None
         if hdf5:
-            self._h5_file = H5File(os.path.join(dir, 'logs.h5'), 'w')
+            # self._h5_file = H5File(os.path.join(dir, 'logs.h5'), 'w')
+            self._h5_file = H5File('logs.h5', 'a')
             if hdf5_name == '':
                 hdf5_name = 'electronic'
             self._h5_group = self._h5_file.create_group(hdf5_name)
@@ -263,7 +264,7 @@ class SimulationLogger():
         if save_p:
             self._loggers.append(NuclearPLogger(os.path.join(dir, 'nuclear_P.txt'), self._h5_group))
         if save_jobs:
-            self._loggers.append(TCJobsLogger(os.path.join(dir, 'jobs_data.h5'), self._h5_file))
+            self._loggers.append(TCJobsLogger(self._h5_file))
 
         self._nuc_geo_logger = None
         if save_geo:
@@ -277,8 +278,9 @@ class SimulationLogger():
         self.state_labels = None
 
     def __del__(self):
-        if self._h5_file:
-            self._h5_file.to_file_and_dir()
+        pass
+        # if self._h5_file:
+        #     self._h5_file.to_file_and_dir()
 
 
     def write(self, time, total_E=None, elec_E=None, grads=None, NACs=None, timings=None, elec_p=None, elec_q=None, nuc_p=None, nuc_q=None, jobs_data=None, all_energies=None):
@@ -327,9 +329,17 @@ class TCJobsLogger_OLD():
         self._file.flush()
 
 class TCJobsLogger():
-    def __init__(self, file_loc: str, file: h5py.File =None) -> None:
-        self._file_loc = file_loc
-        self._file: h5py.File = file
+    # def __init__(self, file_loc: str, file: h5py.File =None) -> None:
+    def __init__(self, file: str | h5py.File) -> None:
+
+        if isinstance(file, str):
+            self._file_loc = file
+            self._file = None
+        elif isinstance(file, h5py.File):
+            self._file_loc = None
+            self._file = file
+        else:
+            raise ValueError('file must be a string or h5py.File object')
 
         self._data_fields = [
             'energy', 'gradient', 'dipole_moment', 'dipole_vector', 'nacme', 'cis_', 'cas_'
@@ -342,9 +352,6 @@ class TCJobsLogger():
             self._file = H5File(self._file_loc, 'w')
         
     def __del__(self):
-        # print(self._file.print_data_structure(self._file))
-        # self._file.to_file_and_dir()
-
         if self._file is not None:
             self._file.close()
 
@@ -375,7 +382,8 @@ class TCJobsLogger():
                                   data = cleaned_batch.results_list[0]['atoms'])
         geom = np.array(cleaned_batch.results_list[0]['geom'])
         geom_ds = self._file.create_dataset(name = f'{self._group_name}/geom', 
-                                  data = [geom], 
+                                #   data = [geom],
+                                shape=(0,) + geom.shape,
                                   maxshape=(None,) + geom.shape)
         geom_ds.attrs.create('units', 'angstroms')
         

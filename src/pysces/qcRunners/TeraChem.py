@@ -725,6 +725,7 @@ class TCRunner():
             if n_comp != n_req:
                 raise ValueError(f'DEBUG MODE: Number of jobs requested ({n_req}) does not match the next batch of jobs in the trajectory ({n_comp})')
             time.sleep(0.025)
+            # time.sleep(5.0)
             return completed_batch
 
         n_clients = len(self._client_list)

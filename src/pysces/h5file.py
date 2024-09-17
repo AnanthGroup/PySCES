@@ -5,9 +5,56 @@ import os
 import sys
 import argparse
 
+class H5Group(h5py.Group):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+
+    def create_group(self, name, track_order=None, exist_ok=True):
+        if exist_ok and name in self:
+            return self[name]
+        grp = super().create_group(name, track_order)
+        return H5Group(grp.id)
+    
+    def create_dataset(self, name, shape=None, dtype=None, data=None, exist_ok=True, **kwargs):
+        if name in self and exist_ok:
+            return self[name]
+        dset = super().create_dataset(name, shape, dtype, data, **kwargs)
+        return H5Dataset(dset.id)
+
+
+class H5Dataset(h5py.Dataset):
+    def __init__(self, bind, *, readonly=False):
+        super().__init__(bind, readonly=readonly)
+
+    def append(self, value):
+        self.resize(self.shape[0]+1, axis=0)
+        self[-1] = value
+
 class H5File(h5py.File):
     def __init__(self, name, mode='r', driver=None, libver=None, userblock_size=None, swmr=False, rdcc_nslots=None, rdcc_nbytes=None, rdcc_w0=None, track_order=None, fs_strategy=None, fs_persist=False, fs_threshold=1, fs_page_size=None, page_buf_size=None, min_meta_keep=0, min_raw_keep=0, locking=None, alignment_threshold=1, alignment_interval=1, meta_block_size=None, **kwds):
         super().__init__(name, mode, driver, libver, userblock_size, swmr, rdcc_nslots, rdcc_nbytes, rdcc_w0, track_order, fs_strategy, fs_persist, fs_threshold, fs_page_size, page_buf_size, min_meta_keep, min_raw_keep, locking, alignment_threshold, alignment_interval, meta_block_size, **kwds)
+
+    def create_group(self, name, track_order=None, exist_ok=True):
+        if exist_ok and name in self:
+            return self[name]
+        
+        grp = super().create_group(name, track_order)
+        return H5Group(grp.id)
+    
+    def create_dataset(self, name, shape=None, dtype=None, data=None, exist_ok=True, **kwargs):
+        if name in self and exist_ok:
+            return self[name]
+        dset = super().create_dataset(name, shape, dtype, data, **kwargs)
+        return H5Dataset(dset.id)
+    
+    # Override __getitem__ to return either H5Group or H5Dataset
+    def __getitem__(self, name):
+        obj = super().__getitem__(name)
+        if isinstance(obj, h5py.Group):
+            return H5Group(obj.id)
+        elif isinstance(obj, h5py.Dataset):
+            return H5Dataset(obj.id)
+        return obj
 
     @staticmethod
     def append_dataset(ds: h5py.Dataset, value):
@@ -89,15 +136,18 @@ class H5File(h5py.File):
             else:
                 np.save(file_name, data[:])
 
+    def to_json(self, file_loc):
+        out_data = self.to_dict()
+        with open(file_loc, 'w') as file:
+            json.dump(out_data, file, indent=4)
 
-    def to_json(self, data: h5py.File |  h5py.Dataset | h5py.Group = None):
+    def to_dict(self, data: h5py.File |  h5py.Dataset | h5py.Group = None):
         if data is None:
             data = self
         out_data = {}
         if isinstance(data, h5py.Group) or isinstance(data, h5py.File):
             for key, val in data.items():
-                print(key)
-                out_data[key] = self._to_json(val)
+                out_data[key] = self.to_dict(val)
         elif isinstance(data, h5py.Dataset):
             if data.dtype == 'object':
                 conv_data = np.array(data[:]).astype(str).tolist()
@@ -121,8 +171,6 @@ if __name__ == '__main__':
 
     with H5File(args.file, 'r') as file:
         if args.json is not None:
-            data = file[args.json]
-            print(json.dumps(H5File().to_json(data), indent=4))
+            file.to_json(args.json)
         else:
             file.print_data_structure()
-            file.to_file_and_dir()
