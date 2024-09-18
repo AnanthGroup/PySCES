@@ -15,7 +15,7 @@ class H5Group(h5py.Group):
         grp = super().create_group(name, track_order)
         return H5Group(grp.id)
     
-    def create_dataset(self, name, shape=None, dtype=None, data=None, exist_ok=True, **kwargs):
+    def create_dataset(self, name, shape=None, dtype='f8', data=None, exist_ok=True, **kwargs):
         if name in self and exist_ok:
             return self[name]
         dset = super().create_dataset(name, shape, dtype, data, **kwargs)
@@ -41,7 +41,7 @@ class H5File(h5py.File):
         grp = super().create_group(name, track_order)
         return H5Group(grp.id)
     
-    def create_dataset(self, name, shape=None, dtype=None, data=None, exist_ok=True, **kwargs):
+    def create_dataset(self, name, shape=None, dtype='f8', data=None, exist_ok=True, **kwargs):
         if name in self and exist_ok:
             return self[name]
         dset = super().create_dataset(name, shape, dtype, data, **kwargs)
