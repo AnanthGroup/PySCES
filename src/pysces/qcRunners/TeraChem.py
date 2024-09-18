@@ -1,6 +1,8 @@
 #!/usr/bin/env python
 # Basic energy calculation
+import functools
 import os
+import threading
 import numpy as np
 from tcpb import TCProtobufClient as TCPBClient
 from tcpb.exceptions import ServerError
@@ -27,6 +29,82 @@ _DEBUG = bool(int(os.environ.get('DEBUG', False)))
 _DEBUG_TRAJ = os.environ.get('DEBUG_TRAJ', False)
 _SAVE_DEBUG_TRAJ = os.environ.get('SAVE_DEBUG_TRAJ', False)
 
+
+def synchronized(function):
+    print('In synchronized')
+    ''''Decorator to make sure that only one thread can access the function at a time'''
+    lock = threading.Lock()
+    @functools.wraps(function)
+    def wrapper(self, *args, **kwargs):
+        with lock:
+            return function(self, *args, **kwargs)
+    print('Returning wrapper')
+    return wrapper
+class TCClientExtra(TCPBClient):
+    host_port_to_ID: dict = {}
+
+    def __init__(self, host: str = "127.0.0.1", port: int = 11111, debug=False, trace=False, log=True) -> None:
+        """
+        Initializes a TCClientExtra object.
+
+        Args:
+            host (str): The host IP address. Defaults to "127.0.0.1".
+            port (int): The port number. Defaults to 11111.
+            debug (bool): Whether to enable debug mode. Defaults to False.
+            trace (bool): Whether to enable trace mode. Defaults to False.
+            log (bool): Whether to enable logging. Defaults to True.
+        """
+        super().__init__(host, port, debug, trace)
+
+        self._add_to_host_port_to_ID()
+        self._log = None
+        if log:
+            self._log = open(f'tc_client_{self._get_ID()}.log', 'a')
+            self.log_message(f'Client started on {host}:{port}')
+
+    def __del__(self):
+        if self._log:
+            self._log.close()
+
+    def __repr__(self) -> str:
+        """
+        Returns a string representation of the TCClientExtra object.
+
+        Returns:
+            str: The string representation of the object.
+        """
+        out_str = f'TCClientExtra(host={self.host}, port={self.port})'
+        return out_str
+
+    def log_message(self, message):
+        """
+        Logs a message to the log file.
+
+        Args:
+            message (str): The message to be logged.
+        """
+        if self._log:
+            self._log.write(f'{time.ctime()}: {message}\n')
+            self._log.flush()
+
+    @synchronized
+    def _add_to_host_port_to_ID(self):
+        """
+        Adds the host and port combination to the host_port_to_ID dictionary.
+        """
+        new_ID = 0
+        while new_ID in self.host_port_to_ID.values():
+            new_ID += 1
+        TCClientExtra.host_port_to_ID[(self.host, self.port)] = new_ID
+
+    def _get_ID(self):
+        """
+        Returns the ID associated with the current host and port combination.
+
+        Returns:
+            int: The ID associated with the host and port combination.
+        """
+        return self.host_port_to_ID[(self.host, self.port)]
 
 class TCServerStallError(Exception):
     def __init__(self, message):            
@@ -99,8 +177,8 @@ def start_TC_server(port: int):
 
     #   set up a temporary client to make sure it is open
     try:
-        tmp_client = TCPBClient(host, port)
-        TCRunner.wait_until_available(tmp_client)
+        # tmp_client = TCPBClient(host, port)
+        tmp_client = TCRunner.get_new_client(host, port)
         _server_processes[(host, port)] = process
         tmp_client.disconnect()
     except TimeoutError as e:
@@ -140,7 +218,7 @@ def _start_TC_server(port: int):
     
     return ip
 
-def compute_job_sync(client: TCPBClient, jobType="energy", geom=None, unitType="bohr", **kwargs):
+def compute_job_sync(client: TCClientExtra, jobType="energy", geom=None, unitType="bohr", **kwargs):
     """Wrapper for send_job_async() and recv_job_async(), using check_job_complete() to poll the server.
     Main funcitonality is coppied from TCProtobufClient.send_job_async() and
     TCProtobufClient.check_job_complete(). This is mostly to change the time in which the server is pinged. 
@@ -156,10 +234,15 @@ def compute_job_sync(client: TCPBClient, jobType="energy", geom=None, unitType="
     """
 
     print("Submitting Job...")
+    client.log_message("Submitting Job...")
     accepted = client.send_job_async(jobType, geom, unitType, **kwargs)
     while accepted is False:
         time.sleep(0.25)
         accepted = client.send_job_async(jobType, geom, unitType, **kwargs)
+
+    client.log_message("Job Accepted")
+    client.log_message(f"    Job Type: {jobType}")
+    client.log_message(f"    Current Job Dir: {client.curr_job_dir}")
 
     completed = client.check_job_complete()
     while completed is False:
@@ -177,6 +260,8 @@ def compute_job_sync(client: TCPBClient, jobType="energy", geom=None, unitType="
                 client,
             )
     return client.recv_job_async()
+
+
 
 class TCJob():
     __job_counter = 0
@@ -274,6 +359,10 @@ class TCJobBatch():
         # timings['Wall_Time'] = np.sum(list(timings.values()))
         return timings
 
+
+
+
+    
 class TCRunner():
     def __init__(self, 
                  hosts: str, 
@@ -313,8 +402,8 @@ class TCRunner():
                 self._client_list.append(None)
                 print('DEBUG_TRAJ set, clients will not be opened')
                 break
-            client = TCPBClient(host=h, port=p)
-            self.wait_until_available(client, max_wait=max_wait)
+            # client = TCPBClient(host=h, port=p)
+            client = self.get_new_client(h, p, max_wait=max_wait)
             self._client_list.append(client)
 
         self._client = self._client_list[0]
@@ -385,7 +474,9 @@ class TCRunner():
             client.disconnect()
 
     @staticmethod
-    def wait_until_available(client: TCPBClient, max_wait=10.0, time_btw_check=1.0):
+    def get_new_client(host: str, port: int, max_wait=10.0, time_btw_check=1.0):
+        print('Setting up new client')
+        client = TCClientExtra(host=host, port=port)
         total_wait = 0.0
         avail = False
         while not avail:
@@ -400,7 +491,8 @@ class TCRunner():
                 total_wait += time_btw_check
                 if total_wait >= max_wait:
                     raise TimeoutError('Maximum time allotted for checking for TeraChem server')
-        print('Terachem Server is available and connected')
+        print('Terachem server is available and connected')
+        return client
 
     @staticmethod
     def append_results_file(results: dict):
@@ -423,14 +515,14 @@ class TCRunner():
         return results
     
     @staticmethod
-    def remove_previous_job_dir(client: TCPBClient):
+    def remove_previous_job_dir(client: TCClientExtra):
         results = client.prev_results
         TCRunner.remove_previous_scr_dir(client)
         job_dir = results['job_dir']
         shutil.rmtree(job_dir)
 
     @staticmethod
-    def remove_previous_scr_dir(client: TCPBClient):
+    def remove_previous_scr_dir(client: TCClientExtra):
         results = client.prev_results
         scr_dir = results['job_scr_dir']
         shutil.rmtree(scr_dir)
@@ -473,7 +565,7 @@ class TCRunner():
         return cleaned
 
     @staticmethod
-    def run_TC_single(client: TCPBClient, geom, atoms: list[str], opts: dict):
+    def run_TC_single(client: TCClientExtra, geom, atoms: list[str], opts: dict):
         opts['atoms'] = atoms
         start = time.time()
         results = client.compute_job_sync('energy', geom, 'angstrom', **opts)
@@ -549,14 +641,16 @@ class TCRunner():
             stop_TC_server(host, port)
             time.sleep(2.0)
             start_TC_server(port)
-            self._client = TCPBClient(host=host, port=port)
-            self.wait_until_available(self._client, max_wait=20)
+            # self._client = TCPBClient(host=host, port=port)
+            # self.get_new_client(self._client, max_wait=20)
+            self._client = self.get_new_client(host, port, self._client, max_wait=20)
             print('Started new TC Server: re-running current step')
             job_batch = self.run_TC_new_geom(geom)
 
-        # if _SAVE_DEBUG_TRAJ:
-        #     print("APPENDING DEBUG TRAJ")
-        #     self._debug_traj.append(job_batch)
+        if _SAVE_DEBUG_TRAJ:
+            print("SAVING DEBUG TRAJ FILE: ", _SAVE_DEBUG_TRAJ)
+            with open(_SAVE_DEBUG_TRAJ, 'wb') as file:
+                pickle.dump(self._debug_traj, file)
                 
         return job_batch
 
@@ -971,7 +1065,7 @@ def _correct_signs_from_charges(job: TCJob, ref_job: TCJob):
         job.results['nacme'] = (np.array(job.results['nacme'])*min_signs[idx1]*min_signs[idx2]).tolist()
 
 
-def _run_jobs_on_client(client: TCPBClient, jobs: list[TCJob], server_root, client_ID=0, prev_results=[]):
+def _run_jobs_on_client(client: TCClientExtra, jobs: list[TCJob], server_root, client_ID=0, prev_results=[]):
     times = {}
     all_results = []
 
@@ -984,6 +1078,9 @@ def _run_jobs_on_client(client: TCPBClient, jobs: list[TCJob], server_root, clie
 
         _set_guess(job_opts, j.excited_type, all_results + prev_results, j.state, client, server_root)
         print(f"\nRunning {job_name} on client ID {client_ID}")
+        if client.prev_results:
+            job_dir = os.path.join(server_root, client.prev_results['job_dir'])
+            print(f'    {job_dir}')
         # if 'cisrestart' in job_opts:
         #     job_opts['cisrestart'] = f"{job_opts['cisrestart']}_{client.host}_{client.port}"
 
@@ -1003,9 +1100,11 @@ def _run_jobs_on_client(client: TCPBClient, jobs: list[TCJob], server_root, clie
                     exit()
                 else:
                     try_again = True
-                    print("Server error recieved; trying to run job once more")
                     print(e)
+                    print("Server error recieved; trying to run job once more")
+                    client.log_message(f"Server error recieved; trying to run job once more")
                     time.sleep(20)
+                    client = TCRunner.get_new_client(client.host, client.port)
         # j.total_time = time.time() - start
         j.end_time = time.time()
         results['run'] = job_type
@@ -1016,7 +1115,7 @@ def _run_jobs_on_client(client: TCPBClient, jobs: list[TCJob], server_root, clie
 
     # return all_results, times
 
-def _set_guess(job_opts: dict, excited_type: str, prev_results: list[dict], state: int, client: TCPBClient, server_root='.'):
+def _set_guess(job_opts: dict, excited_type: str, prev_results: list[dict], state: int, client: TCClientExtra, server_root='.'):
 
     if len(prev_results) != 0:
         prev_job = prev_results[-1]

@@ -242,7 +242,7 @@ class SimulationLogger():
         self._h5_group = None
         if hdf5:
             # self._h5_file = H5File(os.path.join(dir, 'logs.h5'), 'w')
-            self._h5_file = H5File('logs.h5', 'w')
+            self._h5_file = H5File('logs.h5', 'a')
             if hdf5_name == '':
                 hdf5_name = 'electronic'
             self._h5_group = self._h5_file.create_group(hdf5_name)
