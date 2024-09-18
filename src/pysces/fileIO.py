@@ -242,7 +242,7 @@ class SimulationLogger():
         self._h5_group = None
         if hdf5:
             # self._h5_file = H5File(os.path.join(dir, 'logs.h5'), 'w')
-            self._h5_file = H5File('logs.h5', 'a')
+            self._h5_file = H5File('logs.h5', 'w')
             if hdf5_name == '':
                 hdf5_name = 'electronic'
             self._h5_group = self._h5_file.create_group(hdf5_name)
@@ -358,6 +358,8 @@ class TCJobsLogger():
     def _initialize(self, cleaned_batch: TC.TCJobBatch):
         self._file.create_group(self._group_name)
         
+        str_dt = h5py.string_dtype(encoding='utf-8')
+
         for job in cleaned_batch.jobs:
             group = self._file[self._group_name].create_group(name=job.name)
             group.create_dataset(name='timestep', shape=(0,1), maxshape=(None, 1))
@@ -374,19 +376,17 @@ class TCJobsLogger():
 
             #   couldn't figure out how to initialize with an empty shape when using strings,
             #   so I just resized afterwards
-            ds = group.create_dataset(name='tc.out', shape=(1,1), maxshape=(None, 1), dtype=str)
+            ds = group.create_dataset(name='tc.out', shape=(1,1), maxshape=(None, 1), data='', dtype=str_dt)
             ds.resize((0, 1))
-            ds = group.create_dataset(name='other', shape=(1,1), maxshape=(None, 1), dtype=str)
+            ds = group.create_dataset(name='other', shape=(1,1), maxshape=(None, 1), data='', dtype=str_dt)
             ds.resize((0, 1))
 
 
         self._file.create_dataset(name = f'{self._group_name}/atoms', 
-                                  data = cleaned_batch.results_list[0]['atoms'])
+                                  data = cleaned_batch.results_list[0]['atoms'], dtype=str_dt)
         geom = np.array(cleaned_batch.results_list[0]['geom'])
-        print('CREATING GEOM')
         geom_ds = self._file.create_dataset(name = f'{self._group_name}/geom', 
                                             shape=(0,) + geom.shape,
-                                            data='',
                                             maxshape=(None,) + geom.shape)
         geom_ds.attrs.create('units', 'angstroms')
         
@@ -710,8 +710,6 @@ class EnergyLogger(BaseLogger):
 
     def write(self, data: LoggerData):
         super().write(data)
-        print('ALL ENERGIES:', data.all_energies)
-        print('ELEC ENERGIES:', data.elec_E)
         if self._file:
             out_str = f'{data.time:12.6f} {data.total_E:16.10f}'
             if data.all_energies is not None:
@@ -725,11 +723,7 @@ class EnergyLogger(BaseLogger):
         
         if self._h5_dataset:
             if data.all_energies is not None:
-                print('APPENDING: ', list(data.all_energies) + [data.total_E,])
                 H5File.append_dataset(self._h5_dataset, list(data.all_energies) + [data.total_E,])
-                print('After Appending: ')
-                for x in self._h5_dataset[:][-1]:
-                    print(x, type(x), float(x))
             else:
                 H5File.append_dataset(self._h5_dataset, list(data.elec_E) + [data.total_E, ])
 
