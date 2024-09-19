@@ -43,7 +43,7 @@ def synchronized(function):
 class TCClientExtra(TCPBClient):
     host_port_to_ID: dict = {}
 
-    def __init__(self, host: str = "127.0.0.1", port: int = 11111, debug=False, trace=False, log=True) -> None:
+    def __init__(self, host: str = "127.0.0.1", port: int = 11111, debug=False, trace=False, log=True, server_root='.') -> None:
         """
         Initializes a TCClientExtra object.
 
@@ -59,8 +59,9 @@ class TCClientExtra(TCPBClient):
         self._add_to_host_port_to_ID()
         self._log = None
         if log:
-            self._log = open(f'tc_client_{self._get_ID()}.log', 'a')
+            self._log = open(f'tc_client_{self.get_ID()}.log', 'a')
             self.log_message(f'Client started on {host}:{port}')
+        self.server_root = server_root
 
     def __del__(self):
         if self._log:
@@ -97,7 +98,7 @@ class TCClientExtra(TCPBClient):
             new_ID += 1
         TCClientExtra.host_port_to_ID[(self.host, self.port)] = new_ID
 
-    def _get_ID(self):
+    def get_ID(self):
         """
         Returns the ID associated with the current host and port combination.
 
@@ -265,7 +266,7 @@ def compute_job_sync(client: TCClientExtra, jobType="energy", geom=None, unitTyp
 
 class TCJob():
     __job_counter = 0
-    def __init__(self, geom, opts, job_type, excited_type, state, name='') -> None:
+    def __init__(self, geom, opts, job_type, excited_type, state, name='', client=None) -> None:
         self.geom = geom
         self.excited_type: Literal['cas', 'cis'] = excited_type
         self.opts = opts
@@ -275,6 +276,7 @@ class TCJob():
         self.start_time = 0
         self.end_time = 0
         self._results = {}
+        self.client = client
 
         if job_type not in ['energy', 'gradient', 'coupling']:
             raise ValueError('TCJob job_type must be either "energy", "gradient", or "coupling"')
@@ -298,8 +300,10 @@ class TCJob():
 
     @property
     def complete(self):
-        if self.results: return True
-        else: return False
+        if self.results: 
+            return True
+        else: 
+            return False
 
     @property
     def jobID(self):
@@ -317,7 +321,14 @@ class TCJobBatch():
     '''
         Combines multiple TCJobs into one wrapper
     '''
-    def __init__(self, jobs: list[TCJob]) -> None:
+    def __init__(self, jobs: list[TCJob] | list['TCJobBatch'] = []) -> None:
+        if len(jobs) == 0:
+            self.jobs = []
+            return
+        
+        if isinstance(jobs[0], TCJobBatch):
+            jobs = list(itertools.chain(*[j.jobs for j in jobs]))
+        
         #   sort by ID
         id_list = [j.jobID for j in jobs]
         order = np.argsort(id_list)
@@ -341,10 +352,58 @@ class TCJobBatch():
         jobs = [x for x in self.jobs if x.job_type == job_type]
         return TCJobBatch(jobs)
     
+    def get_by_name(self, names: list | str):
+        if isinstance(names, str):
+            names = [names]
+        jobs = [x for x in self.jobs if x.name in names]
+        return TCJobBatch(jobs)
+    
+    def get_by_client(self, client: TCClientExtra | int):
+        if isinstance(client, int):
+            jobs = [x for x in self.jobs if x.client.get_ID() == client]
+        elif isinstance(client, TCClientExtra):
+            jobs = [x for x in self.jobs if x.client == client]
+        else:
+            raise ValueError('client must be either an integer or a TCClientExtra object')
+        return TCJobBatch(jobs)
+
+    def set_client(self, client: TCClientExtra):
+        for j in self.jobs:
+            j.client = client
+
+    def append(self, job: TCJob):
+        self.jobs.append(job)
+    
     def sorted_jobs_by_state(self):
         states = [x.state for x in self.jobs]
         order = np.argsort(states)
         return [self.jobs[n] for n in order]
+    
+    def check_complete(self):
+        for j in self.jobs:
+            if not j.complete:
+                return False
+        return True
+    
+    def check_client(self):
+        for j in self.jobs:
+            if j.client is None:
+                return False
+        return True
+
+    def wait_for_complete(self, max_wait=20):
+        start = time.time()
+        while not self.check_complete():
+            time.sleep(0.25)
+            if time.time() - start > max_wait:
+                raise TimeoutError('Maximum time allotted for waiting for job completion')
+
+    def _remove_clients(self):
+        ''' DEBUGGING ONLY 
+            Clients can't be pickled
+        '''
+        for j in self.jobs:
+            j.client = None
 
     @property
     def results_list(self) -> list[dict]:
@@ -358,10 +417,6 @@ class TCJobBatch():
         timings['Wall_Time'] = max_time - min_time
         # timings['Wall_Time'] = np.sum(list(timings.values()))
         return timings
-
-
-
-
     
 class TCRunner():
     def __init__(self, 
@@ -370,10 +425,11 @@ class TCRunner():
                  atoms: list,
                  tc_options: dict,
                  tc_spec_job_opts: dict = None,
-                 tc_initial_job_options: dict = None,
+                 tc_initial_frame_options: dict = None,
+                 tc_client_assignments: list[list[str]] = None,
                  server_roots = '.',
                  start_new:  bool=False,
-                 run_options: dict={}, 
+                 tc_state_options: dict={}, 
                  max_wait=20,
                  ) -> None:
 
@@ -397,13 +453,13 @@ class TCRunner():
         self._server_root_list = server_roots
         self._client_list = []
 
-        for h, p in zip(hosts, ports):
+        for h, p, s in zip(hosts, ports, server_roots):
             if _DEBUG_TRAJ: 
                 self._client_list.append(None)
                 print('DEBUG_TRAJ set, clients will not be opened')
                 break
             # client = TCPBClient(host=h, port=p)
-            client = self.get_new_client(h, p, max_wait=max_wait)
+            client = self.get_new_client(h, p, max_wait=max_wait, server_root=s)
             self._client_list.append(client)
 
         self._client = self._client_list[0]
@@ -424,23 +480,26 @@ class TCRunner():
         self._n_calls = 0
 
         #   state options
-        if run_options.get('grads', False):
-            self._grads = run_options['grads']
+        if tc_state_options.get('grads', False):
+            self._grads = tc_state_options['grads']
             self._max_state = max(self._grads)
-        elif run_options.get('max_state', False):
-            self._max_state = run_options['max_state']
+        elif tc_state_options.get('max_state', False):
+            self._max_state = tc_state_options['max_state']
             self._grads = list(range(self._max_state + 1))
         else:
             raise ValueError('either "max_state" or a list of "grads" must be specified')
         # self._max_state = run_options.get('max_state', 0)
         # self._grads = run_options.get('grads', False)
-        self._NACs = run_options.pop('nacs', 'all')
+        self._NACs = tc_state_options.pop('nacs', 'all')
 
         #   job options for specific jobs
         self._spec_job_opts = tc_spec_job_opts
 
         #   job options for first step only
-        self._initial_job_options = tc_initial_job_options
+        self._initial_frame_options = tc_initial_frame_options
+
+        #   assign particular job names to particular clients
+        self._client_assignments = tc_client_assignments
 
         self._prev_results = []
         self._prev_jobs: list[TCJob] = []
@@ -474,9 +533,9 @@ class TCRunner():
             client.disconnect()
 
     @staticmethod
-    def get_new_client(host: str, port: int, max_wait=10.0, time_btw_check=1.0):
+    def get_new_client(host: str, port: int, max_wait=10.0, time_btw_check=1.0, server_root=''):
         print('Setting up new client')
-        client = TCClientExtra(host=host, port=port)
+        client = TCClientExtra(host=host, port=port, server_root=server_root)
         total_wait = 0.0
         avail = False
         while not avail:
@@ -509,7 +568,6 @@ class TCRunner():
             for n in range(len(lines)):
                 lines[n] = lines[n][0:-1]
             results['tc.out'] = lines
-            print("### APPENDED TC.OUT ###")
         else:
             print("Warning: Output file not found at ", output_file)
         return results
@@ -556,11 +614,6 @@ class TCRunner():
         cleaned = {}
         for key in results:
             cleaned[key] = _convert(results[key])
-            # if isinstance(results[key], np.ndarray):
-            #     results[key] = results[key].tolist()
-            # if isinstance(results[key], list) and len(results[key]):
-            #     if isinstance(results[key][0], np.ndarray):
-            #         results[key] = np.array(results[key]).tolist()
 
         return cleaned
 
@@ -643,7 +696,7 @@ class TCRunner():
             start_TC_server(port)
             # self._client = TCPBClient(host=host, port=port)
             # self.get_new_client(self._client, max_wait=20)
-            self._client = self.get_new_client(host, port, self._client, max_wait=20)
+            self._client = self.get_new_client(host, port, self._client, max_wait=20, server_root=self._server_root)
             print('Started new TC Server: re-running current step')
             job_batch = self.run_TC_new_geom(geom)
 
@@ -698,11 +751,11 @@ class TCRunner():
             base_options.update(orig_opts)
         
         #   options for the first few steps only
-        if self._initial_job_options is not None:
-            if 'n_frames' not in self._initial_job_options:
-                self._initial_job_options['n_frames'] = 0
-            if self._frame_counter < self._initial_job_options['n_frames']:
-                base_options.update(self._initial_job_options)
+        if self._initial_frame_options is not None:
+            if 'n_frames' not in self._initial_frame_options:
+                self._initial_frame_options['n_frames'] = 0
+            if self._frame_counter < self._initial_frame_options['n_frames']:
+                base_options.update(self._initial_frame_options)
 
         #   determine the range of gradients and couplings to compute
         grads = []
@@ -720,11 +773,6 @@ class TCRunner():
                             continue
                         NACs.append((i, j))
 
-        # if couplings:
-        #     NACs = []
-        #     for i in range(max_state+1):
-        #         for j in range(i+1, max_state+1):
-        #             NACs.append((i, j))
 
         #   make sure we are computing enough states
         if excited_type == 'cis':
@@ -743,8 +791,7 @@ class TCRunner():
 
 
         n_clients = len(self._client_list)
-        jobs_to_run = [[] for i in range(n_clients)]
-        job_num = 0
+        job_batch = TCJobBatch()
 
         #   run energy only if gradients and NACs are not requested
         if len(grads) == 0 and len(NACs) == 0:
@@ -772,11 +819,8 @@ class TCRunner():
                 if excited_type == 'cis':
                     job_opts.update(excited_options)
                     job_opts['cistarget'] = state
-                    
-            # self._set_guess(job_opts, excited_type, all_results, state)
 
-            jobs_to_run[job_num % n_clients].append(TCJob(geom, job_opts.copy(), 'gradient', excited_type, state, name))
-            job_num += 1
+            job_batch.append(TCJob(geom, job_opts.copy(), 'gradient', excited_type, state, name))
 
 
         #   create NAC job properties
@@ -797,68 +841,66 @@ class TCRunner():
             job_opts['nacstate1'] = nac1
             job_opts['nacstate2'] = nac2
 
-            jobs_to_run[job_num % n_clients].append(TCJob(geom, job_opts.copy(), 'coupling', excited_type, max(nac1, nac2), name))
-            job_num += 1
+            job_batch.append(TCJob(geom, job_opts.copy(), 'coupling', excited_type, max(nac1, nac2), name))
 
-        job_batch = self._send_jobs_to_clients(jobs_to_run)
+        job_batch = self._send_jobs_to_clients(job_batch)
         self._frame_counter += 1
-        # self._prev_jobs = [job for job_list in jobs_to_run for job in job_list]
         self._prev_jobs = job_batch.jobs
         return job_batch
 
-    def _send_jobs_to_clients(self, jobs_to_run: list[list[TCJob]]) -> tuple[TCJobBatch, dict]:
-        
 
+    def _send_jobs_to_clients(self, jobs_batch: TCJobBatch):
+
+        #   debug mode
         if self._debug_traj and not _SAVE_DEBUG_TRAJ:
             completed_batch = self._debug_traj.pop(0)
-            n_comp = len(completed_batch.jobs)         
-            n_req = 0
-
-            for i in range(len(jobs_to_run)):
-                for j in range(len(jobs_to_run[i])):
-                    # jobs_to_run[i][j] = completed_batch.get_by_id(jobs_to_run[i][j].jobID)
-                    jobs_to_run[i][j] = completed_batch.jobs[j]
-                    n_req += 1
+            n_comp = len(completed_batch.jobs)        
+            n_req = len(jobs_batch.jobs)
             if n_comp != n_req:
                 raise ValueError(f'DEBUG MODE: Number of jobs requested ({n_req}) does not match the next batch of jobs in the trajectory ({n_comp})')
             time.sleep(0.025)
-            # time.sleep(5.0)
             return completed_batch
+        
 
         n_clients = len(self._client_list)
+        if self._client_assignments:
+            for i, names in enumerate(self._client_assignments):
+                sub_jobs = jobs_batch.get_by_name(names)
+                sub_jobs.set_client(self._client_list[i])
+        else:
+            #   equally distribute jobs among clients
+            for j in jobs_batch.jobs:
+                j.client = self._client_list[j.jobID % n_clients]
+
+        if not jobs_batch.check_client():
+            raise ValueError('Not all jobs have been assigned a client')
 
         #   if only one client is being used, don't open up threads, easier to debug
         if n_clients == 1:
-            _run_jobs_on_client(self._client_list[0], jobs_to_run[0], self._server_root_list[0], 0, self._prev_results)
+            jobs_batch.jobs[0].client = self._client_list[0]
+            _run_batch_jobs(jobs_batch.jobs[0], self._prev_results)
 
         #   submit jobs as separate threads, one per client
         else:
             with concurrent.futures.ThreadPoolExecutor() as executor:
                 futures = []
-                for i in range(n_clients):
-                    jobs = jobs_to_run[i]
-                    args = (self._client_list[i], jobs, self._server_root_list[i], i, self._prev_results)
-                    future = executor.submit(_run_jobs_on_client, *args)
+                for client in self._client_list:
+                    jobs = jobs_batch.get_by_client(client)
+                    args = (jobs, self._prev_results)
+                    future = executor.submit(_run_batch_jobs, *args)
                     futures.append(future)
                 for f in futures:
                     f.result()
 
-        #   collect all jobs
-        all_jobs = []
-        for jobs in jobs_to_run:
-            for j in jobs:
-                all_jobs.append(j)
-
-        #   group the completed jobs into a batch
-        job_batch = TCJobBatch(all_jobs)
-        self._prev_results = job_batch.results_list
-        self.set_avg_max_times(job_batch.timings)
+        self._prev_results = jobs_batch.results_list
+        self.set_avg_max_times(jobs_batch.timings)
 
         if _SAVE_DEBUG_TRAJ:
-            print("APPENDING DEBUG TRAJ ", job_batch)
-            self._debug_traj.append(job_batch)
+            print("APPENDING DEBUG TRAJ ", jobs_batch)
+            jobs_batch._remove_clients()
+            self._debug_traj.append(jobs_batch)
 
-        return job_batch
+        return jobs_batch
 
     def _run_numerical_derivatives(self, ref_job: TCJob, n_points=3, dx=0.01, overlap=False):
         '''
@@ -878,19 +920,17 @@ class TCRunner():
         for n, i, j in indicies:
             new_geom = np.copy(ref_job.geom)
             new_geom[n, i] += j*dx/1.8897259886 # angstrom to bohr
-            job = TCJob(new_geom, base_opts, 'energy', ref_job.excited_type, ref_job.state, str((n, i, j)))
+            job = TCJob(new_geom, base_opts, 'energy', ref_job.excited_type, ref_job.state, str((n, i, j)), self._client_list[0])
             num_deriv_jobs.append(job)
 
 
         if not _DEBUG:
-            # _run_jobs_on_client(self._client_list[0], num_deriv_jobs, self._server_root_list[0], 0, self._prev_results)
-            # print('NUM DERIV JOBS: ', num_deriv_jobs)
             batch = self._send_jobs_to_clients([num_deriv_jobs])
         else:
             if os.path.isfile('_num_deriv_jobs.pkl'):
                 with open('_num_deriv_jobs.pkl', 'rb') as file: num_deriv_jobs = pickle.load(file)
             else:
-                _run_jobs_on_client(self._client_list[0], num_deriv_jobs, self._server_root_list[0], 0, self._prev_results)
+                _run_batch_jobs(num_deriv_jobs, self._server_root_list[0], 0, self._prev_results)
                 self._send_jobs_to_clients(num_deriv_jobs)
                 with open('_num_deriv_jobs.pkl', 'wb') as file: pickle.dump(num_deriv_jobs, file)        
 
@@ -908,18 +948,18 @@ class TCRunner():
                 opts['orb1afile'] = os.path.join(self._server_root_list[0], ref_results["job_scr_dir"], "c0")
                 opts['orb2afile'] = os.path.join(self._server_root_list[0], job_results["job_scr_dir"], "c0")
                 opts['old_coors'] = os.path.join(self._server_root_list[0], ref_results["job_dir"], "geom.xyz")
-                job = TCJob(job.geom, opts, 'ci_vec_overlap', ref_job.excited_type, ref_job.state, f'overlap_{deriv_job.name}')
+                job = TCJob(job.geom, opts, 'ci_vec_overlap', ref_job.excited_type, ref_job.state, f'overlap_{deriv_job.name}', self._client_list[0])
                 overlap_jobs.append(job)
                 # deriv_to_overlap[deriv_job.jobID] = job.jobID
                 job_pairs.append((deriv_job, job))
 
             if not _DEBUG:
-                _run_jobs_on_client(self._client_list[0], overlap_jobs, self._server_root_list[0], 0, self._prev_results)
+                _run_batch_jobs(overlap_jobs, self._server_root_list[0], 0, self._prev_results)
             else:
                 if os.path.isfile('_overlap_pairs.pkl'):
                     with open('_overlap_pairs.pkl', 'rb') as file: job_pairs = pickle.load(file)
                 else:
-                    _run_jobs_on_client(self._client_list[0], overlap_jobs, self._server_root_list[0], 0, self._prev_results)
+                    _run_batch_jobs(overlap_jobs, self._server_root_list[0], 0, self._prev_results)
                     with open('_overlap_pairs.pkl', 'wb') as file: pickle.dump(job_pairs, file)
             
 
@@ -933,10 +973,6 @@ class TCRunner():
         else:
             return_dict = {'num_deriv_jobs': num_deriv_jobs, 'overlap_jobs': None}
             return return_dict
-
-    # def _set_guess(self, job_opts: dict, excited_type: str, all_results: list[dict], state):
-    #     return _set_guess(job_opts, excited_type, all_results, state)
-
 
 def _correct_signs_from_overlaps(job: TCJob, overlap_job: TCJob):
     '''
@@ -1065,22 +1101,20 @@ def _correct_signs_from_charges(job: TCJob, ref_job: TCJob):
         job.results['nacme'] = (np.array(job.results['nacme'])*min_signs[idx1]*min_signs[idx2]).tolist()
 
 
-def _run_jobs_on_client(client: TCClientExtra, jobs: list[TCJob], server_root, client_ID=0, prev_results=[]):
+def _run_batch_jobs(jobs_batch: TCJobBatch, prev_results=[]):
     times = {}
     all_results = []
 
-    for j in jobs:
+    for j in jobs_batch.jobs:
         job_name = j.name
         geom = j.geom
         job_opts =  j.opts
         job_type =  j.job_type
+        client: TCClientExtra = j.client
         j.start_time = time.time()
 
-        _set_guess(job_opts, j.excited_type, all_results + prev_results, j.state, client, server_root)
-        print(f"\nRunning {job_name} on client ID {client_ID}")
-        if client.prev_results:
-            job_dir = os.path.join(server_root, client.prev_results['job_dir'])
-            print(f'    {job_dir}')
+        _set_guess(job_opts, j.excited_type, all_results + prev_results, j.state, client)
+        print(f"\nRunning {job_name} on client ID {client.get_ID()}")
         # if 'cisrestart' in job_opts:
         #     job_opts['cisrestart'] = f"{job_opts['cisrestart']}_{client.host}_{client.port}"
 
@@ -1104,19 +1138,20 @@ def _run_jobs_on_client(client: TCClientExtra, jobs: list[TCJob], server_root, c
                     print("Server error recieved; trying to run job once more")
                     client.log_message(f"Server error recieved; trying to run job once more")
                     time.sleep(20)
-                    client = TCRunner.get_new_client(client.host, client.port)
+                    client = TCRunner.get_new_client(client.host, client.port, client.server_root)
         # j.total_time = time.time() - start
         j.end_time = time.time()
         results['run'] = job_type
-        TCRunner.append_output_file(results, server_root)
+        TCRunner.append_output_file(results, client.server_root)
         results.update(job_opts)
         j.results = results.copy()
         all_results.append(results)
 
     # return all_results, times
 
-def _set_guess(job_opts: dict, excited_type: str, prev_results: list[dict], state: int, client: TCClientExtra, server_root='.'):
+def _set_guess(job_opts: dict, excited_type: str, prev_results: list[dict], state: int, client: TCClientExtra):
 
+    server_root = client.server_root
     if len(prev_results) != 0:
         prev_job = prev_results[-1]
         job_dir = os.path.join(server_root, prev_job['job_dir'])

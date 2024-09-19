@@ -1764,7 +1764,7 @@ def rk4(initq, initp, tStop, H, restart, amu_mat, U, com_ang, AN_mat):
             if not proceed:
                 sys.exit("Electronic structure calculation failed at initial time. Exitting.")
         elif QC_RUNNER == 'terachem':
-            tc_runner = TCRunner(tcr_host, tcr_port, atoms, tcr_job_options, server_roots=tcr_server_root, run_options=tcr_state_options, tc_spec_job_opts=tcr_spec_job_opts, tc_initial_job_options=tcr_initial_frame_opts, start_new=False)
+            tc_runner = TCRunner(tcr_host, tcr_port, atoms, tcr_job_options, server_roots=tcr_server_root, tc_state_options=tcr_state_options, tc_spec_job_opts=tcr_spec_job_opts, tc_initial_frame_options=tcr_initial_frame_opts, start_new=False)
             job_batch = tc_runner.run_TC_new_geom(qC/ang2bohr)
             timings = job_batch.timings
             all_energies, elecE, grad, nac, trans_dips = format_output_LSCIVR(job_batch.results_list)
