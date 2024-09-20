@@ -1,5 +1,6 @@
 #!/usr/bin/env python
 # Basic energy calculation
+from datetime import datetime
 import functools
 import os
 import threading
@@ -20,6 +21,7 @@ import pickle
 from typing import Literal
 import itertools
 import weakref
+# import GPUtil
 
 
 _server_processes = {}
@@ -31,14 +33,12 @@ _SAVE_DEBUG_TRAJ = os.environ.get('SAVE_DEBUG_TRAJ', False)
 
 
 def synchronized(function):
-    print('In synchronized')
     ''''Decorator to make sure that only one thread can access the function at a time'''
     lock = threading.Lock()
     @functools.wraps(function)
     def wrapper(self, *args, **kwargs):
         with lock:
             return function(self, *args, **kwargs)
-    print('Returning wrapper')
     return wrapper
 class TCClientExtra(TCPBClient):
     host_port_to_ID: dict = {}
@@ -63,6 +63,8 @@ class TCClientExtra(TCPBClient):
             self.log_message(f'Client started on {host}:{port}')
         self.server_root = server_root
 
+        self._last_known_curr_dir = None
+
     def __del__(self):
         if self._log:
             self._log.close()
@@ -74,8 +76,12 @@ class TCClientExtra(TCPBClient):
         Returns:
             str: The string representation of the object.
         """
-        out_str = f'TCClientExtra(host={self.host}, port={self.port})'
+        out_str = f'TCClientExtra(host={self.host}, port={self.port}, id={self.get_ID()})'
         return out_str
+
+    def disconnect(self):
+        super().disconnect()
+        self.host_port_to_ID.pop((self.host, self.port))
 
     def log_message(self, message):
         """
@@ -85,7 +91,9 @@ class TCClientExtra(TCPBClient):
             message (str): The message to be logged.
         """
         if self._log:
-            self._log.write(f'{time.ctime()}: {message}\n')
+            current_time = datetime.now()
+            formatted_time = current_time.strftime('%Y-%m-%d %H:%M:%S.%f')[:-3] 
+            self._log.write(f'{formatted_time}: {message}\n')
             self._log.flush()
 
     @synchronized
@@ -93,9 +101,11 @@ class TCClientExtra(TCPBClient):
         """
         Adds the host and port combination to the host_port_to_ID dictionary.
         """
+        print('CREATING NEW ID ', self.host_port_to_ID)
         new_ID = 0
         while new_ID in self.host_port_to_ID.values():
             new_ID += 1
+        print('    NEW ID ', new_ID)
         TCClientExtra.host_port_to_ID[(self.host, self.port)] = new_ID
 
     def get_ID(self):
@@ -106,7 +116,54 @@ class TCClientExtra(TCPBClient):
             int: The ID associated with the host and port combination.
         """
         return self.host_port_to_ID[(self.host, self.port)]
+    
+    def get_curr_job_dir(self):
+        return os.path.join(self.server_root, self.curr_job_dir)
+    
+    @property
+    def curr_job_dir(self):
+        return self.__dict__['curr_job_dir']
+    
+    @curr_job_dir.setter
+    def curr_job_dir(self, value):
+        self.__dict__['curr_job_dir'] = value
+        self._last_known_curr_dir = value
 
+    def print_end_of_file(self, n_lines=30):
+        lines  = []
+        job_dir = os.path.join(self.server_root, self.curr_job_dir)
+        with open(job_dir + '/tc.out', 'r') as file:
+            lines = file.readlines()
+        for line in lines[-n_lines:]:
+            if '\n' in line:
+                print(line[0:-1])
+            else:
+                print(line)
+
+class TCServerProcess(subprocess.Popen):
+    def __init__(self, port, gpus=[]):
+        self.gpus = gpus
+        self.port = port
+        self.start()
+
+    def start(self):
+        if len(self.gpus) == 0:
+            command = f'terachem -s {self.port}'
+        else:
+            gpus_str = ''.join([str(x) for x in self.gpus])
+            command = f'terachem -s {self.port} --gpus {gpus_str}'
+
+        super().__init__(command.split(), shell=False)
+
+    def restart(self):
+        self.kill()
+        self.start()
+
+    def kill(self):
+        proc = psutil.Process(self.pid)
+        for child in proc.children(recursive=True):  # or parent.children() for recursive=False
+            child.kill()
+        proc.kill()
 class TCServerStallError(Exception):
     def __init__(self, message):            
         # Call the base class constructor with the parameters it needs
@@ -141,18 +198,25 @@ def _convert(value):
     else:
         return value
 
-def start_TC_server(port: int):
+def start_TC_server(port: int, gpus=[], server_root='.'):
     '''
         Start a new TeraChem server. 
         
         Parameters
         ----------
         port: int, port number for the server to use
+        gpus: list, list of GPU numbers to use
+        server_root: string, the root directory to run the server in
 
         Returns
         -------
         host: string, the host of the server being run
     '''
+
+    #   change to server root directory to start the server
+    original_curr_dir = os.path.abspath(os.curdir)
+    os.chdir(server_root)
+
     host = socket.gethostbyname(socket.gethostname())
 
     #   make sure terachem executable is found
@@ -172,19 +236,19 @@ def start_TC_server(port: int):
         pass
     
     #   start TC process
-    command = f'terachem -s {port}'
-    process = subprocess.Popen(command.split(), shell=False)
-    time.sleep(10)
-
+    process = TCServerProcess(port, gpus)
+    time.sleep(5)
     #   set up a temporary client to make sure it is open
     try:
-        # tmp_client = TCPBClient(host, port)
-        tmp_client = TCRunner.get_new_client(host, port)
-        _server_processes[(host, port)] = process
+        tmp_client = TCPBClient(host, port)
+        tmp_client.connect()
         tmp_client.disconnect()
     except TimeoutError as e:
         raise RuntimeError(f'Could not start TeraChem server on {host} with port {port}')
     
+    _server_processes[(host, port)] = process
+    #   return to original directory
+    os.chdir(original_curr_dir)
     return host
 
 def stop_TC_server(host: str, port: int):
@@ -243,7 +307,7 @@ def compute_job_sync(client: TCClientExtra, jobType="energy", geom=None, unitTyp
 
     client.log_message("Job Accepted")
     client.log_message(f"    Job Type: {jobType}")
-    client.log_message(f"    Current Job Dir: {client.curr_job_dir}")
+    client.log_message(f"    Current Job Dir: {client.get_curr_job_dir()}")
 
     completed = client.check_job_complete()
     while completed is False:
@@ -261,9 +325,6 @@ def compute_job_sync(client: TCClientExtra, jobType="energy", geom=None, unitTyp
                 client,
             )
     return client.recv_job_async()
-
-
-
 class TCJob():
     __job_counter = 0
     def __init__(self, geom, opts, job_type, excited_type, state, name='', client=None) -> None:
@@ -316,7 +377,6 @@ class TCJob():
     @results.setter
     def results(self, value):
         self._results = value
-
 class TCJobBatch():
     '''
         Combines multiple TCJobs into one wrapper
@@ -417,10 +477,9 @@ class TCJobBatch():
         timings['Wall_Time'] = max_time - min_time
         # timings['Wall_Time'] = np.sum(list(timings.values()))
         return timings
-    
 class TCRunner():
     def __init__(self, 
-                 hosts: str, 
+                 hosts: str,
                  ports: int,
                  atoms: list,
                  tc_options: dict,
@@ -428,7 +487,7 @@ class TCRunner():
                  tc_initial_frame_options: dict = None,
                  tc_client_assignments: list[list[str]] = None,
                  server_roots = '.',
-                 start_new:  bool=False,
+                 tc_server_gpus:  bool=[],
                  tc_state_options: dict={}, 
                  max_wait=20,
                  ) -> None:
@@ -440,26 +499,36 @@ class TCRunner():
         if isinstance(server_roots, str):
             server_roots = [server_roots]
 
+        #   make sure server roots are absolute paths and exist
+        for i, root in enumerate(server_roots):
+            os.makedirs(root, exist_ok=True)
+            server_roots[i] = os.path.abspath(root)
+
         #   check that the right number of servers are provided
         if len(hosts) != len(ports) != len(server_roots):
             raise ValueError('Number of servers must match the number of port numbers and root locations')
 
         #   set up the servers
-        if start_new:
-            hosts = start_TC_server(ports)
+        if len(tc_server_gpus) != 0:
+            hosts = []
+            if len(tc_server_gpus) != len(ports):
+                raise ValueError('Number of GPUs must match the number of servers')
+            for i, port in enumerate(ports):
+                host = start_TC_server(port, tc_server_gpus[i], server_roots[i])
+                hosts.append(host)
 
         self._host_list = hosts
         self._port_list = ports
         self._server_root_list = server_roots
         self._client_list = []
 
-        for h, p, s in zip(hosts, ports, server_roots):
+        for h, p, s, gpus in zip(hosts, ports, server_roots, tc_server_gpus):
             if _DEBUG_TRAJ: 
                 self._client_list.append(None)
                 print('DEBUG_TRAJ set, clients will not be opened')
                 break
             # client = TCPBClient(host=h, port=p)
-            client = self.get_new_client(h, p, max_wait=max_wait, server_root=s)
+            client = self.get_new_client(h, p, max_wait=max_wait, server_root=s, gpus=gpus)
             self._client_list.append(client)
 
         self._client = self._client_list[0]
@@ -533,7 +602,12 @@ class TCRunner():
             client.disconnect()
 
     @staticmethod
-    def get_new_client(host: str, port: int, max_wait=10.0, time_btw_check=1.0, server_root=''):
+    def get_new_client(host: str, port: int, max_wait=10.0, time_btw_check=1.0, server_root='', gpus=[]):
+        
+        #   start a new TeraChem server if gpus are supplied
+        # if len(gpus) != 0:
+        #     host = start_TC_server(port, gpus, server_root)
+        
         print('Setting up new client')
         client = TCClientExtra(host=host, port=port, server_root=server_root)
         total_wait = 0.0
@@ -552,6 +626,21 @@ class TCRunner():
                     raise TimeoutError('Maximum time allotted for checking for TeraChem server')
         print('Terachem server is available and connected')
         return client
+    
+    @staticmethod
+    def restart_client(client: TCClientExtra, max_wait=10.0, time_btw_check=1.0):
+        host = client.host
+        port = client.port
+        server_root = client.server_root
+        if (host, port) in _server_processes:
+            process: TCServerProcess = _server_processes[(host, port)]
+            
+            process.kill()
+            time.sleep(8.0)
+            start_TC_server(port, server_root=server_root, gpus=process.gpus)
+        client.disconnect()
+        del client
+        return TCRunner.get_new_client(host, port, max_wait=max_wait, time_btw_check=time_btw_check, server_root=server_root)
 
     @staticmethod
     def append_results_file(results: dict):
@@ -864,13 +953,36 @@ class TCRunner():
 
         n_clients = len(self._client_list)
         if self._client_assignments:
+            all_job_names = [j.name for j in jobs_batch.jobs]
+            clients_IDs_for_other = []
+
+            #   assign clients specified in the client_assignments
+            
             for i, names in enumerate(self._client_assignments):
-                sub_jobs = jobs_batch.get_by_name(names)
+                names_list = names.copy()
+                if 'other' in names_list:
+                    clients_IDs_for_other.append(i)
+                    names_list.remove('other')
+
+                sub_jobs = jobs_batch.get_by_name(names_list)
                 sub_jobs.set_client(self._client_list[i])
+                for name in names_list:
+                    all_job_names.remove(name)
+
+            #   evertying else gets assigned to the 'other' clients
+            if len(clients_IDs_for_other) > 0:
+                n_other_clients = len(clients_IDs_for_other)
+                for i, name in enumerate(all_job_names):
+                    sub_batch = jobs_batch.get_by_name(name)
+                    client_id = clients_IDs_for_other[i % n_other_clients]
+                    client = self._client_list[client_id]
+                    sub_batch.set_client(client)
+
         else:
             #   equally distribute jobs among clients
             for j in jobs_batch.jobs:
                 j.client = self._client_list[j.jobID % n_clients]
+
 
         if not jobs_batch.check_client():
             raise ValueError('Not all jobs have been assigned a client')
@@ -1100,12 +1212,12 @@ def _correct_signs_from_charges(job: TCJob, ref_job: TCJob):
         idx2 = job.results['nacstate2']
         job.results['nacme'] = (np.array(job.results['nacme'])*min_signs[idx1]*min_signs[idx2]).tolist()
 
-
 def _run_batch_jobs(jobs_batch: TCJobBatch, prev_results=[]):
     times = {}
     all_results = []
 
     for j in jobs_batch.jobs:
+        j: TCJob
         job_name = j.name
         geom = j.geom
         job_opts =  j.opts
@@ -1129,16 +1241,27 @@ def _run_batch_jobs(jobs_batch: TCJobBatch, prev_results=[]):
                 try_count += 1
                 if try_count == max_tries:
                     try_again = False
-                    print("Server error recieved; will not try again")
                     print(e)
+                    print("Server error recieved")
+                    print('End of tc.out file:')
+                    print('\n START OF FILE .... \n')
+                    client.print_end_of_file()
+                    print('\n ... END OF FILE \n')
+                    print("    Will not try again")
                     exit()
                 else:
                     try_again = True
                     print(e)
-                    print("Server error recieved; trying to run job once more")
+                    print(f"Server error recieved on client {client}\n")
+                    print('End of tc.out file:')
+                    print('\n START OF FILE .... \n')
+                    client.print_end_of_file()
+                    print('\n ... END OF FILE \n')
+                    print("    Trying to run job once more")
                     client.log_message(f"Server error recieved; trying to run job once more")
-                    time.sleep(20)
-                    client = TCRunner.get_new_client(client.host, client.port, client.server_root)
+                    time.sleep(10)
+
+                    client = TCRunner.restart_client(client)
         # j.total_time = time.time() - start
         j.end_time = time.time()
         results['run'] = job_type
