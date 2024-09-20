@@ -92,24 +92,17 @@ class SignFlipper():
         self.tdm_hist = np.zeros((n_states, n_states, 3, hist_length))
         self.name = name
 
-
-    # def create_history(self, nac: np.ndarray, trans_dips=None):
-    #     for it in range(0,self.hist_length):
-    #         self.nac_hist[:,:,:,it] = nac
-    #         if trans_dips is not None:
-    #             self.tdm_hist[:,:,:,it] = trans_dips
    
     def set_history(self, nac, nac_hist_in: np.ndarray, trans_dips: np.ndarray = None, tdm_hist_in: np.ndarray=None):
         # If nac_hist and tdm_hist array does not exist yet, create it as zeros array
         if nac_hist_in.size == 0:
-            self.nac_hist = np.zeros((nel,nel,nnuc, self.hist_length))
+            self.nac_hist = np.zeros((self.n_states, self.n_states, nnuc, self.hist_length))
             # fill array with current nac
             for it in range(0,self.hist_length):
-                # print('SETTING HISTORY: ', nac)
                 self.nac_hist[:,:,:,it] = nac
         # exit()
         if tdm_hist_in.size == 0:
-            self.tdm_hist = np.zeros((nel,nel,3,self.hist_length))
+            self.tdm_hist = np.zeros((self.n_states, self.n_states, 3, self.hist_length))
             # fill array with current tdm (if available)
             if trans_dips is not None:
                 for it in range(0,self.hist_length):
@@ -168,13 +161,15 @@ class SignFlipper():
                             tdm_expol[i,j,ix] = np.polyval(coefficients,self.hist_length)
 
 
+        print(' In correct_nac_sign: ', nac.shape)
+
         # check whether the TC/GAMESS vector goes in the same or opposite direction
         # (means an angle with more than 90 degree) as the estimation
         # if the angle is < 90 degree -> np.sign(dot_product)== 1 -> no flip
         # if the angle is > 90 degree -> np.sign(dot_product)==-1 -> flip
         message = ''
-        for i in range(0, nel):
-            for j in range(i+1, nel):
+        for i in range(0, self.n_states):
+            for j in range(i+1, self.n_states):
                 flip_detected = False
                 nac_dot_product = np.dot(nac[i,j,:],nac_expol[i,j,:])
                 # if tdm is available: check if it also flips sign. if not, no correction

@@ -522,13 +522,13 @@ class TCRunner():
         self._server_root_list = server_roots
         self._client_list = []
 
-        for h, p, s, gpus in zip(hosts, ports, server_roots, tc_server_gpus):
+        for h, p, s in zip(hosts, ports, server_roots):
             if _DEBUG_TRAJ: 
                 self._client_list.append(None)
                 print('DEBUG_TRAJ set, clients will not be opened')
                 break
             # client = TCPBClient(host=h, port=p)
-            client = self.get_new_client(h, p, max_wait=max_wait, server_root=s, gpus=gpus)
+            client = self.get_new_client(h, p, max_wait=max_wait, server_root=s)
             self._client_list.append(client)
 
         self._client = self._client_list[0]
@@ -602,7 +602,7 @@ class TCRunner():
             client.disconnect()
 
     @staticmethod
-    def get_new_client(host: str, port: int, max_wait=10.0, time_btw_check=1.0, server_root='', gpus=[]):
+    def get_new_client(host: str, port: int, max_wait=10.0, time_btw_check=1.0, server_root=''):
         
         #   start a new TeraChem server if gpus are supplied
         # if len(gpus) != 0:
