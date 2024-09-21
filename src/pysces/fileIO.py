@@ -6,7 +6,8 @@ from copy import deepcopy
 import yaml
 from .qcRunners import TeraChem as TC
 from .h5file import H5File, H5Group, H5Dataset
-from .input_simulation import extra_loggers
+# from .input_simulation import extra_loggers, logging_mode
+from . import input_simulation as opts
 
 
 def read_restart(file_loc: str='restart.out', ndof: int=0, integrator: str='RK4') -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, float, float]:
@@ -242,7 +243,7 @@ class SimulationLogger():
         self._h5_group = None
         if hdf5:
             # self._h5_file = H5File(os.path.join(dir, 'logs.h5'), 'w')
-            self._h5_file = H5File('logs.h5', 'w')
+            self._h5_file = H5File('logs.h5', opts.logging_mode)
             if hdf5_name == '':
                 hdf5_name = 'electronic'
             self._h5_group = self._h5_file.create_group(hdf5_name)
@@ -251,6 +252,7 @@ class SimulationLogger():
         self._loggers = []
         if save_energy:
             self._loggers.append(EnergyLogger(os.path.join(dir, 'energy.txt'), self._h5_group))
+            self._loggers.append(ExEnergyLogger(os.path.join(dir, 'ex_energy.txt'), self._h5_group))
         if save_grad:
             self._loggers.append(GradientLogger(os.path.join(dir, 'grad.txt'), self._h5_group))
         if save_nac:
@@ -272,8 +274,9 @@ class SimulationLogger():
             self._nuc_geo_logger = NucGeoLogger(os.path.join(dir, 'nuc_geo.xyz'), self._h5_group)
 
         #   append additionally specified loggers
-        for logger in extra_loggers:
-            self._loggers.append(logger(self._h5_file))
+        for ex_logger in opts.extra_loggers:
+            ex_logger.setup(dir, self._h5_file)
+            self._loggers.append(ex_logger)
 
         self.state_labels = None
 
@@ -726,6 +729,49 @@ class EnergyLogger(BaseLogger):
                 H5File.append_dataset(self._h5_dataset, list(data.all_energies) + [data.total_E,])
             else:
                 H5File.append_dataset(self._h5_dataset, list(data.elec_E) + [data.total_E, ])
+
+class ExEnergyLogger(BaseLogger):
+    def __init__(self, file_loc: str=None, h5_group: H5Group = None) -> None:
+        super().__init__(file_loc, h5_group)
+
+    def _initialize(self, data: LoggerData):
+
+        if data.all_energies is None:
+            print('WARNING: Excited state energies requires that all energies be provided')
+            print('Excited state energies will not be logged')
+            return
+        
+        if data.state_labels is not None:
+            labels = data.state_labels[1:]
+        else:
+            labels = [f'S{i}' for i in range(1, len(data.all_energies))]
+
+        if self._file:
+            self._file.write('%12s' % 'Time')
+            for l in labels:
+                self._file.write(' %16s' % l)
+            self._file.write('\n')
+        
+        if self._h5_group:
+            self._h5_dataset = self._h5_group.create_dataset('ex_energy', shape=(0, len(labels)), maxshape=(None, len(labels)+1))
+            self._h5_dataset.attrs.create('labels', labels)
+
+    def write(self, data: LoggerData):
+        super().write(data)
+        if self._file:
+            out_str = f'{data.time:12.6f}'
+            ex_energies = (data.all_energies[1:] - data.all_energies[0])*27.2114079527 # Convert Hartree to eV
+
+            for e in ex_energies:
+                out_str += f' {e:16.10f}'
+            self._file.write(f'{out_str}\n')
+            self._file.flush()
+        
+        if self._h5_dataset:
+            if data.all_energies is not None:
+                H5File.append_dataset(self._h5_dataset, data.all_energies)
+            else:
+                H5File.append_dataset(self._h5_dataset, data.elec_E)
 
 class GradientLogger(BaseLogger):
     def __init__(self, file_loc: str = None, h5_group: H5Group = None) -> None:

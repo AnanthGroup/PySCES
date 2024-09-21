@@ -101,6 +101,8 @@ logging_dir = 'logs'
 #   HDF5 File logging
 hdf5_logging = False
 
+logging_mode = 'w'
+
 #   additional loggers
 extra_loggers = []
 
