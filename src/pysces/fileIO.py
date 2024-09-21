@@ -242,7 +242,7 @@ class SimulationLogger():
         self._h5_group = None
         if hdf5:
             # self._h5_file = H5File(os.path.join(dir, 'logs.h5'), 'w')
-            self._h5_file = H5File('logs.h5', 'a')
+            self._h5_file = H5File('logs.h5', 'w')
             if hdf5_name == '':
                 hdf5_name = 'electronic'
             self._h5_group = self._h5_file.create_group(hdf5_name)
@@ -398,8 +398,7 @@ class TCJobsLogger():
         
         results: list[dict] = deepcopy(data.jobs_data.results_list)
         cleaned_results = TC.TCRunner.cleanup_multiple_jobs(results, 'orb_energies', 'bond_order', 'orb_occupations', 'spins')
-        # cleaned_batch = deepcopy(data.jobs_data)
-        cleaned_batch = data.jobs_data
+        cleaned_batch = deepcopy(data.jobs_data)
         for job, res in zip(cleaned_batch.jobs, cleaned_results):
             job.results = res
 

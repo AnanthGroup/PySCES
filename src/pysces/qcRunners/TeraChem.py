@@ -1113,7 +1113,7 @@ def _correct_signs_from_overlaps(job: TCJob, overlap_job: TCJob):
         idx2 = job.results['nacstate2']
         job.results['nacme'] = (np.array(job.results['nacme'])*signs[idx1]*signs[idx2]).tolist()
     
-def _correct_signs_from_charges(job: TCJob, ref_job: TCJob):
+def _correct_signs(job: TCJob, ref_job: TCJob):
     '''
         Correct the sings of transition dipole moments and NACs based 
         on the overlaps with previous jobs.
@@ -1123,26 +1123,48 @@ def _correct_signs_from_charges(job: TCJob, ref_job: TCJob):
     n_states = len(job.results['energy'])
 
     if 'cas_tr_resp_charges' in job.results:
+        quant_key = 'cas_tr_resp_charges'
         exc_type = 'cas'
     elif 'cis_tr_resp_charges' in job.results:
+        quant_key = 'cis_tr_resp_charges'
+        exc_type = 'cis'
+    elif 'cas_transition_dipoles' in job.results:
+        quant_key = 'cas_transition_dipoles'
+        exc_type = 'cas'
+    elif 'cis_transition_dipoles' in job.results:
+        quant_key = 'cis_transition_dipoles'
         exc_type = 'cis'
     else:
-        warnings.warn(f'cas_tr_resp_charges or cis_tr_resp_charges not found in job {job}, cannot correct transition charges')
+        warnings.warn(f'No transition charges or dipoles found in job {job}, cannot correct transition charges')
+        # for key in job.results:
+        #     print('    ', key)
+        # input()
         return
+    
+
+    # if 'cas_tr_resp_charges' in job.results:
+    #     exc_type = 'cas'
+    # elif 'cis_tr_resp_charges' in job.results:
+    #     exc_type = 'cis'
+    # else:
+    #     warnings.warn(f'cas_tr_resp_charges or cis_tr_resp_charges not found in job {job}, cannot correct transition charges')
+    #     return
 
     #   Get the correct dipole key. Some CAS jobs don't have an 's' at the end
-    dipole_key = None
-    if f'{exc_type}_transition_dipole' in job.results:
-        dipole_key = f'{exc_type}_transition_dipole'
+    # dipole_key = None
+    dipole_key = f'{exc_type}_transition_dipoles'
+    charge_key = f'{exc_type}_tr_resp_charges'
+    # if f'{exc_type}_transition_dipole' in job.results:
+    #     dipole_key = f'{exc_type}_transition_dipole'
 
-    elif f'{exc_type}_transition_dipoles' in job.results:
-        dipole_key = f'{exc_type}_transition_dipoles' 
+    # elif f'{exc_type}_transition_dipoles' in job.results:
+    #     dipole_key = f'{exc_type}_transition_dipoles' 
 
-    charges_key = f'{exc_type}_tr_resp_charges'
-    charges_orig = np.array(job.results.get(charges_key, []))
-    charges_ref = np.array(ref_job.results.get(charges_key, []))
-    if charges_ref.shape[0] == 0:
-        raise ValueError(f'{charges_key} not found in reference job')
+    # charges_key = f'{exc_type}_tr_resp_charges'
+    quant_orig = np.array(job.results.get(quant_key, []))
+    quant_ref = np.array(ref_job.results.get(quant_key, []))
+    if quant_ref.shape[0] == 0:
+        raise ValueError(f'{quant_key} not found in reference job {job}')
 
     min_RRMSE_all = []
     min_RRMSE = 1e20
@@ -1167,11 +1189,22 @@ def _correct_signs_from_charges(job: TCJob, ref_job: TCJob):
         count = 0
         for i in range(0, n_states):
             for j in range(i+1, n_states):
-                q_new = charges_orig[count]*signs[i]*signs[j]
-                q_ref = charges_ref[count]
-                arg_max = np.argmax(np.abs(q_new))
+                q_new = quant_orig[count]*signs[i]*signs[j]
+                q_ref = quant_ref[count]
                 RRMSE += np.sqrt(np.mean((q_new - q_ref)**2) / np.mean(q_ref**2))
                 count += 1
+
+        if RRMSE < 1e-04 and _debug_print:
+            print('Found Low RRMSE: ', RRMSE, signs)
+            count = 0
+            for i in range(0, n_states):
+                for j in range(i+1, n_states):
+                    q_new = quant_orig[count]*signs[i]*signs[j]
+                    q_ref = quant_ref[count]
+                    print(  f'{i} {j} {q_ref} {q_new}')
+                    count += 1
+
+
 
         min_RRMSE_all.append((signs, RRMSE))
         if RRMSE < min_RRMSE:
@@ -1185,10 +1218,11 @@ def _correct_signs_from_charges(job: TCJob, ref_job: TCJob):
         for i in range(len(job.results[dipole_key])):
             fmt_str = '{:10.6f} '*3 + '|' + '{:10.6f} '*3 + '|' + '{:10.6f}'
             ref_d, job_d = ref_job.results[dipole_key][i], job.results[dipole_key][i]
-            print(fmt_str.format(*ref_d, *job_d, np.dot(ref_d, job_d)))
+            proj = np.dot(ref_d, job_d)/(np.linalg.norm(ref_d)*np.linalg.norm(job_d))
+            print(fmt_str.format(*ref_d, *job_d, proj))
 
     #   correct the transition charges, dipoles, and dipole derivatives
-    for key in [dipole_key, charges_key, 'cis_transition_dipole_deriv']:
+    for key in [dipole_key, charge_key, 'cis_transition_dipole_deriv']:
         count = 0
         if key not in job.results:
             continue
@@ -1203,7 +1237,9 @@ def _correct_signs_from_charges(job: TCJob, ref_job: TCJob):
         print("minimum RRMSE: ", min_RRMSE, min_signs)
         for i in range(len(job.results[dipole_key])):
             ref_d, job_d = ref_job.results[dipole_key][i], job.results[dipole_key][i]
-            print(fmt_str.format(*ref_d, *job_d, np.dot(ref_d, job_d)))
+            proj = np.dot(ref_d, job_d)/(np.linalg.norm(ref_d)*np.linalg.norm(job_d))
+            print(fmt_str.format(*ref_d, *job_d, proj))
+        input()
 
 
     #   correct the nonadibatic coupling
@@ -1211,6 +1247,8 @@ def _correct_signs_from_charges(job: TCJob, ref_job: TCJob):
         idx1 = job.results['nacstate1']
         idx2 = job.results['nacstate2']
         job.results['nacme'] = (np.array(job.results['nacme'])*min_signs[idx1]*min_signs[idx2]).tolist()
+
+    
 
 def _run_batch_jobs(jobs_batch: TCJobBatch, prev_results=[]):
     times = {}

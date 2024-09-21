@@ -32,7 +32,11 @@ class H5Dataset(h5py.Dataset):
 
 class H5File(h5py.File):
     def __init__(self, name, mode='r', driver=None, libver=None, userblock_size=None, swmr=False, rdcc_nslots=None, rdcc_nbytes=None, rdcc_w0=None, track_order=None, fs_strategy=None, fs_persist=False, fs_threshold=1, fs_page_size=None, page_buf_size=None, min_meta_keep=0, min_raw_keep=0, locking=None, alignment_threshold=1, alignment_interval=1, meta_block_size=None, **kwds):
-        super().__init__(name, mode, driver, libver, userblock_size, swmr, rdcc_nslots, rdcc_nbytes, rdcc_w0, track_order, fs_strategy, fs_persist, fs_threshold, fs_page_size, page_buf_size, min_meta_keep, min_raw_keep, locking, alignment_threshold, alignment_interval, meta_block_size, **kwds)
+        super().__init__(name, mode, driver, libver, userblock_size, swmr,
+                 rdcc_nslots, rdcc_nbytes, rdcc_w0, track_order,
+                 fs_strategy, fs_persist, fs_threshold, fs_page_size,
+                 page_buf_size, min_meta_keep, min_raw_keep, locking,
+                 alignment_threshold, alignment_interval, meta_block_size, **kwds)
 
     def create_group(self, name, track_order=None, exist_ok=True):
         if exist_ok and name in self:
