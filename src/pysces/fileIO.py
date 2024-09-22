@@ -278,7 +278,7 @@ class SimulationLogger():
             ex_logger.setup(dir, self._h5_file)
             self._loggers.append(ex_logger)
 
-        self.state_labels = None
+        self.state_labels = opts.state_labels
 
     def __del__(self):
         pass
@@ -646,7 +646,7 @@ class CorrelationLogger(BaseLogger):
         #     labels = [f'S{i}' for i in range(len(data.all_energies))]
         # elif labels is None:
         if data.state_labels is None:
-            labels = [f'S{i}' for i in range(len(data.elec_E))]
+            labels = [f'S{i}' for i in range(len(data.elec_q))]
         else:
             labels = data.state_labels
             
@@ -741,10 +741,7 @@ class ExEnergyLogger(BaseLogger):
             print('Excited state energies will not be logged')
             return
         
-        if data.state_labels is not None:
-            labels = data.state_labels[1:]
-        else:
-            labels = [f'S{i}' for i in range(1, len(data.all_energies))]
+        labels = [f'S{i}' for i in range(1, len(data.all_energies))]
 
         if self._file:
             self._file.write('%12s' % 'Time')
@@ -753,7 +750,7 @@ class ExEnergyLogger(BaseLogger):
             self._file.write('\n')
         
         if self._h5_group:
-            self._h5_dataset = self._h5_group.create_dataset('ex_energy', shape=(0, len(labels)), maxshape=(None, len(labels)+1))
+            self._h5_dataset = self._h5_group.create_dataset('ex_energy', shape=(0, len(labels)), maxshape=(None, len(labels)))
             self._h5_dataset.attrs.create('labels', labels)
 
     def write(self, data: LoggerData):
@@ -768,10 +765,8 @@ class ExEnergyLogger(BaseLogger):
             self._file.flush()
         
         if self._h5_dataset:
-            if data.all_energies is not None:
-                H5File.append_dataset(self._h5_dataset, data.all_energies)
-            else:
-                H5File.append_dataset(self._h5_dataset, data.elec_E)
+            H5File.append_dataset(self._h5_dataset, ex_energies)
+
 
 class GradientLogger(BaseLogger):
     def __init__(self, file_loc: str = None, h5_group: H5Group = None) -> None:

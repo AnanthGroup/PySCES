@@ -106,6 +106,9 @@ logging_mode = 'w'
 #   additional loggers
 extra_loggers = []
 
+#   for logging only
+state_labels = None
+
 ########## END DEFAULT SETTINGS ##########
 
 def input_local_settings():

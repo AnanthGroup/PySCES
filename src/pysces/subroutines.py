@@ -161,8 +161,6 @@ class SignFlipper():
                             tdm_expol[i,j,ix] = np.polyval(coefficients,self.hist_length)
 
 
-        print(' In correct_nac_sign: ', nac.shape)
-
         # check whether the TC/GAMESS vector goes in the same or opposite direction
         # (means an angle with more than 90 degree) as the estimation
         # if the angle is < 90 degree -> np.sign(dot_product)== 1 -> no flip

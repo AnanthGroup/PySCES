@@ -525,7 +525,7 @@ class TCRunner():
         for h, p, s in zip(hosts, ports, server_roots):
             if _DEBUG_TRAJ: 
                 self._client_list.append(None)
-                print('DEBUG_TRAJ set, clients will not be opened')
+                print('DEBUG_TRAJ set, TeraChem clients will not be opened')
                 break
             # client = TCPBClient(host=h, port=p)
             client = self.get_new_client(h, p, max_wait=max_wait, server_root=s)
