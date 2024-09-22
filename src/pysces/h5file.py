@@ -1,9 +1,12 @@
+import pickle
 import h5py
 import json
 import numpy as np
 import os
 import sys
 import argparse
+import gzip
+import gzip
 
 class H5Group(h5py.Group):
     def __init__(self, *args, **kwargs):
@@ -37,6 +40,8 @@ class H5File(h5py.File):
                  fs_strategy, fs_persist, fs_threshold, fs_page_size,
                  page_buf_size, min_meta_keep, min_raw_keep, locking,
                  alignment_threshold, alignment_interval, meta_block_size, **kwds)
+        
+        self._dictionaried_data = None
 
     def create_group(self, name, track_order=None, exist_ok=True):
         if exist_ok and name in self:
@@ -141,17 +146,35 @@ class H5File(h5py.File):
                 np.save(file_name, data[:])
 
     def to_json(self, file_loc):
-        out_data = self.to_dict()
-        with open(file_loc, 'w') as file:
-            json.dump(out_data, file, indent=4)
+        print('Saving to json:')
+        out_data = self.to_dict(print_message=True)
+        if file_loc.endswith('.gz'):
+            print('    Writing data to a compressed .json file')
+            with gzip.open(file_loc, 'wt') as file:
+                json.dump(out_data, file, indent=4)
+        else:
+            print('    Writing data to a .json file')
+            with open(file_loc, 'w') as file:
+                json.dump(out_data, file, indent=4)
+        print('    Done!')
 
-    def to_dict(self, data: h5py.File |  h5py.Dataset | h5py.Group = None):
+    def to_dict(self, data: h5py.File |  h5py.Dataset | h5py.Group = None, print_message=False):
+        if self._dictionaried_data is not None:
+            return self._dictionaried_data
+        if print_message:
+            print('    Converting data to a dictionary')
+        if data is None:
+            data = self
+        return self._to_dict_recursive(data)
+        
+    
+    def _to_dict_recursive(self, data: h5py.File |  h5py.Dataset | h5py.Group):
         if data is None:
             data = self
         out_data = {}
         if isinstance(data, h5py.Group) or isinstance(data, h5py.File):
             for key, val in data.items():
-                out_data[key] = self.to_dict(val)
+                out_data[key] = self._to_dict_recursive(val)
         elif isinstance(data, h5py.Dataset):
             if data.dtype == 'object':
                 conv_data = np.array(data[:]).astype(str).tolist()
@@ -160,13 +183,35 @@ class H5File(h5py.File):
             return conv_data
         else:
             print("Could not convert ", data)
+        self._dictionaried_data = out_data
         return out_data
     
-if __name__ == '__main__':
+    def to_pickle(self, file_loc):
+        print('Saving data to a pickled dictionary:')
+        data = self.to_dict(print_message=True)
+
+        if file_loc.endswith('.gz'):
+            print('    Writing data to a compressed pickle file')
+            with gzip.open(file_loc, 'wb') as file:
+                pickle.dump(data, file)
+        else:
+            print('    Writing data to a pickle file')
+            with open(file_loc, 'wb') as file:
+                pickle.dump(data, file)
+
+        print('    Done!')
+    
+    def remove_tc_jobs(self, new_file_loc):
+        with H5File(new_file_loc, 'w') as new_file:
+            self._remove_tc_jobs(self, new_file)
+
+def run_h5_module():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--file', '-f', type=str, help='HDF5 file to read')
-    parser.add_argument('--json', '-j', type=str, help='Convert to JSON')
-    args = parser.parse_args()
+    parser.add_argument('--file',       '-f', type=str, help='HDF5 file to read')
+    parser.add_argument('--json',       '-j', type=str, help='Convert to JSON')
+    parser.add_argument('--rm_tc_files', '-r', type=str, help='Remove tc.out file data from tc_job_data and save to this file')
+    parser.add_argument('--pickle',     '-p', type=str, help='Convert to a pickled HDF5 file')
+    args = parser.parse_args(sys.argv[2:])
 
     if args.file is None:
         print('Please provide a file to read')
@@ -176,5 +221,17 @@ if __name__ == '__main__':
     with H5File(args.file, 'r') as file:
         if args.json is not None:
             file.to_json(args.json)
-        else:
+        if args.pickle is not None:
+            pass
+        if args.rm_tc_files is not None:
+            file.remove_tc_jobs(args.rm_tc_files)
+        if args.pickle is not None:
+            file.to_pickle(args.pickle)
+        
+        if all(v is None for v in [args.json, args.pickle, args.rm_tc_files]):
             file.print_data_structure()
+
+
+    exit()
+if __name__ == '__main__':
+    run_h5_module()

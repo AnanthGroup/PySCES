@@ -855,6 +855,9 @@ class NACLogger(BaseLogger):
             H5File.append_dataset(self._h5_dataset, out_data)
 
 def print_ascii_art():
+    #   Useful for debugging
+    if os.environ.get('NO_SPLASH', None):
+        return
     art = '''                                                                                     
                                         @@@@@@@                                 
                                  @@@@@@@@@   @@@@@@@@@                          

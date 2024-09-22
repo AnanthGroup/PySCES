@@ -12,16 +12,28 @@ Main code to run LSC-IVR dynamics
 
 import os
 import numpy as np
-import pandas
+import argparse
 from pysces.input_gamess import * 
 from pysces.subroutines import *
 from pysces.fileIO import print_ascii_art
+from pysces.h5file import run_h5_module
 __location__ = ''
 
 from pysces.input_simulation import * 
 
+
 def main():
     print_ascii_art()
+    run_modules()
+    run_simulation()
+
+def run_simulation():
+    description = 'Main code to run LSC-IVR dynamics\n'
+    description += 'When run, PySCES will look for a file named "local_settings.py" in \n'
+    description += 'the current directory and use it to set the simulation parameters.\n'
+    parser = argparse.ArgumentParser(description=description)
+    args = parser.parse_args(sys.argv[2:])
+
     input_local_settings()
     print_settings()
 
@@ -83,5 +95,18 @@ def main():
 
     '''End of the program'''
 
+
+modules_map = {'h5': run_h5_module, 'run': run_simulation}
+def run_modules():
+    if len(sys.argv) > 1:
+        if sys.argv[1] in modules_map:
+            modules_map[sys.argv[1]]()
+        else:
+            print("Invalid module specified, must be one of:")
+            for k in modules_map.keys():
+                print(f'  {k}')
+            print('For details, run `pysces <module> -h`')
+            exit()
+
 if __name__ == '__main__':
-    main()
+    run_modules()
