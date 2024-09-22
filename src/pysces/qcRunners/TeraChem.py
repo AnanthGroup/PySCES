@@ -101,11 +101,9 @@ class TCClientExtra(TCPBClient):
         """
         Adds the host and port combination to the host_port_to_ID dictionary.
         """
-        print('CREATING NEW ID ', self.host_port_to_ID)
         new_ID = 0
         while new_ID in self.host_port_to_ID.values():
             new_ID += 1
-        print('    NEW ID ', new_ID)
         TCClientExtra.host_port_to_ID[(self.host, self.port)] = new_ID
 
     def get_ID(self):
@@ -237,7 +235,7 @@ def start_TC_server(port: int, gpus=[], server_root='.'):
     
     #   start TC process
     process = TCServerProcess(port, gpus)
-    time.sleep(5)
+    time.sleep(10)
     #   set up a temporary client to make sure it is open
     try:
         tmp_client = TCPBClient(host, port)
@@ -527,7 +525,6 @@ class TCRunner():
                 self._client_list.append(None)
                 print('DEBUG_TRAJ set, TeraChem clients will not be opened')
                 break
-            # client = TCPBClient(host=h, port=p)
             client = self.get_new_client(h, p, max_wait=max_wait, server_root=s)
             self._client_list.append(client)
 
@@ -952,7 +949,7 @@ class TCRunner():
         
 
         n_clients = len(self._client_list)
-        if self._client_assignments:
+        if len(self._client_assignments) > 0:
             all_job_names = [j.name for j in jobs_batch.jobs]
             clients_IDs_for_other = []
 

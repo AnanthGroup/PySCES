@@ -76,7 +76,7 @@ tcr_initial_frame_opts = {
     'n_frames': 0
 }
 #   TeraChem runner client assignments based on job names
-tcr_client_assignments = [[]]
+tcr_client_assignments = []
 #   log TC job results
 tcr_log_jobs = True
 #   pysces should start it's own TeraChem servers
