@@ -1732,7 +1732,14 @@ def rk4(initq, initp, tStop, H, restart, amu_mat, U, com_ang, AN_mat):
         if com is not None:
             com_ang = com
         if QC_RUNNER == 'terachem':
-            tc_runner = TCRunner(tcr_host, tcr_port, atoms, tcr_job_options, server_roots=tcr_server_root, run_options=tcr_state_options, tc_spec_job_opts=tcr_spec_job_opts, tc_initial_job_options=tcr_initial_frame_opts, tc_server_gpus=tcr_server_gpus)
+            # tc_runner = TCRunner(tcr_host, tcr_port, atoms, tcr_job_options, server_roots=tcr_server_root, tc_state_options=tcr_state_options, tc_spec_job_opts=tcr_spec_job_opts, tc_initial_job_options=tcr_initial_frame_opts, tc_server_gpus=tcr_server_gpus)
+            tc_runner = TCRunner(tcr_host, tcr_port, atoms, tcr_job_options, 
+                                 server_roots=tcr_server_root, 
+                                 tc_state_options=tcr_state_options, 
+                                 tc_spec_job_opts=tcr_spec_job_opts, 
+                                 tc_initial_frame_options=tcr_initial_frame_opts, 
+                                 tc_client_assignments=tcr_client_assignments,
+                                 tc_server_gpus=tcr_server_gpus)
 
     elif restart == 0:
         q[:nel], p[:nel] = initq[:nel], initp[:nel]
@@ -1858,6 +1865,7 @@ def rk4(initq, initp, tStop, H, restart, amu_mat, U, com_ang, AN_mat):
             record_nuc_geo(restart, t, atoms, qC, com_ang, logger)
         
             logger.write(t, total_E=new_energy, elec_E=elecE,  grads=grad, NACs=nac, timings=timings, elec_q=y[0:nel], elec_p=y[ndof:ndof+nel], nuc_p=y[-natom*3:], jobs_data=job_batch, all_energies=all_energies)
+            
             write_restart(restart_file_out, [Y[-1][:ndof], Y[-1][ndof:]], sign_flipper.nac_hist, sign_flipper.tdm_hist, new_energy, t, nel, 'rk4', elecE, grad, nac, com_ang)
 
             if t == tStop:

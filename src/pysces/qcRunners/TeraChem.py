@@ -129,14 +129,21 @@ class TCClientExtra(TCPBClient):
 
     def print_end_of_file(self, n_lines=30):
         lines  = []
+        if self.curr_job_dir is None:
+            print('No job directory set, cannot print end of tc.out file')
+            return
         job_dir = os.path.join(self.server_root, self.curr_job_dir)
         with open(job_dir + '/tc.out', 'r') as file:
             lines = file.readlines()
+        print('End of tc.out file at:')
+        print(job_dir)
+        print('\n START OF FILE .... \n')
         for line in lines[-n_lines:]:
             if '\n' in line:
                 print(line[0:-1])
             else:
                 print(line)
+        print('\n ... END OF FILE \n')
 
 class TCServerProcess(subprocess.Popen):
     def __init__(self, port, gpus=[]):
@@ -281,6 +288,8 @@ def _start_TC_server(port: int):
     
     return ip
 
+#   TODO: move to TCPBClient and add a counter for jobs submitted.
+#   If the number of jobs submitted is the first job, remove the old restart file
 def compute_job_sync(client: TCClientExtra, jobType="energy", geom=None, unitType="bohr", **kwargs):
     """Wrapper for send_job_async() and recv_job_async(), using check_job_complete() to poll the server.
     Main funcitonality is coppied from TCProtobufClient.send_job_async() and
@@ -483,7 +492,7 @@ class TCRunner():
                  tc_options: dict,
                  tc_spec_job_opts: dict = None,
                  tc_initial_frame_options: dict = None,
-                 tc_client_assignments: list[list[str]] = None,
+                 tc_client_assignments: list[list[str]] = [],
                  server_roots = '.',
                  tc_server_gpus:  bool=[],
                  tc_state_options: dict={}, 
@@ -1278,20 +1287,16 @@ def _run_batch_jobs(jobs_batch: TCJobBatch, prev_results=[]):
                     try_again = False
                     print(e)
                     print("Server error recieved")
-                    print('End of tc.out file:')
-                    print('\n START OF FILE .... \n')
                     client.print_end_of_file()
-                    print('\n ... END OF FILE \n')
                     print("    Will not try again")
                     exit()
                 else:
                     try_again = True
                     print(e)
-                    print(f"Server error recieved on client {client}\n")
-                    print('End of tc.out file:')
-                    print('\n START OF FILE .... \n')
+                    current_time = datetime.now()
+                    formatted_time = current_time.strftime('%Y-%m-%d %H:%M:%S.%f')[:-3] 
+                    print(f"Server error recieved at {formatted_time} on client {client}\n")
                     client.print_end_of_file()
-                    print('\n ... END OF FILE \n')
                     print("    Trying to run job once more")
                     client.log_message(f"Server error recieved; trying to run job once more")
                     time.sleep(10)
