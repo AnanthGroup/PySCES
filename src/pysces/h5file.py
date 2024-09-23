@@ -207,16 +207,11 @@ class H5File(h5py.File):
 
 def run_h5_module():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--file',       '-f', type=str, help='HDF5 file to read')
+    parser.add_argument('--file',       '-f', type=str, help='HDF5 file to read', required=True)
     parser.add_argument('--json',       '-j', type=str, help='Convert to JSON')
     parser.add_argument('--rm_tc_files', '-r', type=str, help='Remove tc.out file data from tc_job_data and save to this file')
     parser.add_argument('--pickle',     '-p', type=str, help='Convert to a pickled HDF5 file')
     args = parser.parse_args(sys.argv[2:])
-
-    if args.file is None:
-        print('Please provide a file to read')
-        sys.exit(1)
-
 
     with H5File(args.file, 'r') as file:
         if args.json is not None:

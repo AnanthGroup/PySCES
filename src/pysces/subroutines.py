@@ -1723,7 +1723,7 @@ def rk4(initq, initp, tStop, H, restart, amu_mat, U, com_ang, AN_mat):
     atoms = get_atom_label()
     logger.atoms = atoms
 
-
+    #   Initialization
     if restart == 1:
         q, p, nac_hist, tdm_hist, init_energy, initial_time, elecE, grad, nac, com = read_restart(file_loc=restart_file_in, ndof=ndof)
         t = initial_time
@@ -1748,6 +1748,8 @@ def rk4(initq, initp, tStop, H, restart, amu_mat, U, com_ang, AN_mat):
         q[nel:], p[nel:] = qC, pC
         y = np.concatenate((q, p))
 
+    #   Run first electronic structure calculation if we are not restarting,
+    #   or if we are restarting and the electronic structure information is missing
     if restart == 0 or len(elecE) == 0 or len(grad) == 0 or len(nac) == 0:
         if QC_RUNNER == 'gamess':
             # Update geo_gamess with qC
@@ -1780,9 +1782,8 @@ def rk4(initq, initp, tStop, H, restart, amu_mat, U, com_ang, AN_mat):
         # Total initial energy at t=0
         init_energy = get_energy(au_mas, q, p, elecE)
 
-        # Record nuclear geometry in angstrom
+        # Record nuclear geometry in angstrom and log the rest
         record_nuc_geo(restart, t, atoms, qC, com_ang, logger)
-
         logger.write(t, init_energy, elecE,  grad, nac, timings, elec_p=p[0:nel], elec_q=q[0:nel], nuc_p=p[nel:], jobs_data=job_batch, all_energies=all_energies)
 
     # Create nac history for sign-flip extrapolation

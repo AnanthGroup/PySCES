@@ -5,11 +5,119 @@ import numpy as np
 import h5py
 from copy import deepcopy
 import yaml
+import argparse
+import sys
 from .qcRunners import TeraChem as TC
 from .h5file import H5File, H5Group, H5Dataset
 # from .input_simulation import extra_loggers, logging_mode
 from . import input_simulation as opts
 
+ANG_2_BOHR = 1.8897259886
+
+def _to_symmetric_matrix(data: np.ndarray) -> np.ndarray:
+    ''' Convert an array of upper triangular matrix elements to a full symmetric matrix '''
+    a = data.shape[0]
+    b = data.shape[1:]
+    n = int((1 + np.sqrt(1 + 8 * a)) / 2)
+    mat = np.zeros((n, n) + b)
+    mat[np.triu_indices(n, 1)] = data
+    mat += mat.swapaxes(0, 1)
+    return mat
+
+def run_restart_module():
+    print('Running restart module')
+    arg_parser = argparse.ArgumentParser(description='Run the restart module')
+    arg_parser.add_argument('--file',   '-f', type=str,     help='HDF5 file to read', required=True)
+    arg_parser.add_argument('--time',   '-t', type=float,   help='Time to create restart from', default=0.0)
+    arg_parser.add_argument('--output', '-o', type=str,     help='Output json file name', default='restart.json')
+    args = arg_parser.parse_args(sys.argv[2:])
+
+    print(args)
+
+    if args.file.endswith('.h5'):
+        traj_file = H5File(args.file, 'r')
+        times = np.array(traj_file['electronic/time'])
+        dt = times[1] - times[0]
+        print('\nReading in data from HDF5 file\n')
+        print(f'Number of frames in trajectory: ', len(times))
+        print(f'Start time: {times[0]} a.u.')
+        print(f'End time: {times[-1]} a.u.')
+        print(f'Trajectory time length: {times[-1] - times[0] + dt} a.u.', )
+        print(f'Trajectory time step: {dt} a.u.')
+
+        #   find the closest time to the requested time
+        time_idx = np.argmin(np.abs(times - args.time))
+        print('\nRequest a restart file at time: ', args.time)
+        print(f'Closest time step: {times[time_idx]} a.u.')
+
+        print('\nExtracting data from the closest time step')
+        elec_pq = np.array(traj_file['electronic/electric_pq'])
+        elec_p = elec_pq[time_idx, 0:elec_pq.shape[1]//2]
+        elec_q = elec_pq[time_idx, elec_pq.shape[1]//2:]
+        nuc_P = np.array(traj_file['electronic/nuclear_P'])[time_idx].flatten()
+        nuc_Q = np.array(traj_file['electronic/nuclear_Q'])[time_idx].flatten()*ANG_2_BOHR
+        grads = np.array(traj_file['electronic/grad'])[time_idx]
+
+        # energies
+        energies = np.array(traj_file['electronic/energy'])[time_idx]
+        total_e = energies[-1]
+        elec_E = energies[0:-1]
+        if elec_E.shape[0] != elec_p.shape[0]:
+            print(f'Warning: Length of electronic energies ({len(elec_E)}) does not match electronic coordinates ({len(elec_p)})')
+            print(f'         Assuming the last {len(elec_p)} energies are used in dynamics')
+            elec_E = elec_E[-len(elec_p):]
+        
+        #   form the NAC matrix
+        nac_data = traj_file['electronic/nac']
+        nac = np.array(nac_data)[time_idx]
+        a, b = nac.shape
+        nac_mat = _to_symmetric_matrix(nac)
+        # n = int((1 + np.sqrt(1 + 8 * a)) / 2)
+        # nac_mat = np.zeros((n, n, b))
+        # nac_mat[np.triu_indices(n, 1)] = nac
+        # nac_mat += nac_mat.swapaxes(0, 1)
+
+        #   NAC history
+        if time_idx == 0:
+            print('Warning: Nac history can only be formed when selected frame is not the first')
+            print('         Assuming NAC history is zero')
+        else:
+            print('Forming NAC history with 2 previous timesteps')
+            nac_hist = np.zeros(nac_mat.shape + (2,))
+            nac_hist[:,:,:,0] = _to_symmetric_matrix(np.array(nac_data)[time_idx-1])
+            nac_hist[:,:,:,1] = nac_mat
+
+            # nac_1 = np.zeros_like(nac_mat)
+            # nac_2 = np.zeros_like(nac_mat)
+            # nac_1[np.triu_indices(n, 1)] = nac[time_idx-1]
+            # nac_1 += nac_1.swapaxes(0, 1)
+            # nac_2[np.triu_indices(n, 1)] = nac[time_idx]
+            # nac_2 += nac_2.swapaxes(0, 1)
+            # nac_hist[:,:,:,0] = nac_1
+            # nac_hist[:,:,:,1] = nac_2
+
+        #   TDM History
+
+
+        #   Center of Mass
+        if 'com' in traj_file['electronic']:
+            com = np.array(traj_file['electronic/com'])[time_idx]
+        else:
+            print('Warning: No COM data found\n         Assuming COM=[0, 0, 0]')
+            com = np.zeros(3)
+
+        #   Integrator type
+        if 'integrator' in traj_file['electronic']:
+            integrator = traj_file['electronic/integrator'][0]
+        else:
+            print('Warning: No integrator data found\n         Assuming RK4')
+            integrator = 'RK4'
+
+        coord_out = [np.concatenate((elec_q, nuc_Q)), np.concatenate((elec_p, nuc_P))]
+
+        write_restart(args.output, coord_out, nac_hist, np.array([]), total_e, times[time_idx], len(elec_p), integrator, elec_E, grads, nac_mat, com)
+
+    exit()
 
 def read_restart(file_loc: str='restart.out', ndof: int=0, integrator: str='RK4') -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, float, float]:
     '''
@@ -125,7 +233,18 @@ def read_restart(file_loc: str='restart.out', ndof: int=0, integrator: str='RK4'
     else:
         exit(f'ERROR: only RK4 is implimented fileIO')
 
-def write_restart(file_loc: str, coord: list | np.ndarray, nac_hist: np.ndarray, tdm_hist: np.ndarray, energy: float, time: float, n_states: int, integrator='rk4', elecE: float=np.empty(0), grads: np.ndarray = np.empty(0), nac_mat: np.ndarray=np.empty(0), com=None):
+def write_restart(file_loc: str, 
+                    coord: np.ndarray | list, 
+                    nac_hist: np.ndarray, 
+                    tdm_hist: np.ndarray, 
+                    energy: float, 
+                    time: float, 
+                    n_states: int, 
+                    integrator='rk4', 
+                    elecE: float=np.empty(0), 
+                    grads: np.ndarray = np.empty(0), 
+                    nac_mat: np.ndarray = np.empty(0), 
+                    com=None):
     '''
         Writes a restart file for restarting a simulation from the previous conditions
 

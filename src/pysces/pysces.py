@@ -15,7 +15,7 @@ import numpy as np
 import argparse
 from pysces.input_gamess import * 
 from pysces.subroutines import *
-from pysces.fileIO import print_ascii_art
+from pysces.fileIO import print_ascii_art, run_restart_module
 from pysces.h5file import run_h5_module
 __location__ = ''
 
@@ -96,7 +96,10 @@ def run_simulation():
     '''End of the program'''
 
 
-modules_map = {'h5': run_h5_module, 'run': run_simulation}
+modules_map = {'h5': run_h5_module, 
+               'run': run_simulation, 
+               'genrst': run_restart_module
+               }
 def run_modules():
     if len(sys.argv) > 1:
         if sys.argv[1] in modules_map:
