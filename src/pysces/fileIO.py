@@ -1,5 +1,6 @@
 import os
 import json
+import shutil
 import numpy as np
 import h5py
 from copy import deepcopy
@@ -243,6 +244,13 @@ class SimulationLogger():
         self._h5_group = None
         if hdf5:
             # self._h5_file = H5File(os.path.join(dir, 'logs.h5'), 'w')
+            if 'r' in opts.logging_mode and os.path.exists('logs.h5'):
+                raise ValueError('logging mode must be either "w", "a", or "x/w-"')
+            if opts.logging_mode == 'w' and os.path.exists('logs.h5'):
+                for n in range(100):
+                    if not os.path.exists(f'logs_{n}.h5'):
+                        shutil.move('logs.h5', f'logs_{n}.h5')
+                        break
             self._h5_file = H5File('logs.h5', opts.logging_mode)
             if hdf5_name == '':
                 hdf5_name = 'electronic'
