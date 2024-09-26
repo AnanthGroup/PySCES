@@ -1842,7 +1842,7 @@ def rk4(initq, initp, tStop, H, restart, amu_mat, U, com_ang, AN_mat):
                 timings = job_batch.timings
                 all_energies, elecE, grad, nac, trans_dips  = format_output_LSCIVR(job_batch.results_list)
             else:
-                timings, all_energies, elecE, grad, nac, trans_dips = QC_RUNNER.run_new_geom(qC/ang2bohr)
+                timings, all_energies, elecE, grad, nac, trans_dips = QC_RUNNER.run_new_geom(qC/ang2bohr, y[-natom*3:])
             
             #correct nac sign
             nac = sign_flipper.correct_nac_sign(nac, trans_dips)
