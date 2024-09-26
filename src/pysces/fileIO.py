@@ -72,32 +72,21 @@ def run_restart_module():
         nac = np.array(nac_data)[time_idx]
         a, b = nac.shape
         nac_mat = _to_symmetric_matrix(nac)
-        # n = int((1 + np.sqrt(1 + 8 * a)) / 2)
-        # nac_mat = np.zeros((n, n, b))
-        # nac_mat[np.triu_indices(n, 1)] = nac
-        # nac_mat += nac_mat.swapaxes(0, 1)
+
 
         #   NAC history
         if time_idx == 0:
             print('Warning: Nac history can only be formed when selected frame is not the first')
             print('         Assuming NAC history is zero')
+            nac_hist = np.array([])
         else:
             print('Forming NAC history with 2 previous timesteps')
             nac_hist = np.zeros(nac_mat.shape + (2,))
             nac_hist[:,:,:,0] = _to_symmetric_matrix(np.array(nac_data)[time_idx-1])
             nac_hist[:,:,:,1] = nac_mat
 
-            # nac_1 = np.zeros_like(nac_mat)
-            # nac_2 = np.zeros_like(nac_mat)
-            # nac_1[np.triu_indices(n, 1)] = nac[time_idx-1]
-            # nac_1 += nac_1.swapaxes(0, 1)
-            # nac_2[np.triu_indices(n, 1)] = nac[time_idx]
-            # nac_2 += nac_2.swapaxes(0, 1)
-            # nac_hist[:,:,:,0] = nac_1
-            # nac_hist[:,:,:,1] = nac_2
-
         #   TDM History
-
+        #   TODO: Add TDM history
 
         #   Center of Mass
         if 'com' in traj_file['electronic']:
@@ -208,7 +197,10 @@ def read_restart(file_loc: str='restart.out', ndof: int=0, integrator: str='RK4'
                 data = json.load(file)
             rst_integrator = data['integrator'].lower()
             if rst_integrator != integrator.lower():
-                exit(f'ERROR: Restart file integrator {rst_integrator} does not match request integrator "{integrator}"')
+                raise ValueError(f'ERROR: Restart file integrator {rst_integrator} does not match request integrator "{integrator}"')
+            if any([x not in data for x in ['nucl_q', 'nucl_p', 'elec_q', 'elec_p', 'energy', 'time']]):
+                raise ValueError(f'ERROR: Restart file requires at least the following keys: nucl_q, nucl_p, elec_q, elec_p, energy, time')
+            
             nucl_q = data['nucl_q']
             nucl_p = data['nucl_p']
             elec_q = data['elec_q']
@@ -221,7 +213,9 @@ def read_restart(file_loc: str='restart.out', ndof: int=0, integrator: str='RK4'
             combo_q = np.array(elec_q + nucl_q)
             combo_p = np.array(elec_p + nucl_p)
 
-            com = np.array(data.get('com', np.array([])))
+            com = None
+            if 'com' in data: com = np.array(data['com'])
+   
             elecE = np.array(data.get('elec_E', np.array([])))
             grads = np.array(data.get('grads', np.array([])))
             nac_mat = np.array(data.get('nac_mat', np.array([])))
@@ -315,7 +309,7 @@ def write_restart(file_loc: str,
 
         elif extension == '.json':
             coord = np.array(coord).tolist()
-            data = {'time': time, 'energy': energy, 'integrator': 'rk4'}
+            data = {'time': float(time), 'energy': float(energy), 'integrator': 'rk4'}
             data['elec_q'] = coord[0][0:n_states]
             data['elec_p'] = coord[1][0:n_states]
             data['nucl_q'] = coord[0][n_states:]
@@ -393,7 +387,7 @@ class SimulationLogger():
         if save_p:
             self._loggers.append(NuclearPLogger(os.path.join(dir, 'nuclear_P.txt'), self._h5_group))
         if save_jobs:
-            self._loggers.append(TCJobsLogger(self._h5_file))
+            self._loggers.append(TCJobsLogger(None, self._h5_file))
 
         self._nuc_geo_logger = None
         if save_geo:
@@ -430,13 +424,32 @@ class SimulationLogger():
 
         #TODO: add nuc_geo logging here
 
+class BaseLogger():
+    def __init__(self, file_loc: str = None, h5_group: H5Group = None) -> None:
+        self._file = None
+        if file_loc:
+            self._file = open(file_loc, 'w')
+        self._h5_dataset = None
+        self._h5_group = h5_group
+        self._initialized = False
+        self._next_dataset: H5Dataset = None
+
+    def __del__(self):
+        if self._file:
+            self._file.close()
+
+    def set_next_dataset(self, dataset: H5Dataset):
+        self._next_dataset = dataset
+
+    def write(self, data: LoggerData) -> None:
+        if not self._initialized:
+            self._initialize(data)
+            self._initialized = True
+
 class TCJobsLogger_OLD():
     def __init__(self, file_loc: str) -> None:
         self._file_loc = file_loc
         self._file = None
-
-        if not _TC_AVAIL:
-            raise ImportError('Could not import TeraChem Runner: TCJobsLogger not available for use')
         
     def __del__(self):
         if self._file is not None:
@@ -460,16 +473,26 @@ class TCJobsLogger_OLD():
 
 class TCJobsLogger():
     # def __init__(self, file_loc: str, file: h5py.File =None) -> None:
-    def __init__(self, file: str | h5py.File) -> None:
+    def __init__(self, file: str = None, h5_file=None) -> None:
+        self._file = None
+        self._file_loc = None
+        self._next_dataset = None
+        self.setup(None, h5_file)
+
+    def setup(self, log_dir: str, file: str | h5py.File):
 
         if isinstance(file, str):
-            self._file_loc = file
-            self._file = None
+            if log_dir is not None:
+                self._file_loc = os.path.join(log_dir, file)
+            else:
+                self._file_loc = file
+            self._file = H5File(self._file_loc, 'w')
+
         elif isinstance(file, h5py.File):
             self._file_loc = None
             self._file = file
-        else:
-            raise ValueError('file must be a string or h5py.File object')
+        # else:
+        #     raise ValueError('file must be a string or h5py.File object')
 
         self._data_fields = [
             'energy', 'gradient', 'dipole_moment', 'dipole_vector', 'nacme', 'cis_', 'cas_'
@@ -478,8 +501,6 @@ class TCJobsLogger():
         self._job_datasets = {}
         self._group_name = 'tc_job_data'
 
-        if self._file is None:
-            self._file = H5File(self._file_loc, 'w')
         
     def __del__(self):
         if self._file is not None:
@@ -519,17 +540,29 @@ class TCJobsLogger():
                                             shape=(0,) + geom.shape,
                                             maxshape=(None,) + geom.shape)
         geom_ds.attrs.create('units', 'angstroms')
-        
+    
+    def set_next_dataset(self, jobs_batch: TC.TCJobBatch):
+        self._next_dataset = jobs_batch
 
     def write(self, data: LoggerData):
 
-        if data.jobs_data is None:
+        if data.jobs_data is not None:
+            jobs_data = data.jobs_data
+        elif self._next_dataset is not None:
+            jobs_data = self._next_dataset
+            self._next_dataset = None
+        else:
+            print('fileIO.py: No jobs data found')
             return
         
-        results: list[dict] = deepcopy(data.jobs_data.results_list)
-        cleaned_results = TC.TCRunner.cleanup_multiple_jobs(results, 'orb_energies', 'bond_order', 'orb_occupations', 'spins')
+        results: list[dict] = deepcopy(jobs_data.results_list)
+        #   'cis_excitations' are not guarenteed to be the same size,
+        #   so this can't be added to an H4 dataset.
+        #   TODO: add a check to make sure all jobs have the same number of cis_excitations,
+        #   or convert to a string?
+        cleaned_results = TC.TCRunner.cleanup_multiple_jobs(results, 'cis_excitations', 'orb_energies', 'bond_order', 'orb_occupations', 'spins')
         # cleaned_batch = deepcopy(data.jobs_data)
-        cleaned_batch = data.jobs_data
+        cleaned_batch = jobs_data
         for job, res in zip(cleaned_batch.jobs, cleaned_results):
             job.results = res
 
@@ -558,24 +591,6 @@ class TCJobsLogger():
             
         self._file.flush()     
     
-
-class BaseLogger():
-    def __init__(self, file_loc: str = None, h5_group: H5Group = None) -> None:
-        self._file = None
-        if file_loc:
-            self._file = open(file_loc, 'w')
-        self._h5_dataset = None
-        self._h5_group = h5_group
-        self._initialized = False
-
-    def __del__(self):
-        if self._file:
-            self._file.close()
-
-    def write(self, data: LoggerData) -> None:
-        if not self._initialized:
-            self._initialize(data)
-            self._initialized = True
 class NucGeoLogger():
     def __init__(self, file_loc: str = None, h5_group: H5Group = None) -> None:
         self._file = None

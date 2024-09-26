@@ -24,6 +24,7 @@ from pysces.input_simulation import *
 
 def main():
     print_ascii_art()
+    make_logging_dir()
     run_modules()
     run_simulation()
 

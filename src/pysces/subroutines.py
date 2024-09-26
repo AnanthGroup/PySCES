@@ -1729,6 +1729,7 @@ def rk4(initq, initp, tStop, H, restart, amu_mat, U, com_ang, AN_mat):
         t = initial_time
         qC, pC = q[nel:], p[nel:]
         y = np.concatenate((q, p))
+
         if com is not None:
             com_ang = com
         if QC_RUNNER == 'terachem':
@@ -1777,7 +1778,7 @@ def rk4(initq, initp, tStop, H, restart, amu_mat, U, com_ang, AN_mat):
             timings = job_batch.timings
             all_energies, elecE, grad, nac, trans_dips = format_output_LSCIVR(job_batch.results_list)
         else:
-            timings, all_energies, elecE, grad, nac, trans_dips = QC_RUNNER.run_new_geom(qC/ang2bohr)
+            timings, all_energies, elecE, grad, nac, trans_dips = QC_RUNNER.run_new_geom(qC/ang2bohr, p[nel:])
 
         # Total initial energy at t=0
         init_energy = get_energy(au_mas, q, p, elecE)
@@ -1788,7 +1789,7 @@ def rk4(initq, initp, tStop, H, restart, amu_mat, U, com_ang, AN_mat):
 
     # Create nac history for sign-flip extrapolation
     sign_flipper.set_history(nac, np.empty(0), trans_dips, np.empty(0))
-   
+    # exit()
 
     opt['guess'] = 'moread'
     X,Y = [],[]
@@ -1872,6 +1873,8 @@ def rk4(initq, initp, tStop, H, restart, amu_mat, U, com_ang, AN_mat):
             if t == tStop:
                 with open(os.path.join(__location__, 'progress.out'), 'a') as f:
                     f.write('Propagated to the final time step.\n')
+
+            # exit()
 
     write_restart(restart_file_out, [Y[-1][:ndof], Y[-1][ndof:]], sign_flipper.nac_hist, sign_flipper.tdm_hist, new_energy, t, nel, 'rk4', elecE, grad, nac, com_ang)
 

@@ -133,21 +133,7 @@ def input_local_settings():
     _check_settings(locals)
     _set_seed()
 
-def _check_settings(local: dict):
-    opts.nnuc = 3*opts.natom # number of nuclear DOFs
-    opts.ndof = opts.nel + opts.nnuc 
-
-    if 'q0' not in local:
-        opts.q0 = [0.0]*nel
-    if 'p0' not in local:
-        opts.p0 = [0.0]*nel
-
-
-    #   set input format to the same type of QC runner
-    if opts.mol_input_format == '':
-        opts.mol_input_format = opts.QC_RUNNER
-
-    #   logging directory
+def make_logging_dir():
     opts.logging_dir = os.path.abspath(opts.logging_dir)
     if os.path.isdir(opts.logging_dir):
         #   logging dir alreayd exists (from a previous job)
@@ -164,6 +150,23 @@ def _check_settings(local: dict):
         if count == 100:
             raise RecursionError('logging dir already eists, cou not copy to new numbered dir')
     os.makedirs(opts.logging_dir)
+
+def _check_settings(local: dict):
+    opts.nnuc = 3*opts.natom # number of nuclear DOFs
+    opts.ndof = opts.nel + opts.nnuc 
+
+    if 'q0' not in local:
+        opts.q0 = [0.0]*nel
+    if 'p0' not in local:
+        opts.p0 = [0.0]*nel
+
+
+    #   set input format to the same type of QC runner
+    if opts.mol_input_format == '':
+        opts.mol_input_format = opts.QC_RUNNER
+
+    #   logging directory
+
 
     #   TeraChem settings
     if opts.QC_RUNNER == 'terachem':

@@ -8,6 +8,7 @@ import numpy as np
 from tcpb import TCProtobufClient as TCPBClient
 from tcpb.exceptions import ServerError
 from tcpb import terachem_server_pb2 as pb
+from pysces import input_simulation as opts
 import time
 import warnings
 import shutil
@@ -59,7 +60,9 @@ class TCClientExtra(TCPBClient):
         self._add_to_host_port_to_ID()
         self._log = None
         if log:
-            self._log = open(f'tc_client_{self.get_ID()}.log', 'a')
+            log_file_loc = os.path.join(opts.logging_dir, f'{host}_{port}.log')
+            # log_file_loc = f'tc_client_{self.get_ID()}.log'
+            self._log = open(log_file_loc, 'a')
             self.log_message(f'Client started on {host}:{port}')
         self.server_root = server_root
 
@@ -129,10 +132,15 @@ class TCClientExtra(TCPBClient):
 
     def print_end_of_file(self, n_lines=30):
         lines  = []
-        if self.curr_job_dir is None:
+
+        if self.curr_job_dir is not None:
+            job_dir = os.path.join(self.server_root, self.curr_job_dir)
+        elif self._last_known_curr_dir is not None:
+            job_dir = os.path.join(self.server_root, self._last_known_curr_dir)
+        else:
             print('No job directory set, cannot print end of tc.out file')
             return
-        job_dir = os.path.join(self.server_root, self.curr_job_dir)
+
         with open(job_dir + '/tc.out', 'r') as file:
             lines = file.readlines()
         print('End of tc.out file at:')
@@ -305,11 +313,11 @@ def compute_job_sync(client: TCClientExtra, jobType="energy", geom=None, unitTyp
         dict: Results mirroring recv_job_async
     """
 
-    print("Submitting Job...")
+    # print("Submitting Job...")
     client.log_message("Submitting Job...")
     accepted = client.send_job_async(jobType, geom, unitType, **kwargs)
     while accepted is False:
-        time.sleep(0.25)
+        time.sleep(0.5)
         accepted = client.send_job_async(jobType, geom, unitType, **kwargs)
 
     client.log_message("Job Accepted")
@@ -318,7 +326,7 @@ def compute_job_sync(client: TCClientExtra, jobType="energy", geom=None, unitTyp
 
     completed = client.check_job_complete()
     while completed is False:
-        time.sleep(0.25)
+        time.sleep(0.5)
         client._send_msg(pb.STATUS, None)
         status = client._recv_msg(pb.STATUS)
 
@@ -575,6 +583,8 @@ class TCRunner():
 
         #   assign particular job names to particular clients
         self._client_assignments = tc_client_assignments
+        if len(self._client_assignments) != len(self._client_list) and len(self._client_assignments) != 0:
+            raise ValueError('Number of client assignments must match the number of clients')
 
         self._prev_results = []
         self._prev_jobs: list[TCJob] = []
@@ -624,7 +634,7 @@ class TCRunner():
                 client.is_available()
                 avail = True
             except:
-                print(f'TeraChem server not available: \
+                print(f'TeraChem server {host}:{port} not available: \n\
                         trying again in {time_btw_check} seconds')
                 time.sleep(time_btw_check)
                 total_wait += time_btw_check
@@ -949,6 +959,11 @@ class TCRunner():
         #   debug mode
         if self._debug_traj and not _SAVE_DEBUG_TRAJ:
             completed_batch = self._debug_traj.pop(0)
+
+            for i in range(len(jobs_batch.jobs)):
+                jobs_batch.jobs[i] = completed_batch.jobs[i]
+
+            # jobs_batch = completed_batch
             n_comp = len(completed_batch.jobs)        
             n_req = len(jobs_batch.jobs)
             if n_comp != n_req:
@@ -975,7 +990,7 @@ class TCRunner():
                 for name in names_list:
                     all_job_names.remove(name)
 
-            #   evertying else gets assigned to the 'other' clients
+            #   everything else gets assigned to the 'other' clients
             if len(clients_IDs_for_other) > 0:
                 n_other_clients = len(clients_IDs_for_other)
                 for i, name in enumerate(all_job_names):
@@ -996,7 +1011,7 @@ class TCRunner():
         #   if only one client is being used, don't open up threads, easier to debug
         if n_clients == 1:
             jobs_batch.jobs[0].client = self._client_list[0]
-            _run_batch_jobs(jobs_batch.jobs[0], self._prev_results)
+            _run_batch_jobs(jobs_batch, self._prev_results)
 
         #   submit jobs as separate threads, one per client
         else:
@@ -1270,7 +1285,8 @@ def _run_batch_jobs(jobs_batch: TCJobBatch, prev_results=[]):
         j.start_time = time.time()
 
         _set_guess(job_opts, j.excited_type, all_results + prev_results, j.state, client)
-        print(f"\nRunning {job_name} on client ID {client.get_ID()}")
+        client.log_message(f"Running {job_name}")
+        print(f"Running {job_name}")
         # if 'cisrestart' in job_opts:
         #     job_opts['cisrestart'] = f"{job_opts['cisrestart']}_{client.host}_{client.port}"
 
@@ -1305,6 +1321,7 @@ def _run_batch_jobs(jobs_batch: TCJobBatch, prev_results=[]):
         # j.total_time = time.time() - start
         j.end_time = time.time()
         results['run'] = job_type
+        # print('APPENDING OUTPUT FILE')
         TCRunner.append_output_file(results, client.server_root)
         results.update(job_opts)
         j.results = results.copy()
@@ -1383,10 +1400,10 @@ def format_output_LSCIVR(job_data: list[dict]):
 
             if 'cis_transition_dipoles' in job:
                 x = len(job['cis_transition_dipoles'])
-                N = int((1 + int(np.sqrt(1+8*x)))/2) - 1
+                N = int((1 + int(np.sqrt(1+8*x)))/2)
                 count = 0
                 for i in range(0, N):
-                    for j in range(i+1, N+1):
+                    for j in range(i+1, N):
                         if (i, j) == (state_1, state_2):
                             trans_dips[(state_1, state_2)] = job['cis_transition_dipoles'][count]
                             trans_dips[(state_2, state_1)] = job['cis_transition_dipoles'][count]
