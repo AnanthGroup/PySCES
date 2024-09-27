@@ -370,6 +370,14 @@ class TCJob():
         out_str += ')'
         return out_str
 
+    @staticmethod
+    def new_from_old(self, old_job, new_geom=None):
+        if new_geom is None:
+            new_geom = old_job.geom
+        new_job = TCJob(new_geom, old_job.opts, old_job.job_type, old_job.excited_type, old_job.state, old_job.name, old_job.client)
+        return new_job
+
+
     @property
     def total_time(self):
         return self.end_time - self.start_time

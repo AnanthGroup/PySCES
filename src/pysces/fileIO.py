@@ -579,8 +579,14 @@ class TCJobsLogger():
             for key in group[job.name]:
                 if key in ['other', 'timestep', 'tc.out']:
                     continue
-                H5File.append_dataset(group[job.name][key], results[key])
-                results.pop(key)
+                if key in results:
+                    H5File.append_dataset(group[job.name][key], results[key])
+                    results.pop(key)
+                else:
+                    print(f'Warning: "{key}" not found in job results, using zeros instead')
+                    prev_vals = group[job.name][key][:][-1]
+                    fill_result = np.zeros_like(prev_vals)
+                    H5File.append_dataset(group[job.name][key], fill_result)
             H5File.append_dataset(group[job.name]['tc.out'], json.dumps(results['tc.out']))
             results.pop('tc.out')
             H5File.append_dataset(group[job.name]['timestep'], data.time)
