@@ -30,6 +30,7 @@ _server_processes = {}
 #   debug flags
 _DEBUG = bool(int(os.environ.get('DEBUG', False)))
 _DEBUG_TRAJ = os.environ.get('DEBUG_TRAJ', False)
+_SAVE_BATCH = bool(os.environ.get('SAVE_BATCH', False))
 _SAVE_DEBUG_TRAJ = os.environ.get('SAVE_DEBUG_TRAJ', False)
 
 
@@ -370,11 +371,10 @@ class TCJob():
         out_str += ')'
         return out_str
 
-    @staticmethod
-    def new_from_old(self, old_job, new_geom=None):
+    def new_from_old(self, new_geom=None):
         if new_geom is None:
-            new_geom = old_job.geom
-        new_job = TCJob(new_geom, old_job.opts, old_job.job_type, old_job.excited_type, old_job.state, old_job.name, old_job.client)
+            new_geom = self.geom
+        new_job = TCJob(new_geom, self.opts, self.job_type, self.excited_type, self.state, self.name, self.client)
         return new_job
 
 
@@ -404,18 +404,22 @@ class TCJobBatch():
     '''
         Combines multiple TCJobs into one wrapper
     '''
+    __batch_counter = 0
     def __init__(self, jobs: list[TCJob] | list['TCJobBatch'] = []) -> None:
         if len(jobs) == 0:
             self.jobs = []
-            return
         
-        if isinstance(jobs[0], TCJobBatch):
-            jobs = list(itertools.chain(*[j.jobs for j in jobs]))
+        if len(jobs) > 0:
+            if isinstance(jobs[0], TCJobBatch):
+                jobs = list(itertools.chain(*[j.jobs for j in jobs]))
         
         #   sort by ID
         id_list = [j.jobID for j in jobs]
         order = np.argsort(id_list)
         self.jobs = [jobs[i] for i in order]
+
+        TCJobBatch.__batch_counter += 1
+        self.__batchID = TCJobBatch.__batch_counter
 
     def __repr__(self) -> str:
         out_str = ''
@@ -423,6 +427,13 @@ class TCJobBatch():
             out_str += f'{j}\n'
         return out_str
     
+    def __len__(self):
+        return len(self.jobs)
+    
+    @property
+    def batchID(self):
+        return self.__batchID
+
     def get_by_id(self, id):
         for j in self.jobs:
             if j.jobID == id:
@@ -454,7 +465,10 @@ class TCJobBatch():
         for j in self.jobs:
             j.client = client
 
-    def append(self, job: TCJob):
+    def append(self, job: TCJob, allow_duplicates=True):
+        if not allow_duplicates:
+            if job.jobID in [j.jobID for j in self.jobs]:
+                raise ValueError(f'JobID {job.jobID} already in batch')
         self.jobs.append(job)
     
     def sorted_jobs_by_state(self):
@@ -964,6 +978,16 @@ class TCRunner():
 
     def _send_jobs_to_clients(self, jobs_batch: TCJobBatch):
 
+        # REMOVE ME
+        if _SAVE_BATCH and os.path.isfile(f'_jobs_{jobs_batch.batchID}.pkl'):
+            print('DEBUG OVERWRITING JOBS WITH FILE ', f'_jobs_{jobs_batch.batchID}.pkl')
+            with open(f'_jobs_{jobs_batch.batchID}.pkl', 'rb') as file:
+                completed_batch = pickle.load(file)
+            for i in range(len(jobs_batch.jobs)):
+                jobs_batch.jobs[i] = completed_batch.jobs[i]
+            return completed_batch
+
+
         #   debug mode
         if self._debug_traj and not _SAVE_DEBUG_TRAJ:
             completed_batch = self._debug_traj.pop(0)
@@ -1040,6 +1064,13 @@ class TCRunner():
             print("APPENDING DEBUG TRAJ ", jobs_batch)
             jobs_batch._remove_clients()
             self._debug_traj.append(jobs_batch)
+
+        if _SAVE_BATCH:
+            print(f"SAVING BATCH FILE: _jobs_{jobs_batch.batchID}.pkl")
+            for job in jobs_batch.jobs:
+                job.client = None
+            with open(f'_jobs_{jobs_batch.batchID}.pkl', 'wb') as file:
+                pickle.dump(jobs_batch, file)
 
         return jobs_batch
 
