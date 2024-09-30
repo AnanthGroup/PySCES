@@ -220,6 +220,12 @@ def read_restart(file_loc: str='restart.out', ndof: int=0, integrator: str='RK4'
             grads = np.array(data.get('grads', np.array([])))
             nac_mat = np.array(data.get('nac_mat', np.array([])))
 
+            if 'TCJobBatch__batch_counter' in data:
+                TC.TCJobBatch.set_ID_counter(data['TCJobBatch__batch_counter'])
+
+            if 'TCJob__job_counter' in data:
+                TC.TCJob.set_ID_counter(data['TCJob__job_counter'])
+
             return combo_q, combo_p, nac_hist, tdm_hist, energy, time, elecE, grads, nac_mat, com
 
         else:
@@ -320,8 +326,16 @@ def write_restart(file_loc: str,
             data['grads'] = np.array(grads).tolist()
             data['nac_mat'] = np.array(nac_mat).tolist()
             data['com'] = np.array(com).tolist()
+
+            if TC.TCJobBatch.get_ID_counter() > 0:
+                data['TCJobBatch__batch_counter'] = TC.TCJobBatch.get_ID_counter()
+
+            if TC.TCJob.get_ID_counter() > 0:
+                data['TCJob__job_counter'] = TC.TCJob.get_ID_counter()
+
             with open(file_loc, 'w') as file:
                 json.dump(data, file, indent=2)
+            
     else:
         exit(f'ERROR: only RK4 is implimented fileIO')
 

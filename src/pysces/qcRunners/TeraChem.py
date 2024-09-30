@@ -378,6 +378,17 @@ class TCJob():
         new_job = TCJob(new_geom, self.opts, self.job_type, self.excited_type, self.state, self.name, self.client)
         return new_job
 
+    @classmethod
+    def get_ID_counter(cls):
+        return cls.__job_counter
+    
+    @classmethod
+    def set_ID_counter(cls, value):
+        if not isinstance(value, int):
+            raise ValueError('TCJob ID counter must be an integer')
+        if value < cls.__job_counter:
+            raise ValueError('TCJob ID counter must be greater than the current value')
+        cls.__job_counter = value
 
     @property
     def total_time(self):
@@ -422,6 +433,32 @@ class TCJobBatch():
         TCJobBatch.__batch_counter += 1
         self.__batchID = TCJobBatch.__batch_counter
 
+        caller_info = self._get_caller_info()
+        print(f'TCJobBatch {self.batchID} called from File "{caller_info.filename}", line {caller_info.lineno}, in {caller_info.function}',)
+        # input()
+
+    def _get_caller_info(self):
+        # This helps identify the function that created the object
+        import inspect
+        frame = inspect.currentframe()
+        outer_frame = inspect.getouterframes(frame, 2)
+        caller_frame = outer_frame[2]
+        return caller_frame
+        # return {
+        #     'function': caller_frame.function,  # Function name
+        #     'line': caller_frame.lineno  # Line number
+        # }
+
+
+    def __getstate__(self):
+        state = self.__dict__.copy()
+        state['__batchID'] = self.__batchID
+        return state
+    
+    def __setstate__(self, state):
+        self.__dict__.update(state)
+        TCJobBatch.__batch_counter = max(TCJobBatch.__batch_counter, self.__batchID)
+
     def __repr__(self) -> str:
         out_str = ''
         for j in self.jobs:
@@ -430,6 +467,18 @@ class TCJobBatch():
     
     def __len__(self):
         return len(self.jobs)
+
+    @classmethod
+    def get_ID_counter(cls):
+        return cls.__batch_counter
+    
+    @classmethod
+    def set_ID_counter(cls, value):
+        if not isinstance(value, int):
+            raise ValueError('TCJobBatch ID counter must be an integer')
+        if value < cls.__batch_counter:
+            raise ValueError('TCJobBatch ID counter must be greater than the current value')
+        cls.__batch_counter = value
     
     @property
     def batchID(self):
@@ -989,6 +1038,8 @@ class TCRunner():
                 for i in range(len(jobs_batch.jobs)):
                     jobs_batch.jobs[i] = completed_batch.jobs[i]
                 return completed_batch
+            else:
+                print('COULD NOT FIND FILE ', f'{batch_file}')
 
 
         #   debug mode
