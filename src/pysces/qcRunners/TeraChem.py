@@ -29,8 +29,9 @@ _server_processes = {}
 
 #   debug flags
 _DEBUG = bool(int(os.environ.get('DEBUG', False)))
+
 _DEBUG_TRAJ = os.environ.get('DEBUG_TRAJ', False)
-_SAVE_BATCH = bool(os.environ.get('SAVE_BATCH', False))
+_SAVE_BATCH = os.environ.get('SAVE_BATCH', False)
 _SAVE_DEBUG_TRAJ = os.environ.get('SAVE_DEBUG_TRAJ', False)
 
 
@@ -979,13 +980,15 @@ class TCRunner():
     def _send_jobs_to_clients(self, jobs_batch: TCJobBatch):
 
         # REMOVE ME
-        if _SAVE_BATCH and os.path.isfile(f'_jobs_{jobs_batch.batchID}.pkl'):
-            print('DEBUG OVERWRITING JOBS WITH FILE ', f'_jobs_{jobs_batch.batchID}.pkl')
-            with open(f'_jobs_{jobs_batch.batchID}.pkl', 'rb') as file:
-                completed_batch = pickle.load(file)
-            for i in range(len(jobs_batch.jobs)):
-                jobs_batch.jobs[i] = completed_batch.jobs[i]
-            return completed_batch
+        if _SAVE_BATCH:
+            batch_file = os.path.join(_SAVE_BATCH, f'_jobs_{jobs_batch.batchID}.pkl')
+            if os.path.isfile(batch_file):
+                print('DEBUG OVERWRITING JOBS WITH FILE ', f'{batch_file}')
+                with open(batch_file, 'rb') as file:
+                    completed_batch = pickle.load(file)
+                for i in range(len(jobs_batch.jobs)):
+                    jobs_batch.jobs[i] = completed_batch.jobs[i]
+                return completed_batch
 
 
         #   debug mode
@@ -1066,10 +1069,10 @@ class TCRunner():
             self._debug_traj.append(jobs_batch)
 
         if _SAVE_BATCH:
-            print(f"SAVING BATCH FILE: _jobs_{jobs_batch.batchID}.pkl")
+            print(f"SAVING BATCH FILE: {batch_file}")
             for job in jobs_batch.jobs:
                 job.client = None
-            with open(f'_jobs_{jobs_batch.batchID}.pkl', 'wb') as file:
+            with open(batch_file, 'wb') as file:
                 pickle.dump(jobs_batch, file)
 
         return jobs_batch
