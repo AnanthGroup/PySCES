@@ -1074,7 +1074,8 @@ class TCRunner():
                 sub_jobs = jobs_batch.get_by_name(names_list)
                 sub_jobs.set_client(self._client_list[i])
                 for name in names_list:
-                    all_job_names.remove(name)
+                    if name in all_job_names:
+                        all_job_names.remove(name)
 
             #   everything else gets assigned to the 'other' clients
             if len(clients_IDs_for_other) > 0:
