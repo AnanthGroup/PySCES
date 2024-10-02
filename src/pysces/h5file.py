@@ -24,7 +24,6 @@ class H5Group(h5py.Group):
         dset = super().create_dataset(name, shape, dtype, data, **kwargs)
         return H5Dataset(dset.id)
 
-
 class H5Dataset(h5py.Dataset):
     def __init__(self, bind, *, readonly=False):
         super().__init__(bind, readonly=readonly)
@@ -75,12 +74,11 @@ class H5File(h5py.File):
             data = self
         if isinstance(data, h5py.Group) or isinstance(data, h5py.File):
             for key, val in data.items():
-                # print(f'{string}/{key}: attrs = ', dict(val.attrs))
-                print(f'{string}/{key}: ')
-                print(' '*len(f'{string}/{key}'), ' attrs = ', dict(data.attrs))
                 self.print_data_structure(val, string + '/' + key)
         elif isinstance(data, h5py.Dataset):
-            print(' '*len(string), ' shape = ', data.shape)
+            # print(string, ' shape = ', data.shape, ', attrs = ', dict(data.attrs))
+            print(string, ' shape = ', data.shape)
+
 
 
     def print_data(self, data: h5py.File |  h5py.Dataset | h5py.Group = None):
@@ -95,8 +93,41 @@ class H5File(h5py.File):
 
         return out_data
     
-    def to_file_and_dir(self):
-        self._to_file_and_dir_details(self, '')
+    def to_file_and_dir(self, data_path: str = None, frame=None):
+        if data_path is None:
+            self._to_file_and_dir_details(self)
+        else:
+            if data_path[0] == '/':
+                dir_path = data_path[1:]
+                os.makedirs(os.path.dirname(dir_path), exist_ok=True)
+            data = self[data_path]
+
+            if data_path.endswith('tc.out'):
+                frames = np.arange(len(data))
+                if frame is not None:
+                    data = [data[frame]]
+                    frames = [frame]
+                for file_lines, frame in zip(data, frames):
+                    file_name = dir_path.replace('tc.out', f'tc_{frame}.out')
+                    with open(file_name, 'w') as file:
+                        if len(file_lines) == 1 and type(file_lines[0]) == bytes:
+                            file_lines = eval(file_lines[0].decode('utf-8'))
+                        for line in file_lines:
+                            file.write(line + '\n')
+                return
+
+            if frame is not None:
+                data = data[frame]
+
+            if isinstance(data, np.ndarray):
+                #   NumPy array can't be save directly to a file
+                #   create a temporary file with a dataset to save
+                temp_file = H5File('_temp.h5', 'w')
+                temp_file.create_dataset(data_path, data=data)
+                H5File._to_file_and_dir_details(temp_file)
+                os.remove('_temp.h5')
+                return
+            self._to_file_and_dir_details(data)
 
     @staticmethod
     def _to_file_and_dir_details(data: h5py.File |  h5py.Dataset | h5py.Group, parent_dir=''):
@@ -145,9 +176,14 @@ class H5File(h5py.File):
             else:
                 np.save(file_name, data[:])
 
-    def to_json(self, file_loc):
+    def to_json(self, file_loc, data_path: str = None, frame=None):
         print('Saving to json:')
-        out_data = self.to_dict(print_message=True)
+        if data_path is None:
+            data = self
+        else:
+            data = self[data_path]
+
+        out_data = self.to_dict(data, print_message=True, frame=frame)
         if file_loc.endswith('.gz'):
             print('    Writing data to a compressed .json file')
             with gzip.open(file_loc, 'wt') as file:
@@ -158,28 +194,32 @@ class H5File(h5py.File):
                 json.dump(out_data, file, indent=4)
         print('    Done!')
 
-    def to_dict(self, data: h5py.File |  h5py.Dataset | h5py.Group = None, print_message=False):
+    def to_dict(self, data: h5py.File |  h5py.Dataset | h5py.Group = None, print_message=False, frame=None):
         if self._dictionaried_data is not None:
             return self._dictionaried_data
         if print_message:
             print('    Converting data to a dictionary')
         if data is None:
             data = self
-        return self._to_dict_recursive(data)
+        return self._to_dict_recursive(data, frame)
         
     
-    def _to_dict_recursive(self, data: h5py.File |  h5py.Dataset | h5py.Group):
+    def _to_dict_recursive(self, data: h5py.File |  h5py.Dataset | h5py.Group, frame=None):
         if data is None:
             data = self
         out_data = {}
         if isinstance(data, h5py.Group) or isinstance(data, h5py.File):
             for key, val in data.items():
-                out_data[key] = self._to_dict_recursive(val)
+                out_data[key] = self._to_dict_recursive(val, frame)
         elif isinstance(data, h5py.Dataset):
             if data.dtype == 'object':
                 conv_data = np.array(data[:]).astype(str).tolist()
             else:
                 conv_data = data[:].tolist()
+
+            if frame is not None:
+                print('Frame:', frame)
+                return conv_data[frame]
             return conv_data
         else:
             print("Could not convert ", data)
@@ -210,22 +250,26 @@ def run_h5_module():
     parser.add_argument('--file',       '-f', type=str, help='HDF5 file to read', required=True)
     parser.add_argument('--json',       '-j', type=str, help='Convert to JSON')
     parser.add_argument('--rm_tc_files', '-r', type=str, help='Remove tc.out file data from tc_job_data and save to this file')
-    parser.add_argument('--pickle',     '-p', type=str, help='Convert to a pickled HDF5 file')
+    parser.add_argument('--pickle',     '-P', type=str, help='Convert to a pickled HDF5 file')
+    parser.add_argument('--extract', '-x', help='Extract a dataset from the HDF5 file', action='store_true')
+    parser.add_argument('--path', '-p', type=str, help='Dataset or Group path to extract')
+    parser.add_argument('--frame', '-F', type=int, help='Frame to extract')
     args = parser.parse_args(sys.argv[2:])
 
     with H5File(args.file, 'r') as file:
         if args.json is not None:
-            file.to_json(args.json)
-        if args.pickle is not None:
+            file.to_json(args.json, args.path, args.frame)
+        elif args.pickle is not None:
             pass
-        if args.rm_tc_files is not None:
+        elif args.rm_tc_files is not None:
             file.remove_tc_jobs(args.rm_tc_files)
-        if args.pickle is not None:
+        elif args.pickle is not None:
             file.to_pickle(args.pickle)
-        
-        if all(v is None for v in [args.json, args.pickle, args.rm_tc_files]):
+        elif args.extract:
+            print('Extracting data to file and directory')
+            file.to_file_and_dir(args.path, args.frame)
+        else:
             file.print_data_structure()
-
 
     exit()
 if __name__ == '__main__':

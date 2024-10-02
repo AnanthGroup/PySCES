@@ -24,7 +24,6 @@ from pysces.input_simulation import *
 
 def main():
     print_ascii_art()
-    make_logging_dir()
     run_modules()
     run_simulation()
 
@@ -35,6 +34,7 @@ def run_simulation():
     parser = argparse.ArgumentParser(description=description)
     args = parser.parse_args(sys.argv[2:])
 
+    make_logging_dir()
     input_local_settings()
     print_settings()
 

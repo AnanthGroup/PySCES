@@ -434,8 +434,7 @@ class TCJobBatch():
         self.__batchID = TCJobBatch.__batch_counter
 
         caller_info = self._get_caller_info()
-        print(f'TCJobBatch {self.batchID} called from File "{caller_info.filename}", line {caller_info.lineno}, in {caller_info.function}',)
-        # input()
+        
 
     def _get_caller_info(self):
         # This helps identify the function that created the object
@@ -444,10 +443,6 @@ class TCJobBatch():
         outer_frame = inspect.getouterframes(frame, 2)
         caller_frame = outer_frame[2]
         return caller_frame
-        # return {
-        #     'function': caller_frame.function,  # Function name
-        #     'line': caller_frame.lineno  # Line number
-        # }
 
 
     def __getstate__(self):
@@ -1384,14 +1379,14 @@ def _run_batch_jobs(jobs_batch: TCJobBatch, prev_results=[]):
         # if 'cisrestart' in job_opts:
         #     job_opts['cisrestart'] = f"{job_opts['cisrestart']}_{client.host}_{client.port}"
 
-        max_tries = 2
+        max_tries = 5
         try_count = 0
         try_again = True
         while try_again:
             try:
                 results = compute_job_sync(client, job_type, geom, 'angstrom', **job_opts)
                 try_again = False
-            except ServerError as e:
+            except Exception as e:
                 try_count += 1
                 if try_count == max_tries:
                     try_again = False
@@ -1410,6 +1405,7 @@ def _run_batch_jobs(jobs_batch: TCJobBatch, prev_results=[]):
                     print("    Trying to run job once more")
                     client.log_message(f"Server error recieved; trying to run job once more")
                     time.sleep(10)
+                    
 
                     client = TCRunner.restart_client(client)
         # j.total_time = time.time() - start
