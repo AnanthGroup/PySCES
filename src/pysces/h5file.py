@@ -97,9 +97,15 @@ class H5File(h5py.File):
         if data_path is None:
             self._to_file_and_dir_details(self)
         else:
-            if data_path[0] == '/':
-                dir_path = data_path[1:]
-                os.makedirs(os.path.dirname(dir_path), exist_ok=True)
+
+            if isinstance(self[data_path], (h5py.File, h5py.Group)):
+                os.makedirs(data_path[1:], exist_ok=True)
+            else:
+                dir_path = os.path.dirname(data_path[1:])
+                if dir_path != '':
+                    os.makedirs(dir_path, exist_ok=True)
+
+
             data = self[data_path]
 
             if data_path.endswith('tc.out'):

@@ -42,12 +42,12 @@ def run_restart_module():
         print(f'Number of frames in trajectory: ', len(times))
         print(f'Start time: {times[0]} a.u.')
         print(f'End time: {times[-1]} a.u.')
-        print(f'Trajectory time length: {times[-1] - times[0] + dt} a.u.', )
+        print(f'Trajectory time length: {times[-1] - times[0]} a.u.', )
         print(f'Trajectory time step: {dt} a.u.')
 
         #   find the closest time to the requested time
-        time_idx = np.argmin(np.abs(times - args.time))
         print('\nRequest a restart file at time: ', args.time)
+        time_idx = np.argmin(np.abs(times - args.time))
         print(f'Closest time step: {times[time_idx]} a.u.')
 
         print('\nExtracting data from the closest time step')
