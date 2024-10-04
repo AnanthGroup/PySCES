@@ -69,15 +69,25 @@ class H5File(h5py.File):
         ds.resize(ds.shape[0]+1, axis=0)
         ds[-1] = value
 
+    @staticmethod
+    def _print_dataset_info(name, obj):
+        """
+        Function to print the name and shape of datasets.
+        This will be applied to each object in the HDF5 file.
+        """
+        if isinstance(obj, h5py.Dataset):
+            print(f"Dataset: {name}, Shape: {obj.shape}")
+
     def print_data_structure(self, data: h5py.File | h5py.Dataset | h5py.Group = None, string=''):
         if data is None:
             data = self
-        if isinstance(data, h5py.Group) or isinstance(data, h5py.File):
-            for key, val in data.items():
-                self.print_data_structure(val, string + '/' + key)
-        elif isinstance(data, h5py.Dataset):
-            # print(string, ' shape = ', data.shape, ', attrs = ', dict(data.attrs))
-            print(string, ' shape = ', data.shape)
+        data.visititems(H5File._print_dataset_info)
+        # if isinstance(data, h5py.Group) or isinstance(data, h5py.File):
+        #     for key, val in data.items():
+        #         self.print_data_structure(val, string + '/' + key)
+        # elif isinstance(data, h5py.Dataset):
+        #     # print(string, ' shape = ', data.shape, ', attrs = ', dict(data.attrs))
+        #     print(string, ' shape = ', data.shape)
 
 
 
@@ -251,18 +261,63 @@ class H5File(h5py.File):
         with H5File(new_file_loc, 'w') as new_file:
             self._remove_tc_jobs(self, new_file)
 
+    # def extract_path(self, new_file_loc: str, paths: list[str], frame: int):
+    #     data = self[paths[0]]
+    #     for p in paths[1:]:
+
+        
+    #     if frame is not None:
+    #         data = data[frame]
+    #     new_file = H5File(new_file_loc, 'w')
+    #     if isinstance(data, h5py.Dataset):
+    #         new_file.create_dataset(path, data=data)
+    #     else:
+    #         self.copy(data, new_file)
+    #     new_file.close()
+            
+    @staticmethod
+    def copy_with_frame(source, dest_file, frame=None):
+        
+        if isinstance(source, (h5py.File, h5py.Group)):
+            for key in source:
+                H5File.copy_with_frame(source[key], dest_file, frame)
+        elif isinstance(source, h5py.Dataset):
+            if frame is None:
+                print('   Copying dataset:', source.name)
+                dest_file.create_dataset(source.name, data=source[:])
+            else:
+                # Check if the dataset is large enough to grab the n-th element
+                if len(source) > frame:
+                    n_th_element = source[frame]
+                    print('   Copying dataset:', source.name)
+                    dest_file.create_dataset(source.name, data=n_th_element)
+                else:
+                    print(f"Dataset: {source.name} is too small for frame {frame}")
+
+
+    def write_new_file(self, new_file_loc: str, paths: list[str], frame: int):
+        with h5py.File(new_file_loc, 'w') as new_file:
+            # Iterate through the list of paths to copy and apply the function
+            for path in paths:
+                print('Working on path:', path)
+                if path in self:
+                    obj = self[path]
+                    H5File.copy_with_frame(obj, new_file, frame=frame)
+
 def run_h5_module():
     parser = argparse.ArgumentParser()
     parser.add_argument('--file',       '-f', type=str, help='HDF5 file to read', required=True)
     parser.add_argument('--json',       '-j', type=str, help='Convert to JSON')
-    parser.add_argument('--rm_tc_files', '-r', type=str, help='Remove tc.out file data from tc_job_data and save to this file')
+    parser.add_argument('--rm_tc_files','-r', type=str, help='Remove tc.out file data from tc_job_data and save to this file')
     parser.add_argument('--pickle',     '-P', type=str, help='Convert to a pickled HDF5 file')
-    parser.add_argument('--extract', '-x', help='Extract a dataset from the HDF5 file', action='store_true')
-    parser.add_argument('--path', '-p', type=str, help='Dataset or Group path to extract')
-    parser.add_argument('--frame', '-F', type=int, help='Frame to extract')
+    parser.add_argument('--extract',    '-x', help='Extract a dataset from the HDF5 file', action='store_true')
+    parser.add_argument('--path',       '-p', type=str, help='Dataset or Group path to extract', nargs='+')
+    parser.add_argument('--frame',      '-F', type=int, help='Frame to extract')
+    parser.add_argument('--new',        '-n', help='Create a new H5 file')
     args = parser.parse_args(sys.argv[2:])
 
     with H5File(args.file, 'r') as file:
+
         if args.json is not None:
             file.to_json(args.json, args.path, args.frame)
         elif args.pickle is not None:
@@ -274,7 +329,11 @@ def run_h5_module():
         elif args.extract:
             print('Extracting data to file and directory')
             file.to_file_and_dir(args.path, args.frame)
+        elif args.new:
+            print('Creating new h5 file')
+            file.write_new_file(args.new, args.path, args.frame)
         else:
+            print('Printing data structure:')
             file.print_data_structure()
 
     exit()
