@@ -1743,6 +1743,7 @@ def rk4(initq, initp, tStop, H, restart, amu_mat, U, com_ang, AN_mat):
                                  tc_initial_frame_options=tcr_initial_frame_opts, 
                                  tc_client_assignments=tcr_client_assignments,
                                  tc_server_gpus=tcr_server_gpus)
+            tc_runner._prev_ref_job = _tcr_ref_job
 
     elif restart == 0:
         q[:nel], p[:nel] = initq[:nel], initp[:nel]

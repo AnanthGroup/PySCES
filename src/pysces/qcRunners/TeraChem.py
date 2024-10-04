@@ -656,6 +656,7 @@ class TCRunner():
         self._prev_results = []
         self._prev_jobs: list[TCJob] = []
         self._frame_counter = 0
+        self._prev_ref_job = None
 
         # Don't actually run terachem, instead load a trajectory from a file
         self._debug_traj = []
@@ -857,7 +858,7 @@ class TCRunner():
         self._max_time_list.append(max_time)
         self._max_time = np.mean(self._max_time_list)*5
 
-    def run_TC_new_geom(self, geom):
+    def run_TC_new_geom(self, geom, correct_signs=True):
         try:
             job_batch = self._run_TC_new_geom_kernel(geom)
         except TCServerStallError as error:
@@ -871,6 +872,19 @@ class TCRunner():
             self._client = self.get_new_client(host, port, self._client, max_wait=20, server_root=self._server_root)
             print('Started new TC Server: re-running current step')
             job_batch = self.run_TC_new_geom(geom)
+
+        #   correct signs from previous job
+        # use the highest gradient state as the reference job
+        # if correct_signs:
+        #     grad_batch = job_batch.get_by_type('gradient')
+        #     curr_ref_job = grad_batch.sorted_jobs_by_state()[-1]
+        #     if self._prev_ref_job is None:
+        #         self._prev_ref_job = curr_ref_job
+        #     #   update jobs form tc.out file, and correct with esp charges
+        #     for job in job_batch.jobs:
+        #         print('Correcting signs for job ', job.name)
+        #         _correct_signs(job, self._prev_ref_job)
+        #     self._prev_ref_job = curr_ref_job
 
         if _SAVE_DEBUG_TRAJ:
             print("SAVING DEBUG TRAJ FILE: ", _SAVE_DEBUG_TRAJ)
@@ -906,6 +920,7 @@ class TCRunner():
             #   CI and TDDFT
             excited_type = 'cis'
             for key, val in orig_opts.items():
+                print('KEY: ', key)
                 if key in cis_possible_opts:
                     excited_options[key] = val
                 else:
@@ -1018,6 +1033,7 @@ class TCRunner():
         job_batch = self._send_jobs_to_clients(job_batch)
         self._frame_counter += 1
         self._prev_jobs = job_batch.jobs
+
         return job_batch
 
 
@@ -1349,7 +1365,6 @@ def _correct_signs(job: TCJob, ref_job: TCJob):
             ref_d, job_d = ref_job.results[dipole_key][i], job.results[dipole_key][i]
             proj = np.dot(ref_d, job_d)/(np.linalg.norm(ref_d)*np.linalg.norm(job_d))
             print(fmt_str.format(*ref_d, *job_d, proj))
-        input()
 
 
     #   correct the nonadibatic coupling

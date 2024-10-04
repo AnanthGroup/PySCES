@@ -109,6 +109,9 @@ extra_loggers = []
 #   for logging only
 state_labels = None
 
+#   DEBUG ONLY
+_tcr_ref_job = None
+
 ########## END DEFAULT SETTINGS ##########
 
 def input_local_settings():
