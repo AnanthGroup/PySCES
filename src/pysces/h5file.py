@@ -6,7 +6,7 @@ import os
 import sys
 import argparse
 import gzip
-import gzip
+import fnmatch
 
 class H5Group(h5py.Group):
     def __init__(self, *args, **kwargs):
@@ -294,14 +294,38 @@ class H5File(h5py.File):
                 else:
                     print(f"Dataset: {source.name} is too small for frame {frame}")
 
+    @staticmethod
+    def find_paths_with_wildcard(h5file, pattern):
+        """
+        Recursively find paths of datasets and groups that match a wildcard pattern.
+        
+        :param h5file: The HDF5 file object.
+        :param pattern: The wildcard pattern (e.g., '*/dataset*').
+        :return: A list of paths that match the pattern.
+        """
+        matching_paths = []
+        
+        def visitor_func(name, obj):
+            # Use fnmatch to compare the name with the pattern
+            if fnmatch.fnmatch(name, pattern):
+                matching_paths.append(name)
+        
+        # Traverse the file and apply the visitor_func
+        h5file.visititems(visitor_func)
+        
+        return matching_paths
+
 
     def write_new_file(self, new_file_loc: str, paths: list[str], frame: int):
+        all_paths = []
+        for p in paths:
+            all_paths += H5File.find_paths_with_wildcard(self, p)
+
         with h5py.File(new_file_loc, 'w') as new_file:
             # Iterate through the list of paths to copy and apply the function
-            for path in paths:
-                print('Working on path:', path)
+            for path in all_paths:
                 if path in self:
-                    obj = self[path]
+                    obj = self[path] 
                     H5File.copy_with_frame(obj, new_file, frame=frame)
 
 def run_h5_module():

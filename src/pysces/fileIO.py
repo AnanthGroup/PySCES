@@ -58,6 +58,19 @@ def run_restart_module():
         nuc_Q = np.array(traj_file['electronic/nuclear_Q'])[time_idx].flatten()*ANG_2_BOHR
         grads = np.array(traj_file['electronic/grad'])[time_idx]
 
+        #   test correlation function
+        q, p = elec_q, elec_p
+        nel = len(q)
+        pops = np.zeros(nel)
+        common_TCF = 2**(nel+1) * np.exp(-np.dot(q, q) - np.dot(p, p))
+        for i in range(nel):
+                final_state_TCF = q[i]**2 + p[i]**2 - 0.5
+                pops[i] = common_TCF * final_state_TCF
+        print('Restart populations:')
+        for i in range(nel):
+            print(f'  State {i+1}: {pops[i]:12.8f}')
+        print(f'Total population: {np.sum(pops):8f}')
+
         # energies
         energies = np.array(traj_file['electronic/energy'])[time_idx]
         total_e = energies[-1]
