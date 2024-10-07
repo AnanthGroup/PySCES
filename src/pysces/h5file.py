@@ -285,12 +285,16 @@ class H5File(h5py.File):
             if frame is None:
                 print('   Copying dataset:', source.name)
                 dest_file.create_dataset(source.name, data=source[:])
+                for k, v in source.attrs.items():
+                    dest_file[source.name].attrs[k] = v
             else:
                 # Check if the dataset is large enough to grab the n-th element
                 if len(source) > frame:
                     n_th_element = source[frame]
                     print('   Copying dataset:', source.name)
                     dest_file.create_dataset(source.name, data=n_th_element)
+                    for k, v in source.attrs.items():
+                        dest_file[source.name].attrs[k] = v
                 else:
                     print(f"Dataset: {source.name} is too small for frame {frame}")
 
