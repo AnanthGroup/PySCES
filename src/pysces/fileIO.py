@@ -534,6 +534,10 @@ class TCJobsLogger():
             self._file.close()
 
     def _initialize(self, cleaned_batch: TC.TCJobBatch):
+        #   TODO: Add a fix for when the simulation has been restarted, but
+        #   the next few jobs are missing some keywords. This happens with dipole
+        #   moments and gradients, since an extrapolation scheme doesn't need to
+        #   compute a new one every frame. 
         self._file.create_group(self._group_name)
         
         str_dt = h5py.string_dtype(encoding='utf-8')

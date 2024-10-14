@@ -69,27 +69,94 @@ class H5File(h5py.File):
         ds.resize(ds.shape[0]+1, axis=0)
         ds[-1] = value
 
-    @staticmethod
-    def _print_dataset_info(name, obj):
-        """
-        Function to print the name and shape of datasets.
-        This will be applied to each object in the HDF5 file.
-        """
-        if isinstance(obj, h5py.Dataset):
-            print(f"Dataset: {name}, Shape: {obj.shape}")
+    def get_data_structure(self, data: h5py.File | h5py.Dataset | h5py.Group = None):
+        if data is None:
+            data = self
+        
+        shapes = {}
+        def _print_dataset_info(name, obj):
+            if isinstance(obj, h5py.Dataset):
+                shapes[name] = obj.shape
+        data.visititems(_print_dataset_info)
+        return shapes
 
     def print_data_structure(self, data: h5py.File | h5py.Dataset | h5py.Group = None, string=''):
         if data is None:
             data = self
-        data.visititems(H5File._print_dataset_info)
-        # if isinstance(data, h5py.Group) or isinstance(data, h5py.File):
-        #     for key, val in data.items():
-        #         self.print_data_structure(val, string + '/' + key)
-        # elif isinstance(data, h5py.Dataset):
-        #     # print(string, ' shape = ', data.shape, ', attrs = ', dict(data.attrs))
-        #     print(string, ' shape = ', data.shape)
 
+        shapes = {}
+        def _print_dataset_info(name, obj):
+            if isinstance(obj, h5py.Dataset):
+                print(f"Dataset: {name}, Shape: {obj.shape}")
+                shapes[name] = obj.shape
 
+        data.visititems(_print_dataset_info)
+        print()
+        self.print_trajectory_summary(data)
+
+    def print_trajectory_summary(self, data: h5py.File | h5py.Dataset | h5py.Group = None):
+        if data is None:
+            data = self
+        print('Trajectory Summary')
+        print('------------------')
+        times = np.array(data['electronic/time'])
+        dt = times[1] - times[0]
+        print(f'Number of frames in trajectory: ', len(times))
+        print(f'Start time: {times[0]} a.u.')
+        print(f'End time: {times[-1]} a.u.')
+        print(f'Trajectory time length: {times[-1] - times[0]} a.u.', )
+        print(f'Trajectory time step: {dt} a.u.')
+
+    @staticmethod
+    def combine_files(new_file_loc: str, *file_locs):
+        structures = {}
+        open_files = []
+        for f in file_locs:
+            file = H5File(f, 'r')
+            open_files.append(file)
+            structures[f] = file.get_data_structure()
+
+            print()
+            print(f"File: {f}")
+            file.print_trajectory_summary()
+            print()
+        
+        #   make sure all files have the same structure, except for hte number of frames
+        for file in file_locs[1:]:
+            for ds_path in structures[file]:
+                if ds_path not in structures[file_locs[0]]:
+                    print(f"Dataset {ds_path} in {file_locs[0]} not found in {file}")
+                    return
+                if structures[file][ds_path][1:] != structures[file_locs[0]][ds_path][1:]:
+                    print(f"Dataset {ds_path} in {file_locs[0]} has shape {structures[file_locs[0]][ds_path]} while {file} has shape {structures[file][ds_path]}")
+
+        #   TODO: Fix these later
+        exceptions = ['tc_job_data/atoms', 'tc_job_data/gradient_1/cis_dipole_deriv', 'tc_job_data/gradient_2/cis_transition_dipole_deriv', 'tc_job_data/gradient_1/other']
+        str_dt = h5py.string_dtype(encoding='utf-8')
+
+        #   TODO: re-order based on simulation time
+        #   TODO: check for gaps or replicants in time
+
+        with H5File(new_file_loc, 'w') as new_file:
+            for ds in structures[file_locs[0]]:
+                print('Combining dataset:', ds)
+
+                try:
+
+                    #   first copy over all data as numpy arrays
+                    new_data = np.concatenate([open_files[0][ds][:]] + [file[ds][:] for file in open_files[1:]])
+
+                    #   create the new dataset
+                    new_ds = new_file.create_dataset(ds, data=new_data)
+                    new_ds.attrs.update(open_files[0][ds].attrs)
+                
+                except Exception as e:
+                    print(f"Failed to combine dataset {ds}")
+                    print(e)
+
+        print('New dataset stucture:')
+        with H5File(new_file_loc, 'r') as new_file:
+            new_file.print_data_structure()
 
     def print_data(self, data: h5py.File |  h5py.Dataset | h5py.Group = None):
         if data is None:
@@ -338,11 +405,19 @@ def run_h5_module():
     parser.add_argument('--json',       '-j', type=str, help='Convert to JSON')
     parser.add_argument('--rm_tc_files','-r', type=str, help='Remove tc.out file data from tc_job_data and save to this file')
     parser.add_argument('--pickle',     '-P', type=str, help='Convert to a pickled HDF5 file')
+    parser.add_argument('--concat',     '-c', type=str, help='Concatenate HDF5 files', nargs='+')
     parser.add_argument('--extract',    '-x', help='Extract a dataset from the HDF5 file', action='store_true')
     parser.add_argument('--path',       '-p', type=str, help='Dataset or Group path to extract', nargs='+')
     parser.add_argument('--frame',      '-F', type=int, help='Frame to extract')
     parser.add_argument('--new',        '-n', help='Create a new H5 file')
     args = parser.parse_args(sys.argv[2:])
+
+
+    if args.concat is not None:
+        print('Combining files')
+        files = [args.file] + args.concat
+        H5File.combine_files(args.new, *files)
+        exit()
 
     with H5File(args.file, 'r') as file:
 
@@ -360,6 +435,7 @@ def run_h5_module():
         elif args.new:
             print('Creating new h5 file')
             file.write_new_file(args.new, args.path, args.frame)
+
         else:
             print('Printing data structure:')
             file.print_data_structure()
