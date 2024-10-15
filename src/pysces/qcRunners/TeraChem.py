@@ -22,7 +22,7 @@ import pickle
 from typing import Literal
 import itertools
 import weakref
-# import GPUtil
+from collections import deque
 
 
 _server_processes = {}
@@ -43,6 +43,8 @@ def synchronized(function):
         with lock:
             return function(self, *args, **kwargs)
     return wrapper
+
+
 class TCClientExtra(TCPBClient):
     host_port_to_ID: dict = {}
 
@@ -57,18 +59,21 @@ class TCClientExtra(TCPBClient):
             trace (bool): Whether to enable trace mode. Defaults to False.
             log (bool): Whether to enable logging. Defaults to True.
         """
-        super().__init__(host, port, debug, trace)
-
-        self._add_to_host_port_to_ID()
+        
+        
         self._log = None
         if log:
             log_file_loc = os.path.join(opts.logging_dir, f'{host}_{port}.log')
-            # log_file_loc = f'tc_client_{self.get_ID()}.log'
             self._log = open(log_file_loc, 'a')
             self.log_message(f'Client started on {host}:{port}')
         self.server_root = server_root
 
         self._last_known_curr_dir = None
+
+        self._results_history = deque(maxlen=10)
+
+        super().__init__(host, port, debug, trace)
+        self._add_to_host_port_to_ID()
 
     def __del__(self):
         if self._log:
@@ -83,6 +88,35 @@ class TCClientExtra(TCPBClient):
         """
         out_str = f'TCClientExtra(host={self.host}, port={self.port}, id={self.get_ID()})'
         return out_str
+
+    def startup(self, max_wait=10.0, time_btw_check=1.0):
+        print('Setting up new client')
+        total_wait = 0.0
+        avail = False
+        while not avail:
+            try:
+                self.connect()
+                self.is_available()
+                avail = True
+            except:
+                print(f'TeraChem server {self.host}:{self.port} not available: \n\
+                        trying again in {time_btw_check} seconds')
+                time.sleep(time_btw_check)
+                total_wait += time_btw_check
+                if total_wait >= max_wait:
+                    raise TimeoutError('Maximum time allotted for checking for TeraChem server')
+        print(f'Terachem server {self.host}:{self.port} is available and connected')
+    
+    def restart(self, max_wait=10.0, time_btw_check=1.0):
+        server_root = self.server_root
+        if (self.host, self.port) in _server_processes:
+            process: TCServerProcess = _server_processes[(self.host, self.port)]
+            process.kill()
+            time.sleep(8.0)
+            start_TC_server(self.port, server_root=server_root, gpus=process.gpus)
+        self.disconnect()
+        self.startup()
+
 
     def disconnect(self):
         super().disconnect()
@@ -115,7 +149,8 @@ class TCClientExtra(TCPBClient):
         """
         Returns the ID associated with the current host and port combination.
 
-        Returns:
+        Returns
+        -------
             int: The ID associated with the host and port combination.
         """
         return self.host_port_to_ID[(self.host, self.port)]
@@ -123,6 +158,29 @@ class TCClientExtra(TCPBClient):
     def get_curr_job_dir(self):
         return os.path.join(self.server_root, self.curr_job_dir)
     
+    @property
+    def prev_results(self):
+        '''overwrite the getter and setter for prev_results to add the results to the history'''
+        if len(self._results_history) == 0:
+            return None
+        return self._results_history[-1]
+
+    @prev_results.setter
+    def prev_results(self, value):
+        if value is None:
+            return
+        if len(self._results_history) == self._results_history.maxlen:
+            oldest_res = self._results_history[0]
+            job_dir = os.path.join(self.server_root, oldest_res['job_dir'])
+            print('Removing directiory: ', job_dir)
+            print('Current job dir: ', self.prev_results['job_dir'])
+            shutil.rmtree(job_dir)
+        self._results_history.append(value)
+
+    @property
+    def results_history(self):
+        return self._results_history
+
     @property
     def curr_job_dir(self):
         return self.__dict__['curr_job_dir']
@@ -155,6 +213,7 @@ class TCClientExtra(TCPBClient):
                 print(line)
         print('\n ... END OF FILE \n')
 
+
 class TCServerProcess(subprocess.Popen):
     def __init__(self, port, gpus=[]):
         self.gpus = gpus
@@ -179,6 +238,7 @@ class TCServerProcess(subprocess.Popen):
         for child in proc.children(recursive=True):  # or parent.children() for recursive=False
             child.kill()
         proc.kill()
+
 class TCServerStallError(Exception):
     def __init__(self, message):            
         # Call the base class constructor with the parameters it needs
@@ -354,7 +414,7 @@ class TCJob():
         self.start_time = 0
         self.end_time = 0
         self._results = {}
-        self.client = client
+        self.client: TCClientExtra = client
 
         if job_type not in ['energy', 'gradient', 'coupling']:
             raise ValueError('TCJob job_type must be either "energy", "gradient", or "coupling"')
@@ -412,6 +472,48 @@ class TCJob():
     @results.setter
     def results(self, value):
         self._results = value
+
+    def set_guess(self, prev_results: list[dict]):
+        job_opts = self.opts
+        server_root = self.client.server_root
+        if len(prev_results) != 0:
+            prev_job = prev_results[-1]
+            job_dir = os.path.join(server_root, prev_job['job_dir'])
+            if not os.path.isdir(job_dir):
+                print("Warning: no job directory found at")
+                print(job_dir)
+                print("Check that 'tcr_server_root' is properly set in order to use previous job guess orbitals")
+
+        cas_guess = None
+        scf_guess = None
+        if self.state > 0:
+            if self.excited_type == 'cas':
+                for prev_job in reversed(prev_results):
+                    if prev_job.get('castarget', 0) >= 1:
+                        prev_orb_file = prev_job['orbfile']
+                        if prev_orb_file[-6:] == 'casscf':
+                            cas_guess = os.path.join(server_root, prev_orb_file)
+                            break
+            else:
+                #   we do not consider cis file because it is not stored in each job dorectory; we set it ourselves
+                host_port_str = f'{self.client.host}_{self.client.port}'
+                if host_port_str not in job_opts['cisrestart']:
+                    job_opts['cisrestart'] = f"{job_opts['cisrestart']}_{host_port_str}"
+
+        for i, prev_job in enumerate(reversed(prev_results)):
+            if 'orbfile' in prev_job:
+                scf_guess = os.path.join(server_root, prev_job['orbfile'])
+                #   This is to fix a bug in terachem that still sets the c0.casscf file as the
+                #   previous job's orbital file
+                if scf_guess[-6:] == 'casscf':
+                    scf_guess = scf_guess[0:-7]
+                break
+
+        if os.path.isfile(str(cas_guess)):
+            job_opts['casguess'] = cas_guess
+        if os.path.isfile(str(scf_guess)):
+            job_opts['guess'] = scf_guess
+
 class TCJobBatch():
     '''
         Combines multiple TCJobs into one wrapper
@@ -559,13 +661,14 @@ class TCJobBatch():
         timings['Wall_Time'] = max_time - min_time
         # timings['Wall_Time'] = np.sum(list(timings.values()))
         return timings
+
 class TCRunner():
     def __init__(self, 
                  hosts: str,
                  ports: int,
                  atoms: list,
                  tc_options: dict,
-                 tc_spec_job_opts: dict = None,
+                 tc_spec_job_opts: dict[str, dict] = None,
                  tc_initial_frame_options: dict = None,
                  tc_client_assignments: list[list[str]] = [],
                  server_roots = '.',
@@ -587,8 +690,73 @@ class TCRunner():
             server_roots[i] = os.path.abspath(root)
 
         #   check that the right number of servers are provided
-        if len(hosts) != len(ports) != len(server_roots):
+        if len({len(hosts), len(ports), len(server_roots)}) != 1:
             raise ValueError('Number of servers must match the number of port numbers and root locations')
+        
+        #   state options
+        if tc_state_options.get('grads', False):
+            self._grads = tc_state_options['grads']
+            self._max_state = max(self._grads)
+        elif tc_state_options.get('max_state', False):
+            self._max_state = tc_state_options['max_state']
+            self._grads = list(range(self._max_state + 1))
+        else:
+            raise ValueError('either "max_state" or a list of "grads" must be specified')
+        self._NACs = tc_state_options.pop('nacs', 'all')
+
+        #   job options for specific jobs
+        self._spec_job_opts = tc_spec_job_opts
+
+        #   job options for first step only
+        self._initial_frame_options = tc_initial_frame_options
+        if self._initial_frame_options is not None:
+            if 'n_frames' not in self._initial_frame_options:
+                self._initial_frame_options['n_frames'] = 0
+
+        print('Starting TCRunner')
+
+        print('          Server Information          ')
+        print('--------------------------------------')
+        for i in range(len(hosts)):
+            print(f'Client {i+1}')
+            print(f'    Host:        {hosts[i]}')
+            print(f'    Port:        {ports[i]}')
+            print(f'    Server Root: {server_roots[i]}')
+        print('--------------------------------------')
+        print()
+        print('            Job Information           ')
+        print('--------------------------------------')
+        print(f'Number of Atoms: {len(atoms)}')
+        print('TC Job Options:')
+        for k, v in tc_options.items():
+            print(f'    {k:20s}: {v}')
+
+        print('\n TC Job Specific Options:')
+        if tc_spec_job_opts is None:
+            print('    None')
+        else:
+            for k, v in tc_spec_job_opts.items():
+                print('    ', k)
+                for kk, vv in v.items():
+                    print(f'        {kk:20s}: {vv}')
+
+        print('\n TC Initial Frame Options:')
+        if self._initial_frame_options is None:
+            print('    None')
+        else:
+            for k, v in self._initial_frame_options.items():
+                print(f'    {k:20s}: {v}')
+        
+        print('\n TC State Options:')
+        print('   Max State:', self._max_state)
+        grad_str = ''
+        for g in self._grads:
+            grad_str += f'{g}, '
+        grad_str = grad_str[0:-2]
+        print('   Gradients:', grad_str)
+        print('--------------------------------------')
+        print()
+
 
         #   set up the servers
         if len(tc_server_gpus) != 0:
@@ -609,7 +777,9 @@ class TCRunner():
                 self._client_list.append(None)
                 print('DEBUG_TRAJ set, TeraChem clients will not be opened')
                 break
-            client = self.get_new_client(h, p, max_wait=max_wait, server_root=s)
+            client = TCClientExtra(host=h, port=p, server_root=s)
+            client.startup(max_wait=max_wait)
+            # client = self.get_new_client(h, p, max_wait=max_wait, server_root=s)
             self._client_list.append(client)
 
         self._client = self._client_list[0]
@@ -628,25 +798,8 @@ class TCRunner():
         self._max_time = None
         self._restart_on_stall = True
         self._n_calls = 0
+        
 
-        #   state options
-        if tc_state_options.get('grads', False):
-            self._grads = tc_state_options['grads']
-            self._max_state = max(self._grads)
-        elif tc_state_options.get('max_state', False):
-            self._max_state = tc_state_options['max_state']
-            self._grads = list(range(self._max_state + 1))
-        else:
-            raise ValueError('either "max_state" or a list of "grads" must be specified')
-        # self._max_state = run_options.get('max_state', 0)
-        # self._grads = run_options.get('grads', False)
-        self._NACs = tc_state_options.pop('nacs', 'all')
-
-        #   job options for specific jobs
-        self._spec_job_opts = tc_spec_job_opts
-
-        #   job options for first step only
-        self._initial_frame_options = tc_initial_frame_options
 
         #   assign particular job names to particular clients
         self._client_assignments = tc_client_assignments
@@ -658,6 +811,8 @@ class TCRunner():
         self._frame_counter = 0
         self._prev_ref_job = None
 
+        job_batch_history = deque(maxlen=4)
+
         # Don't actually run terachem, instead load a trajectory from a file
         self._debug_traj = []
         if _DEBUG_TRAJ:
@@ -666,6 +821,7 @@ class TCRunner():
 
         #   for cleanup
         self._finalizer = weakref.finalize(self, self._cleanup)
+
 
     def _cleanup(self):
         self._disconnect_clients()
@@ -685,6 +841,7 @@ class TCRunner():
         for client in self._client_list:
             client.disconnect()
 
+    '''
     @staticmethod
     def get_new_client(host: str, port: int, max_wait=10.0, time_btw_check=1.0, server_root=''):
         
@@ -725,6 +882,8 @@ class TCRunner():
         client.disconnect()
         del client
         return TCRunner.get_new_client(host, port, max_wait=max_wait, time_btw_check=time_btw_check, server_root=server_root)
+
+    '''        
 
     @staticmethod
     def append_results_file(results: dict):
@@ -867,9 +1026,8 @@ class TCRunner():
             stop_TC_server(host, port)
             time.sleep(2.0)
             start_TC_server(port)
-            # self._client = TCPBClient(host=host, port=port)
-            # self.get_new_client(self._client, max_wait=20)
-            self._client = self.get_new_client(host, port, self._client, max_wait=20, server_root=self._server_root)
+
+            self._client.restart(max_wait=20)
             print('Started new TC Server: re-running current step')
             job_batch = self.run_TC_new_geom(geom)
 
@@ -920,7 +1078,6 @@ class TCRunner():
             #   CI and TDDFT
             excited_type = 'cis'
             for key, val in orig_opts.items():
-                print('KEY: ', key)
                 if key in cis_possible_opts:
                     excited_options[key] = val
                 else:
@@ -939,8 +1096,6 @@ class TCRunner():
         
         #   options for the first few steps only
         if self._initial_frame_options is not None:
-            if 'n_frames' not in self._initial_frame_options:
-                self._initial_frame_options['n_frames'] = 0
             if self._frame_counter < self._initial_frame_options['n_frames']:
                 base_options.update(self._initial_frame_options)
 
@@ -1376,30 +1531,24 @@ def _correct_signs(job: TCJob, ref_job: TCJob):
     
 
 def _run_batch_jobs(jobs_batch: TCJobBatch, prev_results=[]):
-    times = {}
-    all_results = []
 
     for j in jobs_batch.jobs:
         j: TCJob
-        job_name = j.name
-        geom = j.geom
         job_opts =  j.opts
-        job_type =  j.job_type
+
         client: TCClientExtra = j.client
         j.start_time = time.time()
 
-        _set_guess(job_opts, j.excited_type, all_results + prev_results, j.state, client)
-        client.log_message(f"Running {job_name}")
-        print(f"Running {job_name}")
-        # if 'cisrestart' in job_opts:
-        #     job_opts['cisrestart'] = f"{job_opts['cisrestart']}_{client.host}_{client.port}"
+        j.set_guess(client.results_history)
+        client.log_message(f"Running {j.name}")
+        print(f"Running {j.name}")
 
         max_tries = 5
         try_count = 0
         try_again = True
         while try_again:
             try:
-                results = compute_job_sync(client, job_type, geom, 'angstrom', **job_opts)
+                results = compute_job_sync(client, j.job_type, j.geom, 'angstrom', **job_opts)
                 try_again = False
             except Exception as e:
                 try_count += 1
@@ -1421,60 +1570,15 @@ def _run_batch_jobs(jobs_batch: TCJobBatch, prev_results=[]):
                     client.log_message(f"Server error recieved; trying to run job once more")
                     time.sleep(10)
                     
+                    client.restart()
+                    # client = TCRunner.restart_client(client)
 
-                    client = TCRunner.restart_client(client)
-        # j.total_time = time.time() - start
         j.end_time = time.time()
-        results['run'] = job_type
-        # print('APPENDING OUTPUT FILE')
+        results['run'] = j.job_type
         TCRunner.append_output_file(results, client.server_root)
         results.update(job_opts)
         j.results = results.copy()
-        all_results.append(results)
 
-    # return all_results, times
-
-def _set_guess(job_opts: dict, excited_type: str, prev_results: list[dict], state: int, client: TCClientExtra):
-
-    server_root = client.server_root
-    if len(prev_results) != 0:
-        prev_job = prev_results[-1]
-        job_dir = os.path.join(server_root, prev_job['job_dir'])
-        if not os.path.isdir(job_dir):
-            print("Warning: no job directory found at")
-            print(job_dir)
-            print("Check that 'tcr_server_root' is properly set in order to use previous job guess orbitals")
-
-    cas_guess = None
-    scf_guess = None
-    if state > 0:
-        if excited_type == 'cas':
-            for prev_job in reversed(prev_results):
-                if prev_job.get('castarget', 0) >= 1:
-                    prev_orb_file = prev_job['orbfile']
-                    if prev_orb_file[-6:] == 'casscf':
-                        cas_guess = os.path.join(server_root, prev_orb_file)
-                        break
-        else:
-            #   we do not consider cis file because it is not stored in each job dorectory; we set it ourselves
-            host_port_str = f'{client.host}_{client.port}'
-            if host_port_str not in job_opts['cisrestart']:
-                job_opts['cisrestart'] = f"{job_opts['cisrestart']}_{host_port_str}"
-            
-
-    for prev_job in reversed(prev_results):
-        if 'orbfile' in prev_job:
-            scf_guess = os.path.join(server_root, prev_job['orbfile'])
-            #   This is to fix a bug in terachem that still sets the c0.casscf file as the
-            #   previous job's orbital file
-            if scf_guess[-6:] == 'casscf':
-                scf_guess = scf_guess[0:-7]
-            break
-
-    if os.path.isfile(str(cas_guess)):
-        job_opts['casguess'] = cas_guess
-    if os.path.isfile(str(scf_guess)):
-        job_opts['guess'] = scf_guess
 
 def format_output_LSCIVR(job_data: list[dict]):
     atoms = job_data[0]['atoms']
