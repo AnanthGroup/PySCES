@@ -11,6 +11,7 @@ from .qcRunners import TeraChem as TC
 from .h5file import H5File, H5Group, H5Dataset
 # from .input_simulation import extra_loggers, logging_mode
 from . import input_simulation as opts
+from .serialization import serialize
 
 ANG_2_BOHR = 1.8897259886
 
@@ -257,7 +258,8 @@ def write_restart(file_loc: str,
                     elecE: float=np.empty(0), 
                     grads: np.ndarray = np.empty(0), 
                     nac_mat: np.ndarray = np.empty(0), 
-                    com=None):
+                    com=None,
+                    qc_runner=None):
     '''
         Writes a restart file for restarting a simulation from the previous conditions
 
@@ -346,8 +348,12 @@ def write_restart(file_loc: str,
             if TC.TCJob.get_ID_counter() > 0:
                 data['TCJob__job_counter'] = TC.TCJob.get_ID_counter()
 
+            if qc_runner:
+                data['qc_runner'] = serialize(qc_runner)
+
             with open(file_loc, 'w') as file:
                 json.dump(data, file, indent=2)
+            exit('EXIT: write_restart')
             
     else:
         exit(f'ERROR: only RK4 is implimented fileIO')

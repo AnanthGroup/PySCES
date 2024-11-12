@@ -88,6 +88,14 @@ class TCClientExtra(TCPBClient):
         """
         out_str = f'TCClientExtra(host={self.host}, port={self.port}, id={self.get_ID()})'
         return out_str
+    
+    def __getstate__(self):
+        state = self.__dict__.copy()
+        # for k, v in state.items():
+        #     print('ITEM: ', k)
+        state.pop('tcsock')
+        state.pop('_log')
+        return state
 
     def startup(self, max_wait=10.0, time_btw_check=1.0):
         print('Setting up new client')
