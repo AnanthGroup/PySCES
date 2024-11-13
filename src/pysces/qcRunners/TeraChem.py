@@ -559,10 +559,11 @@ class TCJobBatch():
         state = self.__dict__.copy()
         state['__batchID'] = self.__batchID
         return state
-    
+
     def __setstate__(self, state):
         self.__dict__.update(state)
-        TCJobBatch.__batch_counter = max(TCJobBatch.__batch_counter, self.__batchID)
+        #   not sure if this is needed yet
+        # TCJobBatch.__batch_counter = max(TCJobBatch.__batch_counter, self.__batchID)
 
     def __repr__(self) -> str:
         out_str = ''

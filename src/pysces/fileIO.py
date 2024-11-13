@@ -353,7 +353,6 @@ def write_restart(file_loc: str,
 
             with open(file_loc, 'w') as file:
                 json.dump(data, file, indent=2)
-            exit('EXIT: write_restart')
             
     else:
         exit(f'ERROR: only RK4 is implimented fileIO')
@@ -594,7 +593,7 @@ class TCJobsLogger():
         
         results: list[dict] = deepcopy(jobs_data.results_list)
         #   'cis_excitations' are not guarenteed to be the same size,
-        #   so this can't be added to an H4 dataset.
+        #   so this can't be added to an H5 dataset.
         #   TODO: add a check to make sure all jobs have the same number of cis_excitations,
         #   or convert to a string?
         cleaned_results = TC.TCRunner.cleanup_multiple_jobs(results, 'cis_excitations', 'orb_energies', 'bond_order', 'orb_occupations', 'spins')
@@ -921,10 +920,10 @@ class ExEnergyLogger(BaseLogger):
         super().__init__(file_loc, h5_group)
 
     def _initialize(self, data: LoggerData):
-
         if data.all_energies is None:
             print('WARNING: Excited state energies requires that all energies be provided')
             print('Excited state energies will not be logged')
+            self._file = None
             return
         
         labels = [f'S{i}' for i in range(1, len(data.all_energies))]
@@ -943,7 +942,7 @@ class ExEnergyLogger(BaseLogger):
         super().write(data)
         if self._file:
             out_str = f'{data.time:12.6f}'
-            ex_energies = (data.all_energies[1:] - data.all_energies[0])*27.2114079527 # Convert Hartree to eV
+            ex_energies = (np.array(data.all_energies[1:]) - data.all_energies[0])*27.2114079527 # Convert Hartree to eV
 
             for e in ex_energies:
                 out_str += f' {e:16.10f}'

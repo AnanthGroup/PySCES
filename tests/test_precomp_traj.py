@@ -50,7 +50,7 @@ class Test_TC_CIS(unittest.TestCase):
         os.environ['DEBUG_TRAJ'] = 'debug_traj.pkl'
 
         import pysces
-        pysces.main()
+        pysces.run_simulation()
 
         #   check simple panda readable data
         for file in ['corr.txt', 'electric_pq.txt', 'energy.txt', 'grad.txt', 'nac.txt']:
