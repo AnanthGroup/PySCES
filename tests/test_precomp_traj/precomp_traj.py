@@ -3,18 +3,15 @@ import pandas
 import io
 import numpy as np
 import os
-from tools import parse_xyz_data, assert_dictionary
+from tools import parse_xyz_data, assert_dictionary, cleanup, reset_directory
 import json
 import pysces
-
-from test_tools import cleanup, reset_directory
 
 class Test_Precompute(unittest.TestCase):
     def __init__(self, methodName: str = "runTest") -> None:
         super().__init__(methodName)
 
     def test_jobs(self):
-        this_dir = os.path.abspath(os.path.curdir)
         reset_directory()
         os.chdir('test_precomp_traj')
         os.environ['DEBUG_TRAJ'] = 'debug_traj.pkl'
@@ -48,21 +45,9 @@ class Test_Precompute(unittest.TestCase):
             restart_tst = json.load(file)
         assert_dictionary(self, restart_ref, restart_tst)
 
-        self.cleanup()
-        os.chdir(this_dir)
-    
+        cleanup()
 
-    def cleanup(self):
-        #   clean up
-        for file in ['progress.out', 'corr.out', 'restart.json', 'restart.out']:
-            if os.path.isfile(file):
-                os.remove(file)
-        for file in os.listdir('logs'):
-            if os.path.isfile(os.path.join('logs', file)):
-                os.remove(os.path.join('logs', file))
-        if os.path.isdir('logs'):
-            os.removedirs('logs')
                 
 if __name__ == '__main__':
-    test = Test_TC_CIS()
+    test = Test_Precompute()
     test.test_jobs()

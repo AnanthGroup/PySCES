@@ -8,7 +8,7 @@ import json
 
 import pysces
 
-class Test_GAMESS_Wigner(unittest.TestCase):
+class Test_GAMESS_RK4(unittest.TestCase):
     def __init__(self, methodName: str = "runTest") -> None:
         super().__init__(methodName)
 

@@ -571,7 +571,7 @@ def write_subm_script(input_name):
 #####################################
 ### Call GAMESS NACME calculation ###
 #####################################
-def run_gms_cas(input_name, opt, atoms, AN_mat, qCart, submit_script_loc=None):
+def run_gms_cas(input_name, opt, atoms, AN_mat, qCart):
     
     print('Running GAMESS')
 
@@ -581,7 +581,7 @@ def run_gms_cas(input_name, opt, atoms, AN_mat, qCart, submit_script_loc=None):
     # Write an input file
     input_file = write_gms_input(input_name, opt, atoms, AN_mat, qCart_ang)
     
-    if submit_script_loc is None:
+    if sub_script is None:
         # Write a submission script
         write_subm_script(input_name)
         
@@ -598,7 +598,7 @@ def run_gms_cas(input_name, opt, atoms, AN_mat, qCart, submit_script_loc=None):
     else:
         #   call supplied submission script
         output_file = 'cas.out'
-        script_loc = os.path.abspath(submit_script_loc)
+        script_loc = os.path.abspath(sub_script)
         sp.call(f'{script_loc} {input_file} {output_file}'.split())
     print("Done running GAMESS CAS-SCF Calculations")
 
@@ -1581,7 +1581,7 @@ def rk4(initq, initp, tStop, H, restart, amu_mat, U, com_ang, AN_mat):
             update_geo_gamess(atoms, AN_mat, qC)
         
             # Call GAMESS to compute E, dE/dR, and NAC
-            run_gms_cas(input_name, opt, atoms, AN_mat, qC, sub_script)
+            run_gms_cas(input_name, opt, atoms, AN_mat, qC)
             elecE, grad, nac, flag_grad, flag_nac = read_gms_out(input_name)
             if any([el == 1  for el in flag_grad]) or flag_nac == 1:
                 proceed = False
@@ -1654,7 +1654,7 @@ def rk4(initq, initp, tStop, H, restart, amu_mat, U, com_ang, AN_mat):
 
             if QC_RUNNER == 'gamess':
                 update_geo_gamess(atoms, AN_mat, qC)
-                run_gms_cas(input_name, opt, atoms, AN_mat, qC, sub_script)
+                run_gms_cas(input_name, opt, atoms, AN_mat, qC)
                 elecE, grad, nac, flag_grad, flag_nac = read_gms_out(input_name)
                 if any([el == 1 for el in flag_grad]) or flag_nac == 1:
                     proceed = False

@@ -1,14 +1,8 @@
 import unittest
-import pandas
-import numpy as np
-import os
-from tools import parse_xyz_data, assert_dictionary, cleanup, reset_directory
-import json
-import shutil
-import pysces
 
-
-from test_gamess_wigner.gamess_wigner import Test_GAMESS_Wigner
+from test_gamess_rk4.gamess_rk4 import Test_GAMESS_RK4
+from test_gamess_abm.gamess_abm import Test_GAMESS_ABM
+from test_gamess_bsh.gamess_bsh import Test_GAMESS_BSH
 from test_gamess_restart.gamess_restart import Test_GAMESS_Restart
 from test_tc_cis.tc_cis import Test_TC_CIS
 from test_precomp_traj.precomp_traj import Test_Precompute
