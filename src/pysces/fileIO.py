@@ -581,6 +581,8 @@ class TCJobsLogger():
         self._next_dataset = jobs_batch
 
     def write(self, data: LoggerData):
+        if self._file is None:
+            return
 
         if data.jobs_data is not None:
             jobs_data = data.jobs_data

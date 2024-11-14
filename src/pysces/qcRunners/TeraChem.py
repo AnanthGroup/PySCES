@@ -177,12 +177,23 @@ class TCClientExtra(TCPBClient):
     def prev_results(self, value):
         if value is None:
             return
+        
+        if not os.path.isdir(self.server_root):
+            print('Warning: Server root directory does not exist, cannot remove old jobs')
+
         if len(self._results_history) == self._results_history.maxlen:
             oldest_res = self._results_history[0]
             job_dir = os.path.join(self.server_root, oldest_res['job_dir'])
-            print('Removing directiory: ', job_dir)
-            print('Current job dir: ', self.prev_results['job_dir'])
-            shutil.rmtree(job_dir)
+            
+            if os.path.isdir(job_dir):
+                print('Removing directiory: ', job_dir)
+                print('Current job dir: ', self.prev_results['job_dir'])
+                shutil.rmtree(job_dir)
+            else:
+                print('Warning: no job directory found at')
+                print(job_dir)
+                print('Check that "tcr_server_root" is properly set to remove old jobs')
+            
         self._results_history.append(value)
 
     @property
@@ -208,8 +219,14 @@ class TCClientExtra(TCPBClient):
         else:
             print('No job directory set, cannot print end of tc.out file')
             return
+        
+        tc_out_file_loc = os.path.join(job_dir, 'tc.out')
+        if not os.path.isfile(tc_out_file_loc):
+            print('No tc.out file found at:')
+            print(job_dir)
+            return
 
-        with open(job_dir + '/tc.out', 'r') as file:
+        with open(tc_out_file_loc, 'r') as file:
             lines = file.readlines()
         print('End of tc.out file at:')
         print(job_dir)
@@ -387,7 +404,7 @@ def compute_job_sync(client: TCClientExtra, jobType="energy", geom=None, unitTyp
     client.log_message("Submitting Job...")
     accepted = client.send_job_async(jobType, geom, unitType, **kwargs)
     while accepted is False:
-        time.sleep(0.5)
+        time.sleep(3.5)
         accepted = client.send_job_async(jobType, geom, unitType, **kwargs)
 
     client.log_message("Job Accepted")
@@ -396,7 +413,7 @@ def compute_job_sync(client: TCClientExtra, jobType="energy", geom=None, unitTyp
 
     completed = client.check_job_complete()
     while completed is False:
-        time.sleep(0.5)
+        time.sleep(1.5)
         client._send_msg(pb.STATUS, None)
         status = client._recv_msg(pb.STATUS)
 
@@ -409,7 +426,10 @@ def compute_job_sync(client: TCClientExtra, jobType="energy", geom=None, unitTyp
                 "Invalid or no job status received, either no job submitted before check_job_complete() or major server issue",
                 client,
             )
-    return client.recv_job_async()
+    results = client.recv_job_async()
+    client.log_message(f"Job Complete with {len(results)} dictionary entries")
+    time.sleep(0.1)
+    return results
 class TCJob():
     __job_counter = 0
     def __init__(self, geom, opts, job_type, excited_type, state, name='', client=None) -> None:

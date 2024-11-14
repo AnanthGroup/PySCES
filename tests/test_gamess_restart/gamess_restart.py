@@ -3,18 +3,17 @@ import pandas
 import io
 import numpy as np
 import os
-from tools import parse_xyz_data, assert_dictionary
+from tools import parse_xyz_data, assert_dictionary, cleanup, reset_directory
 import json
 import shutil
 import pysces
-# from pysces import main
 
-class Test_TC_CIS(unittest.TestCase):
+class Test_GAMESS_Restart(unittest.TestCase):
     def __init__(self, methodName: str = "runTest") -> None:
         super().__init__(methodName)
 
     def test_jobs(self):
-        this_dir = os.path.abspath(os.path.curdir)
+        reset_directory()
         os.chdir('test_gamess_restart')
 
         with open('geo_gamess', 'w') as file:
@@ -27,10 +26,12 @@ class Test_TC_CIS(unittest.TestCase):
             file.write('H    1.0   1.2398447212  -0.9238158831   0.0000000000\n')
 
         shutil.copy2('input_simulation_local_1.py', 'input_simulation_local.py')
+        pysces.reset_settings()
         pysces.run_simulation()
         shutil.move('logs', 'logs_1')
 
         shutil.copy2('input_simulation_local_2.py', 'input_simulation_local.py')
+        pysces.reset_settings()
         pysces.run_simulation()
         shutil.move('logs', 'logs_2')
         # exit()
@@ -80,20 +81,5 @@ class Test_TC_CIS(unittest.TestCase):
             restart_tst = json.load(file)
         assert_dictionary(self, restart_ref, restart_tst)
 
-        self.cleanup()
-        os.chdir(this_dir)
+        cleanup('logs', 'logs_1', 'logs_2', 'logs_combo')
     
-
-    def cleanup(self):
-        #   clean up
-        for file in ['progress.out', 'corr.out', 'restart.json', 'restart.out', 'cas.dat', 'cas.inp', 'cas_old.inp', 'cas.out']:
-            if os.path.isfile(file):
-                os.remove(file)
-        for dir_name in ['logs', 'logs_1', 'logs_2', 'logs_combo']:
-            if os.path.isdir(dir_name):
-                shutil.rmtree(dir_name)
-
-                
-if __name__ == '__main__':
-    test = Test_TC_CIS()
-    test.test_jobs()

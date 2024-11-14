@@ -5,51 +5,21 @@ import numpy as np
 import os
 from tools import parse_xyz_data, assert_dictionary
 import json
-# from pysces import main
+import pysces
 
-class Tester(unittest.TestCase):
-    '''
-        Wrapper for unittest.TestCase with explicit logging.
-        FOR DEBUGGING ONLY
-    '''
-    def __init__(self, methodName: str = "runTest") -> None:
-        super().__init__(methodName)
-        self.logger = io.StringIO()
-        self.logger.write(f"{'Label':30s} {'Max Diff':12s} {'Max Rel Diff':12s}\n")
-        self.logger.write('-------------------------------------------------------------\n')
+from test_tools import cleanup, reset_directory
 
-        #   All functions start this verable set to True and exit seeting it false
-        #   If an error is raised, logs will be print
-        self.print_log = False
-
-    def assert_allclose(self, label, actual, desired, rtol=1e-7, atol=0, equal_nan=True):
-        self.print_log = True
-        diff = actual - desired
-        max_diff = np.max(np.abs(diff))
-        rel_diff = np.abs(diff)/max_diff
-        self.log(label, max_diff, rel_diff)
-        np.testing.assert_allclose(actual, desired, rtol, atol, equal_nan, verbose=True, strict=True)
-        self.print_log = False
-
-    def log(self, file, key, diff, rel_diff):
-        self.logger.write(f'{file:20s} {key:10s} {diff:12.5e} {rel_diff:12.5e}\n')
-
-
-    def __dell__(self):
-        if self.print_log:
-            print(self.logger.getvalue())
-
-
-class Test_TC_CIS(unittest.TestCase):
+class Test_Precompute(unittest.TestCase):
     def __init__(self, methodName: str = "runTest") -> None:
         super().__init__(methodName)
 
     def test_jobs(self):
         this_dir = os.path.abspath(os.path.curdir)
+        reset_directory()
         os.chdir('test_precomp_traj')
         os.environ['DEBUG_TRAJ'] = 'debug_traj.pkl'
 
-        import pysces
+        pysces.reset_settings()
         pysces.run_simulation()
 
         #   check simple panda readable data
@@ -92,8 +62,6 @@ class Test_TC_CIS(unittest.TestCase):
                 os.remove(os.path.join('logs', file))
         if os.path.isdir('logs'):
             os.removedirs('logs')
-
-
                 
 if __name__ == '__main__':
     test = Test_TC_CIS()

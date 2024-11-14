@@ -18,6 +18,7 @@ QC_RUNNER = 'terachem'
 
 #   TeraChem runner options
 tcr_host = ['localhost']
+tcr_host = ['10.1.1.165']
 tcr_port = [1234]
 tcr_job_options = {
         'method': 'hf',

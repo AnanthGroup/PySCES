@@ -114,6 +114,17 @@ _tcr_ref_job = None
 
 ########## END DEFAULT SETTINGS ##########
 
+_set_defaults = False
+defaults = {}
+if not _set_defaults:
+    for k, v in globals().copy().items():
+        defaults[k] = v
+    _set_defaults = True
+
+def reset_settings():
+    for k, v in defaults.items():
+        globals()[k] = v
+
 def input_local_settings():
     '''
         Load in settings from the local input file
