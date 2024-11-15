@@ -925,6 +925,7 @@ class ExEnergyLogger(BaseLogger):
         if data.all_energies is None:
             print('WARNING: Excited state energies requires that all energies be provided')
             print('Excited state energies will not be logged')
+            self._file.close()
             self._file = None
             return
         

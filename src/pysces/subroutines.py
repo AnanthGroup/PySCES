@@ -786,6 +786,23 @@ def get_energy(au_mas, q, p, elecE):
     energy = 0.5*p2m_sum + (1.0/nel)*sum(elecE) + (0.5/nel)*p2x2_DE
     return(energy)
 
+def run_gamess_at_geom(input_name, AN_mat, qC, atoms):
+    proceed = True
+    # Update geo_gamess with qC
+    update_geo_gamess(atoms, AN_mat, qC)
+
+    # Call GAMESS to compute E, dE/dR, and NAC
+    run_gms_cas(input_name, opt, atoms, AN_mat, qC)
+    elecE, grad, nac, flag_grad, flag_nac = read_gms_out(input_name)
+    if any([el == 1  for el in flag_grad]) or flag_nac == 1:
+        proceed = False
+    flag_orb = read_gms_dat(input_name)
+    if flag_orb == 1:
+        proceed = False
+    if not proceed:
+        sys.exit("Electronic structure calculation failed at initial time. Exitting.")
+
+    return elecE, grad, nac, None
 
 # #######################################################
 # ### Compute the population of the electronic states ###
@@ -1577,19 +1594,20 @@ def rk4(initq, initp, tStop, H, restart, amu_mat, U, com_ang, AN_mat):
     #   or if we are restarting and the electronic structure information is missing
     if restart == 0 or len(elecE) == 0 or len(grad) == 0 or len(nac) == 0:
         if QC_RUNNER == 'gamess':
-            # Update geo_gamess with qC
-            update_geo_gamess(atoms, AN_mat, qC)
+            elecE, grad, nac, _ = run_gamess_at_geom(input_name, AN_mat, qC, atoms)
+            # # Update geo_gamess with qC
+            # update_geo_gamess(atoms, AN_mat, qC)
         
-            # Call GAMESS to compute E, dE/dR, and NAC
-            run_gms_cas(input_name, opt, atoms, AN_mat, qC)
-            elecE, grad, nac, flag_grad, flag_nac = read_gms_out(input_name)
-            if any([el == 1  for el in flag_grad]) or flag_nac == 1:
-                proceed = False
-            flag_orb = read_gms_dat(input_name)
-            if flag_orb == 1:
-                proceed = False
-            if not proceed:
-                sys.exit("Electronic structure calculation failed at initial time. Exitting.")
+            # # Call GAMESS to compute E, dE/dR, and NAC
+            # run_gms_cas(input_name, opt, atoms, AN_mat, qC)
+            # elecE, grad, nac, flag_grad, flag_nac = read_gms_out(input_name)
+            # if any([el == 1  for el in flag_grad]) or flag_nac == 1:
+            #     proceed = False
+            # flag_orb = read_gms_dat(input_name)
+            # if flag_orb == 1:
+            #     proceed = False
+            # if not proceed:
+            #     sys.exit("Electronic structure calculation failed at initial time. Exitting.")
         elif QC_RUNNER == 'terachem':
             tc_runner = TCRunner(tcr_host, tcr_port, atoms, tcr_job_options, 
                                  server_roots=tcr_server_root, 
@@ -1629,7 +1647,6 @@ def rk4(initq, initp, tStop, H, restart, amu_mat, U, com_ang, AN_mat):
 
     ### Runge-Kutta routine ###
     while t < tStop:
-        start_time = time.time()
         if not proceed:
             sys.exit("Electronic structure calculation failed in Runge-Kutta routine. Exitting.")
         else:
@@ -1637,7 +1654,6 @@ def rk4(initq, initp, tStop, H, restart, amu_mat, U, com_ang, AN_mat):
             with open(os.path.join(__location__, 'progress.out'), 'a') as f:
                 f.write('\n')
                 f.write('Starting 4th-order Runge-Kutta routine.\n')
-            #y  = integrate_rk4(elecE,grad,nac,t,y,t+H,amu_mat) 
             y  = scipy_rk4(elecE,grad,nac,y,H,au_mas)
             t += H
             X.append(t)
@@ -1653,14 +1669,15 @@ def rk4(initq, initp, tStop, H, restart, amu_mat, U, com_ang, AN_mat):
             qC = y[nel:ndof]
 
             if QC_RUNNER == 'gamess':
-                update_geo_gamess(atoms, AN_mat, qC)
-                run_gms_cas(input_name, opt, atoms, AN_mat, qC)
-                elecE, grad, nac, flag_grad, flag_nac = read_gms_out(input_name)
-                if any([el == 1 for el in flag_grad]) or flag_nac == 1:
-                    proceed = False
-                flag_orb = read_gms_dat(input_name)
-                if flag_orb == 1:
-                    proceed = False
+                elecE, grad, nac, _ = run_gamess_at_geom(input_name, AN_mat, qC, atoms)
+                # update_geo_gamess(atoms, AN_mat, qC)
+                # run_gms_cas(input_name, opt, atoms, AN_mat, qC)
+                # elecE, grad, nac, flag_grad, flag_nac = read_gms_out(input_name)
+                # if any([el == 1 for el in flag_grad]) or flag_nac == 1:
+                #     proceed = False
+                # flag_orb = read_gms_dat(input_name)
+                # if flag_orb == 1:
+                #     proceed = False
             elif QC_RUNNER == 'terachem':
                 job_batch = tc_runner.run_TC_new_geom(qC/ang2bohr)
                 timings = job_batch.timings
@@ -1684,24 +1701,18 @@ def rk4(initq, initp, tStop, H, restart, amu_mat, U, com_ang, AN_mat):
                 sys.exit("Energy conservation failed during the propagation. Exitting.")
 
             # Update & store energy
-            old_energy  = new_energy
             energy.append(new_energy)
 
-            # Record nuclear geometry in angstrom
+            # Record nuclear geometry, logs, and restarts
             record_nuc_geo(restart, t, atoms, qC, com_ang, logger)
-        
             logger.write(t, total_E=new_energy, elec_E=elecE,  grads=grad, NACs=nac, timings=timings, elec_q=y[0:nel], elec_p=y[ndof:ndof+nel], nuc_p=y[-natom*3:], jobs_data=job_batch, all_energies=all_energies)
-            
             write_restart(restart_file_out, [Y[-1][:ndof], Y[-1][ndof:]], sign_flipper.nac_hist, sign_flipper.tdm_hist, new_energy, t, nel, 'rk4', elecE, grad, nac, com_ang)
 
             if t == tStop:
                 with open(os.path.join(__location__, 'progress.out'), 'a') as f:
                     f.write('Propagated to the final time step.\n')
 
-            # exit()
-
     write_restart(restart_file_out, [Y[-1][:ndof], Y[-1][ndof:]], sign_flipper.nac_hist, sign_flipper.tdm_hist, energy[-1], t, nel, 'rk4', elecE, grad, nac, com_ang)
-
 
     coord = np.zeros((2,ndof,len(Y)))
     for i in range(len(Y)):

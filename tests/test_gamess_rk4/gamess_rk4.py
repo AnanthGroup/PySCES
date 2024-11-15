@@ -14,7 +14,7 @@ class Test_GAMESS_RK4(unittest.TestCase):
 
     def test_jobs(self):
         reset_directory()
-        os.chdir('test_gamess_wigner')
+        os.chdir('test_gamess_rk4')
 
         with open('geo_gamess', 'w') as file:
             file.write('6\n')
