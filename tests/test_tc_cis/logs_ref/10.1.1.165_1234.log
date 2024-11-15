@@ -1,0 +1,109 @@
+2024-11-15 11:22:21.496: Client started on 10.1.1.165:1234
+2024-11-15 11:22:21.565: Running gradient_0
+2024-11-15 11:22:21.565: Submitting Job...
+2024-11-15 11:22:21.628: Job Accepted
+2024-11-15 11:22:21.628:     Job Type: gradient
+2024-11-15 11:22:21.628:     Current Job Dir: /home/cmyers7/code/AI-LSC-IVR/tests/test_tc_cis/server_2024-11-15-09.42.11/job_159
+2024-11-15 11:22:23.172: Job Complete with 14 dictionary entries
+2024-11-15 11:22:23.272: Running gradient_1
+2024-11-15 11:22:23.272: Submitting Job...
+2024-11-15 11:22:23.333: Job Accepted
+2024-11-15 11:22:23.333:     Job Type: gradient
+2024-11-15 11:22:23.333:     Current Job Dir: /home/cmyers7/code/AI-LSC-IVR/tests/test_tc_cis/server_2024-11-15-09.42.11/job_160
+2024-11-15 11:22:24.877: Job Complete with 17 dictionary entries
+2024-11-15 11:22:24.977: Running gradient_2
+2024-11-15 11:22:24.977: Submitting Job...
+2024-11-15 11:22:25.019: Job Accepted
+2024-11-15 11:22:25.020:     Job Type: gradient
+2024-11-15 11:22:25.020:     Current Job Dir: /home/cmyers7/code/AI-LSC-IVR/tests/test_tc_cis/server_2024-11-15-09.42.11/job_161
+2024-11-15 11:22:26.563: Job Complete with 17 dictionary entries
+2024-11-15 11:22:26.663: Running nac_0_1
+2024-11-15 11:22:26.663: Submitting Job...
+2024-11-15 11:22:26.706: Job Accepted
+2024-11-15 11:22:26.706:     Job Type: coupling
+2024-11-15 11:22:26.706:     Current Job Dir: /home/cmyers7/code/AI-LSC-IVR/tests/test_tc_cis/server_2024-11-15-09.42.11/job_162
+2024-11-15 11:22:28.250: Job Complete with 17 dictionary entries
+2024-11-15 11:22:28.350: Running nac_0_2
+2024-11-15 11:22:28.350: Submitting Job...
+2024-11-15 11:22:28.417: Job Accepted
+2024-11-15 11:22:28.417:     Job Type: coupling
+2024-11-15 11:22:28.417:     Current Job Dir: /home/cmyers7/code/AI-LSC-IVR/tests/test_tc_cis/server_2024-11-15-09.42.11/job_163
+2024-11-15 11:22:29.961: Job Complete with 17 dictionary entries
+2024-11-15 11:22:30.061: Running nac_1_2
+2024-11-15 11:22:30.061: Submitting Job...
+2024-11-15 11:22:30.125: Job Accepted
+2024-11-15 11:22:30.125:     Job Type: coupling
+2024-11-15 11:22:30.126:     Current Job Dir: /home/cmyers7/code/AI-LSC-IVR/tests/test_tc_cis/server_2024-11-15-09.42.11/job_164
+2024-11-15 11:22:31.669: Job Complete with 17 dictionary entries
+2024-11-15 11:22:31.790: Running gradient_0
+2024-11-15 11:22:31.790: Submitting Job...
+2024-11-15 11:22:31.848: Job Accepted
+2024-11-15 11:22:31.848:     Job Type: gradient
+2024-11-15 11:22:31.848:     Current Job Dir: /home/cmyers7/code/AI-LSC-IVR/tests/test_tc_cis/server_2024-11-15-09.42.11/job_165
+2024-11-15 11:22:33.392: Job Complete with 14 dictionary entries
+2024-11-15 11:22:33.492: Running gradient_1
+2024-11-15 11:22:33.492: Submitting Job...
+2024-11-15 11:22:33.535: Job Accepted
+2024-11-15 11:22:33.535:     Job Type: gradient
+2024-11-15 11:22:33.535:     Current Job Dir: /home/cmyers7/code/AI-LSC-IVR/tests/test_tc_cis/server_2024-11-15-09.42.11/job_166
+2024-11-15 11:22:35.079: Job Complete with 17 dictionary entries
+2024-11-15 11:22:35.179: Running gradient_2
+2024-11-15 11:22:35.179: Submitting Job...
+2024-11-15 11:22:35.223: Job Accepted
+2024-11-15 11:22:35.223:     Job Type: gradient
+2024-11-15 11:22:35.223:     Current Job Dir: /home/cmyers7/code/AI-LSC-IVR/tests/test_tc_cis/server_2024-11-15-09.42.11/job_167
+2024-11-15 11:22:36.767: Job Complete with 17 dictionary entries
+2024-11-15 11:22:36.867: Running nac_0_1
+2024-11-15 11:22:36.867: Submitting Job...
+2024-11-15 11:22:36.910: Job Accepted
+2024-11-15 11:22:36.910:     Job Type: coupling
+2024-11-15 11:22:36.910:     Current Job Dir: /home/cmyers7/code/AI-LSC-IVR/tests/test_tc_cis/server_2024-11-15-09.42.11/job_168
+2024-11-15 11:22:38.454: Job Complete with 17 dictionary entries
+2024-11-15 11:22:38.554: Running nac_0_2
+2024-11-15 11:22:38.554: Submitting Job...
+2024-11-15 11:22:38.596: Job Accepted
+2024-11-15 11:22:38.596:     Job Type: coupling
+2024-11-15 11:22:38.596:     Current Job Dir: /home/cmyers7/code/AI-LSC-IVR/tests/test_tc_cis/server_2024-11-15-09.42.11/job_169
+2024-11-15 11:22:40.140: Job Complete with 17 dictionary entries
+2024-11-15 11:22:40.240: Running nac_1_2
+2024-11-15 11:22:40.240: Submitting Job...
+2024-11-15 11:22:40.283: Job Accepted
+2024-11-15 11:22:40.283:     Job Type: coupling
+2024-11-15 11:22:40.283:     Current Job Dir: /home/cmyers7/code/AI-LSC-IVR/tests/test_tc_cis/server_2024-11-15-09.42.11/job_170
+2024-11-15 11:22:41.827: Job Complete with 17 dictionary entries
+2024-11-15 11:22:41.948: Running gradient_0
+2024-11-15 11:22:41.948: Submitting Job...
+2024-11-15 11:22:41.997: Job Accepted
+2024-11-15 11:22:41.997:     Job Type: gradient
+2024-11-15 11:22:41.997:     Current Job Dir: /home/cmyers7/code/AI-LSC-IVR/tests/test_tc_cis/server_2024-11-15-09.42.11/job_171
+2024-11-15 11:22:43.541: Job Complete with 14 dictionary entries
+2024-11-15 11:22:43.641: Running gradient_1
+2024-11-15 11:22:43.641: Submitting Job...
+2024-11-15 11:22:43.685: Job Accepted
+2024-11-15 11:22:43.685:     Job Type: gradient
+2024-11-15 11:22:43.685:     Current Job Dir: /home/cmyers7/code/AI-LSC-IVR/tests/test_tc_cis/server_2024-11-15-09.42.11/job_172
+2024-11-15 11:22:45.229: Job Complete with 17 dictionary entries
+2024-11-15 11:22:45.329: Running gradient_2
+2024-11-15 11:22:45.329: Submitting Job...
+2024-11-15 11:22:45.371: Job Accepted
+2024-11-15 11:22:45.372:     Job Type: gradient
+2024-11-15 11:22:45.372:     Current Job Dir: /home/cmyers7/code/AI-LSC-IVR/tests/test_tc_cis/server_2024-11-15-09.42.11/job_173
+2024-11-15 11:22:46.915: Job Complete with 17 dictionary entries
+2024-11-15 11:22:47.015: Running nac_0_1
+2024-11-15 11:22:47.015: Submitting Job...
+2024-11-15 11:22:47.057: Job Accepted
+2024-11-15 11:22:47.057:     Job Type: coupling
+2024-11-15 11:22:47.057:     Current Job Dir: /home/cmyers7/code/AI-LSC-IVR/tests/test_tc_cis/server_2024-11-15-09.42.11/job_174
+2024-11-15 11:22:48.601: Job Complete with 17 dictionary entries
+2024-11-15 11:22:48.701: Running nac_0_2
+2024-11-15 11:22:48.701: Submitting Job...
+2024-11-15 11:22:48.744: Job Accepted
+2024-11-15 11:22:48.744:     Job Type: coupling
+2024-11-15 11:22:48.744:     Current Job Dir: /home/cmyers7/code/AI-LSC-IVR/tests/test_tc_cis/server_2024-11-15-09.42.11/job_175
+2024-11-15 11:22:50.288: Job Complete with 17 dictionary entries
+2024-11-15 11:22:50.388: Running nac_1_2
+2024-11-15 11:22:50.388: Submitting Job...
+2024-11-15 11:22:50.430: Job Accepted
+2024-11-15 11:22:50.430:     Job Type: coupling
+2024-11-15 11:22:50.430:     Current Job Dir: /home/cmyers7/code/AI-LSC-IVR/tests/test_tc_cis/server_2024-11-15-09.42.11/job_176
+2024-11-15 11:22:51.974: Job Complete with 17 dictionary entries

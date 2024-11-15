@@ -4,7 +4,7 @@ nel = 3 # number of electronic states
 temp = 300 # simulation temperature in Kelvin
 
 # Maximum propagation time (a.u.), one Runge-Kutta step (a.u.) (Only relevant for RK4)
-tmax_rk4, Hrk4 = 8, 2.0
+tmax_rk4, Hrk4 = 12, 2.0
 
 # Index of initially occupied electronic state
 init_state = 2
@@ -27,13 +27,25 @@ tcr_job_options = {
         'spinmult': 1,
         'closed_shell': True,
         'restricted': True,
-        'precision': 'mixed',
-        'convthre': 1E-6,
-        'sphericalbasis': 'yes',
 
         #   TD-DFT
         'cis': 'yes',
-        'cisnumstates': 2
+        'cisnumstates': 2,
+
+        #   thresholds
+        'precision': 'double',
+        'convthre': 1e-8,
+        'cisconvtol': 1e-8,
+        'maxiter': 100,
+        'cismaxiter': 100,
+        'threall': 1e-20,
+        'threcl': 1e-20,
+        'pqthre': 1e-20,
+        'threoe': 1e-20,
+        'thregr': 1e-20,
+        'threex': 1e-20,
+
+
 }
 tcr_state_options = {
     'max_state': 2
