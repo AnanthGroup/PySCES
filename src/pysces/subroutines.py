@@ -1543,7 +1543,6 @@ def rk4(initq, initp, tStop, H, restart, amu_mat, U, com_ang, AN_mat):
     trans_dips   = None
     all_energies = None
     timings      = {}
-    proceed      = True
     input_name   = 'cas'
     job_batch    = None
     au_mas       = np.diag(amu_mat) * amu2au # masses of atoms in atomic unit (vector)
@@ -1595,19 +1594,6 @@ def rk4(initq, initp, tStop, H, restart, amu_mat, U, com_ang, AN_mat):
     if restart == 0 or len(elecE) == 0 or len(grad) == 0 or len(nac) == 0:
         if QC_RUNNER == 'gamess':
             elecE, grad, nac, _ = run_gamess_at_geom(input_name, AN_mat, qC, atoms)
-            # # Update geo_gamess with qC
-            # update_geo_gamess(atoms, AN_mat, qC)
-        
-            # # Call GAMESS to compute E, dE/dR, and NAC
-            # run_gms_cas(input_name, opt, atoms, AN_mat, qC)
-            # elecE, grad, nac, flag_grad, flag_nac = read_gms_out(input_name)
-            # if any([el == 1  for el in flag_grad]) or flag_nac == 1:
-            #     proceed = False
-            # flag_orb = read_gms_dat(input_name)
-            # if flag_orb == 1:
-            #     proceed = False
-            # if not proceed:
-            #     sys.exit("Electronic structure calculation failed at initial time. Exitting.")
         elif QC_RUNNER == 'terachem':
             tc_runner = TCRunner(tcr_host, tcr_port, atoms, tcr_job_options, 
                                  server_roots=tcr_server_root, 
@@ -1637,80 +1623,62 @@ def rk4(initq, initp, tStop, H, restart, amu_mat, U, com_ang, AN_mat):
     X,Y = [],[]
     X.append(t)
     Y.append(y)
-    flag_energy = 0
-    flag_grad   = 0
-    flag_nac    = 0
-    flag_orb    = 0
     energy      = [init_energy]
     with open(os.path.join(__location__, 'progress.out'), 'a') as f:
         f.write("Initilization done. Move on to propagation routine.\n")
 
     ### Runge-Kutta routine ###
     while t < tStop:
-        if not proceed:
-            sys.exit("Electronic structure calculation failed in Runge-Kutta routine. Exitting.")
+        print(f"##### Performing MD Step Time: {t:8.2f} a.u. ##### ")
+
+        H  = min(H, tStop-t)
+        with open(os.path.join(__location__, 'progress.out'), 'a') as f:
+            f.write('\n')
+            f.write('Starting 4th-order Runge-Kutta routine.\n')
+        y  = scipy_rk4(elecE,grad,nac,y,H,au_mas)
+        t += H
+        X.append(t)
+        Y.append(y)
+        
+        # ES calculation at new y
+        with open(os.path.join(__location__, 'progress.out'), 'a') as f:
+            f.write('\n')
+            f.write('Runge-Kutta step has been accepted.\n')
+
+        qC = y[nel:ndof]
+
+        if QC_RUNNER == 'gamess':
+            elecE, grad, nac, _ = run_gamess_at_geom(input_name, AN_mat, qC, atoms)
+        elif QC_RUNNER == 'terachem':
+            job_batch = tc_runner.run_TC_new_geom(qC/ang2bohr)
+            timings = job_batch.timings
+            all_energies, elecE, grad, nac, trans_dips  = format_output_LSCIVR(job_batch.results_list)
         else:
-            H  = min(H, tStop-t)
+            timings, all_energies, elecE, grad, nac, trans_dips = QC_RUNNER.run_new_geom(qC/ang2bohr, y[-natom*3:])
+        
+        #correct nac sign
+        nac = sign_flipper.correct_nac_sign(nac, trans_dips)
+
+        # Compute energy
+        new_energy = get_energy(au_mas, y[:ndof], y[ndof:], elecE)
+        with open(os.path.join(__location__, 'progress.out'), 'a') as f:
+            f.write('Energy = {:<12.6f} \n'.format(new_energy))
+
+        # Check energy conservation
+        if (init_energy-new_energy)/init_energy > 0.02: # 2% deviation = terrible without doubt
+            sys.exit("Energy conservation failed during the propagation. Exitting.")
+
+        # Update & store energy
+        energy.append(new_energy)
+
+        # Record nuclear geometry, logs, and restarts
+        record_nuc_geo(restart, t, atoms, qC, com_ang, logger)
+        logger.write(t, total_E=new_energy, elec_E=elecE,  grads=grad, NACs=nac, timings=timings, elec_q=y[0:nel], elec_p=y[ndof:ndof+nel], nuc_p=y[-natom*3:], jobs_data=job_batch, all_energies=all_energies)
+        write_restart(restart_file_out, [Y[-1][:ndof], Y[-1][ndof:]], sign_flipper.nac_hist, sign_flipper.tdm_hist, new_energy, t, nel, 'rk4', elecE, grad, nac, com_ang)
+
+        if t == tStop:
             with open(os.path.join(__location__, 'progress.out'), 'a') as f:
-                f.write('\n')
-                f.write('Starting 4th-order Runge-Kutta routine.\n')
-            y  = scipy_rk4(elecE,grad,nac,y,H,au_mas)
-            t += H
-            X.append(t)
-            Y.append(y)
-            
-            print(f"##### Performing MD Step Time: {t:8.2f} a.u. ##### ")
-    
-            # ES calculation at new y
-            with open(os.path.join(__location__, 'progress.out'), 'a') as f:
-                f.write('\n')
-                f.write('Runge-Kutta step has been accepted.\n')
-
-            qC = y[nel:ndof]
-
-            if QC_RUNNER == 'gamess':
-                elecE, grad, nac, _ = run_gamess_at_geom(input_name, AN_mat, qC, atoms)
-                # update_geo_gamess(atoms, AN_mat, qC)
-                # run_gms_cas(input_name, opt, atoms, AN_mat, qC)
-                # elecE, grad, nac, flag_grad, flag_nac = read_gms_out(input_name)
-                # if any([el == 1 for el in flag_grad]) or flag_nac == 1:
-                #     proceed = False
-                # flag_orb = read_gms_dat(input_name)
-                # if flag_orb == 1:
-                #     proceed = False
-            elif QC_RUNNER == 'terachem':
-                job_batch = tc_runner.run_TC_new_geom(qC/ang2bohr)
-                timings = job_batch.timings
-                all_energies, elecE, grad, nac, trans_dips  = format_output_LSCIVR(job_batch.results_list)
-            else:
-                timings, all_energies, elecE, grad, nac, trans_dips = QC_RUNNER.run_new_geom(qC/ang2bohr, y[-natom*3:])
-            
-            #correct nac sign
-            nac = sign_flipper.correct_nac_sign(nac, trans_dips)
-
-        if proceed:
-            # Compute energy
-            new_energy = get_energy(au_mas, y[:ndof], y[ndof:], elecE)
-            with open(os.path.join(__location__, 'progress.out'), 'a') as f:
-                f.write('Energy = {:<12.6f} \n'.format(new_energy))
-
-            # Check energy conservation
-            if (init_energy-new_energy)/init_energy > 0.02: # 2% deviation = terrible without doubt
-                flag_energy = 1
-                proceed = False
-                sys.exit("Energy conservation failed during the propagation. Exitting.")
-
-            # Update & store energy
-            energy.append(new_energy)
-
-            # Record nuclear geometry, logs, and restarts
-            record_nuc_geo(restart, t, atoms, qC, com_ang, logger)
-            logger.write(t, total_E=new_energy, elec_E=elecE,  grads=grad, NACs=nac, timings=timings, elec_q=y[0:nel], elec_p=y[ndof:ndof+nel], nuc_p=y[-natom*3:], jobs_data=job_batch, all_energies=all_energies)
-            write_restart(restart_file_out, [Y[-1][:ndof], Y[-1][ndof:]], sign_flipper.nac_hist, sign_flipper.tdm_hist, new_energy, t, nel, 'rk4', elecE, grad, nac, com_ang)
-
-            if t == tStop:
-                with open(os.path.join(__location__, 'progress.out'), 'a') as f:
-                    f.write('Propagated to the final time step.\n')
+                f.write('Propagated to the final time step.\n')
 
     write_restart(restart_file_out, [Y[-1][:ndof], Y[-1][ndof:]], sign_flipper.nac_hist, sign_flipper.tdm_hist, energy[-1], t, nel, 'rk4', elecE, grad, nac, com_ang)
 
