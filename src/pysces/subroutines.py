@@ -13,12 +13,14 @@ dynamics of polyatomic molecules
 """
 import numpy as np
 import scipy.integrate as it
+from scipy.interpolate import interp1d
 import os
 import sys
 import subprocess as sp
 import random
 import pandas
 import time
+from collections import deque
 from pysces.input_simulation import * 
 from pysces.input_gamess import nacme_option as opt 
 from pysces.fileIO import SimulationLogger, write_restart, read_restart
@@ -27,8 +29,8 @@ from pysces.interpolation import SignFlipper
 __location__ = ''
 
 # from input_simulation import *
-nnuc = 3*natom
-ndof = nnuc + nel
+# nnuc = 3*natom
+# ndof = nnuc + nel
     
 # Physical constants and unit conversion factors
 pi       = np.pi
@@ -43,6 +45,8 @@ au2fs    = autime2s*10**15      # atomic unit time to second
 ang2bohr = 1.8897259886         # angstroms to bohr
 k2autmp  = kb/eh2j              # Kelvin to atomic unit temperature
 beta     = 1.0/(temp * k2autmp) # inverse temperature in atomic unit
+
+
 
 # TODO: Temporary fix for the global variables
 def set_subroutine_globals():
@@ -63,15 +67,16 @@ def set_subroutine_globals():
 ####################################################
 def get_geo_hess():
     if mol_input_format == "terachem":
-        amu_mat, xyz_ang, frq, redmas, L, U, com_ang, atom_number_mat = get_geo_hess_terachem()
+        amu_mat, xyz_ang, frq, redmas, L, U, atom_number_mat = get_geo_hess_terachem()
     elif mol_input_format == "gamess":
-        amu_mat, xyz_ang, frq, redmas, L, U, com_ang, atom_number_mat = get_geo_hess_gamess()
+        amu_mat, xyz_ang, frq, redmas, L, U, atom_number_mat = get_geo_hess_gamess()
     else:
         raise ValueError('mol_input_format must be either "terachem" or "gamess"; got "{}"'.format(mol_input_format))
 
-    return(amu_mat, xyz_ang, frq, redmas, L, U, com_ang, atom_number_mat)
+    return(amu_mat, xyz_ang, frq, redmas, L, U, atom_number_mat)
 
 def get_geo_hess_terachem():
+    global com_ang
     ##--------------------------------------------------
     ## 1 & 2 Read Cartesian coordinate of initial geometry
     ##--------------------------------------------------
@@ -186,15 +191,16 @@ def get_geo_hess_terachem():
     # compute center of mass and remove from geometry
     amu = np.array(amu)
     xyz_shaped = xyz_ang.reshape((-1, 3))
-    com = np.average(xyz_shaped, axis=0, weights=amu)
-    xyz_ang = (xyz_shaped - com).flatten()
+    com_ang = np.average(xyz_shaped, axis=0, weights=amu)
+    xyz_ang = (xyz_shaped - com_ang).flatten()
 
     atom_number_mat = [] # Returns an empty array. Not necessary for terachem option
-    return(amu_mat, xyz_ang, frq, redmas, L, U, com, atom_number_mat)
+    return(amu_mat, xyz_ang, frq, redmas, L, U, atom_number_mat)
 
 
 def get_geo_hess_gamess():
     # Read Cartesian coordinate of initial geometry
+    global com_ang
     atom_number = []
     xyz_ang = np.zeros(nnuc)
     atom_number_mat = np.zeros((nnuc, nnuc))
@@ -268,10 +274,10 @@ def get_geo_hess_gamess():
     #   compute center of mass and remove from geometry
     amu = np.array(amu)
     xyz_shaped = xyz_ang.reshape((-1, 3))
-    com = np.average(xyz_shaped, axis=0, weights=amu)
-    xyz_ang = (xyz_shaped - com).flatten()
+    com_ang = np.average(xyz_shaped, axis=0, weights=amu)
+    xyz_ang = (xyz_shaped - com_ang).flatten()
 
-    return amu_mat, xyz_ang, frq, redmas, L, U, com, atom_number_mat
+    return amu_mat, xyz_ang, frq, redmas, L, U, atom_number_mat
 
 
 ##############################################################################
@@ -451,13 +457,11 @@ def rotate_norm_to_cart(qN, pN, U, amu_mat):
 #####################################################
 ### Record the nuclear geometry at each time step ###
 #####################################################
-def record_nuc_geo(restart, total_time, atoms, qCart, com_ang=None, logger:SimulationLogger=None):
+def record_nuc_geo(restart, total_time, atoms, qCart, logger:SimulationLogger=None):
     if logger is not None:
         return logger._nuc_geo_logger.write(total_time, atoms, qCart/ang2bohr, com_ang)
     f = open(os.path.join(__location__, 'nuc_geo.xyz'), 'a')
     
-    if com_ang is None:
-        com_ang = np.zeros(3)
 
     qCart_ang = qCart/ang2bohr
     f.write('%d \n' %natom)
@@ -826,7 +830,7 @@ def run_gamess_at_geom(input_name, AN_mat, qC, atoms):
 ### MASS-WEIGHTED.  
 #############################################################################
 '''Last edited by by Ken Miyazaki on 05/10/2023'''
-def ME_ABM(restart, initq, initp, amu_mat, U, com_ang, AN_mat):
+def ME_ABM(restart, initq, initp, amu_mat, U, AN_mat):
     force = np.zeros((2, ndof, 5))
     der   = np.zeros((2, ndof))
     coord = np.zeros((2, ndof, nstep+1))
@@ -854,7 +858,7 @@ def ME_ABM(restart, initq, initp, amu_mat, U, com_ang, AN_mat):
         atoms = get_atom_label()
         
         # Write initial nuclear geometry in the output file
-        record_nuc_geo(restart, x, atoms, qC, com_ang)
+        record_nuc_geo(restart, x, atoms, qC)
         
     elif restart == 1: # If this is a restart run
         q, p    = np.zeros(ndof), np.zeros(ndof)
@@ -1088,7 +1092,7 @@ def ME_ABM(restart, initq, initp, amu_mat, U, com_ang, AN_mat):
                 X.append(x)
                 
                 # Record nuclear geometry in angstrom
-                record_nuc_geo(restart, x, atoms, qC, com_ang)
+                record_nuc_geo(restart, x, atoms, qC)
                 
                 # Record the electronic state energies
                 with open(os.path.join(__location__, 'energy.out'), 'a') as g:
@@ -1296,7 +1300,7 @@ def integrate(F, xvar, yvar, xStop, tol, input_name, atoms, amu_mat, qC):
 # H     = increment of x at which results are stored
 # F     = user-supplied function that returns the array F(x,y)={y'[0],y'[1],...,y'[n-1]}
 # =============================================================================
-def BulStoer(initq, initp, xStop, H, tol, restart, amu_mat, U, com_ang, AN_mat):
+def BulStoer(initq, initp, xStop, H, tol, restart, amu_mat, U, AN_mat):
    proceed      = True
    input_name   = 'cas'
    au_mas = np.diag(amu_mat) * amu2au # masses of atoms in atomic unit (vector)
@@ -1324,7 +1328,7 @@ def BulStoer(initq, initp, xStop, H, tol, restart, amu_mat, U, com_ang, AN_mat):
       atoms = get_atom_label()
 
       # Write initial nuclear geometry in the output file
-      record_nuc_geo(restart, x, atoms, qC, com_ang)
+      record_nuc_geo(restart, x, atoms, qC)
 
       # Update geo_gamess with qC
       update_geo_gamess(atoms, AN_mat, qC)
@@ -1435,7 +1439,7 @@ def BulStoer(initq, initp, xStop, H, tol, restart, amu_mat, U, com_ang, AN_mat):
             energy.append(new_energy)
 
             # Record nuclear geometry in angstrom
-            record_nuc_geo(restart, x, atoms, qC, com_ang)
+            record_nuc_geo(restart, x, atoms, qC)
 
             # Record the electronic state energies
             with open(os.path.join(__location__, 'energy.out'), 'a') as g:
@@ -1530,14 +1534,12 @@ def scipy_rk4(elecE, grad, nac, yvar, dt, au_mas):
     result = it.solve_ivp(get_deriv, (0,dt), yvar, method='RK45', max_step=dt, t_eval=[dt], rtol=1e-10, atol=1e-10)
     return(result.y.flatten())
 
-'''
-Main driver of RK4 and electronic structure 
-'''
-def rk4(initq, initp, tStop, H, restart, amu_mat, U, com_ang, AN_mat):
+
+def rk4(initq, initp, tStop, H, restart, amu_mat, U, AN_mat):
     logger = SimulationLogger(dir=logging_dir, save_jobs=tcr_log_jobs, hdf5=hdf5_logging)
 
     if QC_RUNNER == 'terachem':
-        from pysces.qcRunners.TeraChem import TCRunner, TCJobBatch, format_output_LSCIVR
+        from pysces.qcRunners.TeraChem import TCRunner, format_output_LSCIVR
         logger.state_labels = [f'S{x}' for x in tcr_state_options['grads']]
     
     trans_dips   = None
@@ -1564,15 +1566,12 @@ def rk4(initq, initp, tStop, H, restart, amu_mat, U, com_ang, AN_mat):
 
     #   Initialization
     if restart == 1:
-        q, p, nac_hist, tdm_hist, init_energy, initial_time, elecE, grad, nac, com = read_restart(file_loc=restart_file_in, ndof=ndof)
+        q, p, nac_hist, tdm_hist, init_energy, initial_time, elecE, grad, nac = read_restart(file_loc=restart_file_in, ndof=ndof)
         t = initial_time
         qC, pC = q[nel:], p[nel:]
         y = np.concatenate((q, p))
 
-        if com is not None:
-            com_ang = com
         if QC_RUNNER == 'terachem':
-            # tc_runner = TCRunner(tcr_host, tcr_port, atoms, tcr_job_options, server_roots=tcr_server_root, tc_state_options=tcr_state_options, tc_spec_job_opts=tcr_spec_job_opts, tc_initial_job_options=tcr_initial_frame_opts, tc_server_gpus=tcr_server_gpus)
             tc_runner = TCRunner(tcr_host, tcr_port, atoms, tcr_job_options, 
                                  server_roots=tcr_server_root, 
                                  tc_state_options=tcr_state_options, 
@@ -1580,7 +1579,7 @@ def rk4(initq, initp, tStop, H, restart, amu_mat, U, com_ang, AN_mat):
                                  tc_initial_frame_options=tcr_initial_frame_opts, 
                                  tc_client_assignments=tcr_client_assignments,
                                  tc_server_gpus=tcr_server_gpus)
-            tc_runner._prev_ref_job = _tcr_ref_job
+            tc_runner._prev_ref_job = tcr_ref_job
 
     elif restart == 0:
         q[:nel], p[:nel] = initq[:nel], initp[:nel]
@@ -1588,6 +1587,7 @@ def rk4(initq, initp, tStop, H, restart, amu_mat, U, com_ang, AN_mat):
         qC, pC  = rotate_norm_to_cart(qN, pN, U, amu_mat) # collections of nuclear variables in Cartesian coordinate
         q[nel:], p[nel:] = qC, pC
         y = np.concatenate((q, p))
+        nac_hist, tdm_hist = np.empty(0), np.empty(0)
 
     #   Run first electronic structure calculation if we are not restarting,
     #   or if we are restarting and the electronic structure information is missing
@@ -1604,7 +1604,7 @@ def rk4(initq, initp, tStop, H, restart, amu_mat, U, com_ang, AN_mat):
                                  tc_server_gpus=tcr_server_gpus)
             job_batch = tc_runner.run_TC_new_geom(qC/ang2bohr)
             timings = job_batch.timings
-            all_energies, elecE, grad, nac, trans_dips = format_output_LSCIVR(job_batch.results_list)
+            _,       all_energies, elecE, grad, nac, trans_dips = format_output_LSCIVR(job_batch.results_list)
         else:
             timings, all_energies, elecE, grad, nac, trans_dips = QC_RUNNER.run_new_geom(qC/ang2bohr, p[nel:])
 
@@ -1612,11 +1612,12 @@ def rk4(initq, initp, tStop, H, restart, amu_mat, U, com_ang, AN_mat):
         init_energy = get_energy(au_mas, q, p, elecE)
 
         # Record nuclear geometry in angstrom and log the rest
-        record_nuc_geo(restart, t, atoms, qC, com_ang, logger)
+        record_nuc_geo(restart, t, atoms, qC, logger)
         logger.write(t, init_energy, elecE,  grad, nac, timings, elec_p=p[0:nel], elec_q=q[0:nel], nuc_p=p[nel:], jobs_data=job_batch, all_energies=all_energies)
 
     # Create nac history for sign-flip extrapolation
-    sign_flipper.set_history(nac, np.empty(0), trans_dips, np.empty(0))
+    # sign_flipper.set_history(nac, np.empty(0), trans_dips, np.empty(0))
+    sign_flipper.set_history(nac, nac_hist, trans_dips, tdm_hist)
     # exit()
 
     opt['guess'] = 'moread'
@@ -1652,7 +1653,7 @@ def rk4(initq, initp, tStop, H, restart, amu_mat, U, com_ang, AN_mat):
         elif QC_RUNNER == 'terachem':
             job_batch = tc_runner.run_TC_new_geom(qC/ang2bohr)
             timings = job_batch.timings
-            all_energies, elecE, grad, nac, trans_dips  = format_output_LSCIVR(job_batch.results_list)
+            _, all_energies, elecE, grad, nac, trans_dips  = format_output_LSCIVR(job_batch.results_list)
         else:
             timings, all_energies, elecE, grad, nac, trans_dips = QC_RUNNER.run_new_geom(qC/ang2bohr, y[-natom*3:])
         
@@ -1672,7 +1673,7 @@ def rk4(initq, initp, tStop, H, restart, amu_mat, U, com_ang, AN_mat):
         energy.append(new_energy)
 
         # Record nuclear geometry, logs, and restarts
-        record_nuc_geo(restart, t, atoms, qC, com_ang, logger)
+        record_nuc_geo(restart, t, atoms, qC, logger)
         logger.write(t, total_E=new_energy, elec_E=elecE,  grads=grad, NACs=nac, timings=timings, elec_q=y[0:nel], elec_p=y[ndof:ndof+nel], nuc_p=y[-natom*3:], jobs_data=job_batch, all_energies=all_energies)
         write_restart(restart_file_out, [Y[-1][:ndof], Y[-1][ndof:]], sign_flipper.nac_hist, sign_flipper.tdm_hist, new_energy, t, nel, 'rk4', elecE, grad, nac, com_ang)
 
@@ -1688,6 +1689,11 @@ def rk4(initq, initp, tStop, H, restart, amu_mat, U, com_ang, AN_mat):
         coord[1,:,i] = Y[i][ndof:]
 
     return (np.array(X), coord, initial_time)
+
+
+'''
+Main driver of RK4 and electronic structure 
+'''
 
 def compute_CF_single(q, p):
    ### Compute the estimator of electronic state population ###

@@ -12,6 +12,7 @@ from .h5file import H5File, H5Group, H5Dataset
 # from .input_simulation import extra_loggers, logging_mode
 from . import input_simulation as opts
 from .serialization import serialize
+from .common_obj import PhaseVars, ESVars
 
 ANG_2_BOHR = 1.8897259886
 
@@ -24,6 +25,7 @@ def _to_symmetric_matrix(data: np.ndarray) -> np.ndarray:
     mat[np.triu_indices(n, 1)] = data
     mat += mat.swapaxes(0, 1)
     return mat
+
 
 def run_restart_module():
     print('Running restart module')
@@ -167,6 +169,9 @@ def read_restart(file_loc: str='restart.out', ndof: int=0, integrator: str='RK4'
 
 
         extension = os.path.splitext(file_loc)[-1]
+
+        #   Chris: We should start to phase this out and use .json instead, as new
+        #   entries are trivial to add and parse
         if extension == '.out':
             nac_hist = np.array([])
             nac_mat = np.array([])
@@ -193,7 +198,7 @@ def read_restart(file_loc: str='restart.out', ndof: int=0, integrator: str='RK4'
 
                 for line in ff:
                     if 'COM' in line:
-                        com = [float(x) for x in ff.readline().split()]
+                        opts.com_ang = [float(x) for x in ff.readline().split()]
                     if 'NAC History' in line:
                         nac_hist = _read_array_data(ff)
                     if 'NAC Matrix' in line:
@@ -203,7 +208,7 @@ def read_restart(file_loc: str='restart.out', ndof: int=0, integrator: str='RK4'
                     if 'Electronic Energies' in line:
                         elecE = _read_array_data(ff)    
 
-            return q, p, nac_hist, np.array([]), init_energy, t, elecE, grads, nac_mat, com
+            return q, p, nac_hist, np.array([]), init_energy, t, elecE, grads, nac_mat
 
         elif extension == '.json':
             #  json data format
@@ -227,8 +232,8 @@ def read_restart(file_loc: str='restart.out', ndof: int=0, integrator: str='RK4'
             combo_q = np.array(elec_q + nucl_q)
             combo_p = np.array(elec_p + nucl_p)
 
-            com = None
-            if 'com' in data: com = np.array(data['com'])
+            if 'com' in data: 
+                opts.com_ang = np.array(data['com'])
    
             elecE = np.array(data.get('elec_E', np.array([])))
             grads = np.array(data.get('grads', np.array([])))
@@ -240,7 +245,11 @@ def read_restart(file_loc: str='restart.out', ndof: int=0, integrator: str='RK4'
             if 'TCJob__job_counter' in data:
                 TC.TCJob.set_ID_counter(data['TCJob__job_counter'])
 
-            return combo_q, combo_p, nac_hist, tdm_hist, energy, time, elecE, grads, nac_mat, com
+            # phase_vars = PhaseVars(elec_q, elec_p, nucl_q, nucl_p, time)
+            # es_vars = ESVars(elecE, grads, nac_mat)
+            # return phase_vars, es_vars, nac_hist, tdm_hist, energy, time
+
+            return combo_q, combo_p, nac_hist, tdm_hist, energy, time, elecE, grads, nac_mat
 
         else:
             exit(f'ERROR: File extension "{extension}" is not a valid restart file')
@@ -257,7 +266,7 @@ def write_restart(file_loc: str,
                     integrator='rk4', 
                     elecE: float=np.empty(0), 
                     grads: np.ndarray = np.empty(0), 
-                    nac_mat: np.ndarray = np.empty(0), 
+                    nac_mat: np.ndarray = np.empty(0),
                     com=None,
                     qc_runner=None):
     '''
@@ -284,6 +293,9 @@ def write_restart(file_loc: str,
         integrator: str
             The integrator used to run the simulation
     '''
+    if com is None:
+        com = opts.com_ang
+
     if integrator.upper() == 'RK4':
         extension = os.path.splitext(file_loc)[-1]
         
@@ -654,11 +666,13 @@ class NucGeoLogger():
             tmp_data = np.array(qCart_ang).reshape((-1, 3))
             self._h5_dataset = self._h5_group.create_dataset('nuclear_Q', shape=(0,)+tmp_data.shape, maxshape=(None,)+tmp_data.shape)
 
-    def write(self, total_time: float, atoms, qCart_ang, com_ang=None):
+    def write(self, total_time: float, atoms, qCart_ang, com=None):
         if not self._initialized:
             self._initialize(qCart_ang)
-        if com_ang is None:
-            com_ang = np.zeros(3)
+
+        print('In NucGeoLogger.write()', com, opts.com_ang)
+        if com is None:
+            com = opts.com_ang
 
         if self._file:
             natom = len(atoms)
@@ -667,12 +681,12 @@ class NucGeoLogger():
             for i in range(natom):
                 self._file.write('{:<5s}{:>12.6f}{:>12.6f}{:>12.6f} \n'.format(
                     atoms[i],
-                    qCart_ang[3*i+0] + com_ang[0],
-                    qCart_ang[3*i+1] + com_ang[1],
-                    qCart_ang[3*i+2] + com_ang[2]))
+                    qCart_ang[3*i+0] + com[0],
+                    qCart_ang[3*i+1] + com[1],
+                    qCart_ang[3*i+2] + com[2]))
             self._file.flush()
         if self._h5_dataset:
-            shifted = np.array(qCart_ang).reshape((-1, 3)) + com_ang
+            shifted = np.array(qCart_ang).reshape((-1, 3)) + com
             H5File.append_dataset(self._h5_dataset, shifted)
         
 class ElectricPQLogger(BaseLogger):

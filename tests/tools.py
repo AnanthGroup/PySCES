@@ -50,17 +50,12 @@ def cleanup(*files_and_dirs):
         if os.path.isfile(file):
             os.remove(file)
     if os.path.isdir('logs'):
-        for file in os.listdir('logs'):
-            if os.path.isfile(os.path.join('logs', file)):
-                os.remove(os.path.join('logs', file))
-        os.removedirs('logs')
+        shutil.rmtree('logs')
 
     #   remove directories logs.*
     for file in os.listdir():
         if os.path.isdir(file) and file.startswith('logs.'):
-            for file2 in os.listdir(file):
-                os.remove(os.path.join(file, file2))
-            os.removedirs(file)
+            shutil.rmtree(file)
 
     #   remove others
     for x in files_and_dirs:

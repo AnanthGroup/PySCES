@@ -14,8 +14,8 @@ class Test_Precompute(unittest.TestCase):
     def test_jobs(self):
         reset_directory()
         os.chdir('test_precomp_traj')
-        os.environ['DEBUG_TRAJ'] = 'debug_traj.pkl'
 
+        pysces.qcRunners.TeraChem._DEBUG_TRAJ = 'debug_traj.pkl'
         pysces.reset_settings()
         pysces.run_simulation()
 

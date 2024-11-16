@@ -14,6 +14,7 @@ import shutil
 from pysces import input_simulation as opts
 from subprocess import Popen
 from typing import Callable
+import numpy as np
 
 
 ########## DEFAULT SETTINGS ##########
@@ -110,10 +111,12 @@ extra_loggers = []
 state_labels = None
 
 #   DEBUG ONLY
-_tcr_ref_job = None
+tcr_ref_job = None
 
 ########## END DEFAULT SETTINGS ##########
 
+
+########## GLOBAL SETTINGS, SHOULD NOT BE SET BY USER ##########
 _set_defaults = False
 defaults = {}
 if not _set_defaults:
@@ -124,6 +127,10 @@ if not _set_defaults:
 def reset_settings():
     for k, v in defaults.items():
         globals()[k] = v
+
+nnuc = 3*natom
+ndof = nnuc + nel
+com_ang = np.array([0.0, 0.0, 0.0])
 
 def input_local_settings():
     '''

@@ -4,13 +4,13 @@ nel = 3 # number of electronic states
 temp = 300 # simulation temperature in Kelvin
 
 # Maximum propagation time (a.u.), one Runge-Kutta step (a.u.) (Only relevant for RK4)
-tmax_rk4, Hrk4 = 12, 2.0
+tmax_rk4, Hrk4 = 6, 2.0
 
 # Index of initially occupied electronic state
 init_state = 2
 
 # Restart request: 0 = no restart, 1 = restart
-restart = 1
+restart = 0
 restart_file_in = 'restart_start.json'
 
 #   type of QC runner, either 'gamess or 'terachem'
