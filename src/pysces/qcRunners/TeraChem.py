@@ -9,6 +9,7 @@ from tcpb import TCProtobufClient as TCPBClient
 from tcpb.exceptions import ServerError
 from tcpb import terachem_server_pb2 as pb
 from pysces import input_simulation as opts
+from pysces.common_obj import PhaseVars
 import time
 import warnings
 import shutil
@@ -21,9 +22,8 @@ import copy
 import pickle
 from typing import Literal
 import itertools
-import weakref
 from collections import deque
-import weakref
+import qcelemental as qcel
 
 
 _server_processes = {}
@@ -1082,7 +1082,15 @@ class TCRunner():
         self._max_time_list.append(max_time)
         self._max_time = np.mean(self._max_time_list)*5
 
-    def run_TC_new_geom(self, geom, correct_signs=True):
+    def run_TC_new_geom(self, phase_vars: PhaseVars, geom=None):
+
+        if phase_vars is not None:
+            geom = phase_vars.nuc_q*qcel.constants.bohr2angstroms
+        elif geom is not None:
+            pass
+        else:
+            raise ValueError('Either phase_vars or geom must be provided')
+
         try:
             job_batch = self._run_TC_new_geom_kernel(geom)
         except TCServerStallError as error:
