@@ -1,6 +1,81 @@
 import numpy as np
+from collections import deque
+from scipy.integrate import simps
+from scipy.interpolate import interp1d
+class GradEstimator():
+
+
+    def __init__(self, order, history_size, interval=1, name='UNKNOWN'):
+        self.order = order
+        self.history_size = history_size
+        self.interval = interval
+        self.history_grads = deque(maxlen=history_size)
+        self.history_t = deque(maxlen=history_size)
+        self.history_f = deque(maxlen=history_size)
+        self.polynomial_coeffs = None
+        self.name = name
+
+
+    def update_history(self, new_t, new_grads, new_f):
+
+        #   before we update, let's get one more extrapolation to check how close we are
+        if self.polynomial_coeffs is not None:
+            guess = np.polyval(self.polynomial_coeffs, new_t)
+            guess = guess.reshape(self.history_grads[0].shape)
+            error = np.abs(guess - new_grads)
+            max_error = np.max(error)
+            rms_error = np.sqrt(np.mean(error**2))
+            print(f'Before updating extrapolation history in {self.name} at time {new_t}: ')
+            print(f'    {max_error=:.5e}, {rms_error=:.5e}')
+
+        self.history_grads.append(np.array(new_grads))
+        self.history_t.append(new_t)
+        self.history_f.append(new_f)
+        print(f'Updating {self.name} history at time {new_t}')
+        if len(self.history_grads) == self.history_size:
+            self._fit_polynomial()
+
+    def _fit_polynomial(self):
+        # Flatten the matrices and stack them into a 2D array
+        stacked_history = np.vstack([np.ravel(matrix) for matrix in self.history_grads])
+        # Fit a polynomial to each column of the 2D array
+        self.polynomial_coeffs = np.polyfit(self.history_t, stacked_history, self.order)
+
+    def _evaluate(self, time):
+        return np.polyval(self.polynomial_coeffs, time)
+    
+    def __call__(self, t) -> np.ndarray:
+        pass
+
+    def check_if_ready(self):
+        return len(self.history_grads) == self.history_size
+    
+    def check_run_deriv(self, new_time):
+        if len(self.history_grads) < self.history_size:
+            return True, 'History not long enough'
+        elif (1+new_time - len(self.history_grads)) % self.interval == 0:
+            return True, 'Interval reached'
+        else:
+            return False, 'OK'
+    
+    def guess_f(self, f0, times, velocities):
+        if self.polynomial_coeffs is None:
+            raise ValueError("Not enough history to fit a polynomial yet")            
+
+        grads = self._evaluate(times)
+        prod = grads * velocities[:, None]
+        axis = len(grads.shape) - 2
+        delta_f = simps(prod, times, axis=axis)
+        extrap_f = f0 + delta_f
+
+        return extrap_f
+
+    
+
 
 class SignFlipper():
+    _debug = False
+    _ref_nac = None
     def __init__(self, n_states: int, hist_length: int, n_nuc: int, name: str='UNK') -> None:
         ''' Checks which sign for the NAC is expected. 
             Artificial sign flips will be corrected and history is logged
@@ -69,6 +144,12 @@ class SignFlipper():
             # fill array with current nac
             for it in range(0,self.hist_length):
                 self.nac_hist[:,:,:,it] = nac
+        else:
+            if nac_hist_in.shape[3] != self.hist_length:
+                raise ValueError("nac_hist_in does not have the correct history length")
+            if nac_hist_in.shape[0] != self.n_states:
+                raise ValueError("nac_hist_in does not have the correct number of states")
+            self.nac_hist = nac_hist_in
         # exit()
         if tdm_hist_in.size == 0:
             self.tdm_hist = np.zeros((self.n_states, self.n_states, 3, self.hist_length))
@@ -76,8 +157,14 @@ class SignFlipper():
             if trans_dips is not None:
                 for it in range(0,self.hist_length):
                     self.tdm_hist[:,:,:,it] = trans_dips
+        else:
+            if tdm_hist_in.shape[3] != self.hist_length:
+                raise ValueError("tdm_hist_in does not have the correct history length")
+            if tdm_hist_in.shape[0] != self.n_states:
+                raise ValueError("tdm_hist_in does not have the correct number of states")
+            self.tdm_hist = tdm_hist_in
 
-    def correct_nac_sign(self, nac: np.ndarray, tdm: np.ndarray=None, debug=False):
+    def correct_nac_sign(self, nac: np.ndarray, tdm: np.ndarray=None):
         '''Check which sign for the nac is expected and correct artificial sign flips
 
         Parameters
@@ -95,8 +182,7 @@ class SignFlipper():
             use_tdm = False
         else:
             use_tdm = True
-        if debug: print("TDM HIST: ", self.tdm_hist, self.hist_length)
-
+        if self._debug: print("TDM HIST: ", self.tdm_hist, self.hist_length)
 
         polynom_degree = 1 # hardcoded. 1 is usually sufficient. 2 is in principle better but could lead to artificial oscillations
 
@@ -169,7 +255,7 @@ class SignFlipper():
         if message != '':
             print(f'\n{message}\n')
 
-        if debug:
+        if self._debug:
             print("nac_hist vor roll: ")
             print("nh[:,:,0]")
             print(self.nac_hist[:,:,:,0])
@@ -185,7 +271,18 @@ class SignFlipper():
             self.tdm_hist = np.roll(self.tdm_hist,-1,axis=3)
             self.tdm_hist[:,:,:,self.hist_length-1] = tdm
 
-        if debug:
+        if self._debug and self._ref_nac is not None:
+            print("DEBUG CORRECTION")
+            # Check if the NACs are the same as the reference NACsuse signs of the reference NACs
+            #   this is done only for the first frame
+            for i in range(self.n_states):
+                for j in range(i+1, self.n_states):
+                    sign = np.sign(np.dot(nac[i,j], self._ref_nac[i,j]))
+                    nac[i, j] = sign * nac[i, j]
+                    nac[j, i] = sign * nac[j, i]
+            self._ref_nac = None
+
+        if self._debug:
             print("nac_hist nach roll: ")
             print("nh[:,:,0]")
             print(self.nac_hist[:,:,:,0])
@@ -193,8 +290,8 @@ class SignFlipper():
             print(self.nac_hist[:,:,:,1])
             print("nh[:,:,2]")
             # print("nac_dot[0,1] history post roll:",nac_dot_hist[0,1,0],nac_dot_hist[0,1,1],nac_dot_hist[0,1,2])
-            input()
+            # input()
     
-        # if debug: print("nac_dot[0,1] history: post upda",nac_dot_hist[0,1,0],nac_dot_hist[0,1,1],nac_dot_hist[0,1,2])
+        # if self._debug: print("nac_dot[0,1] history: post upda",nac_dot_hist[0,1,0],nac_dot_hist[0,1,1],nac_dot_hist[0,1,2])
 
         return nac

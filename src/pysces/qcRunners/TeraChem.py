@@ -23,6 +23,7 @@ from typing import Literal
 import itertools
 import weakref
 from collections import deque
+import weakref
 
 
 _server_processes = {}
@@ -74,6 +75,11 @@ class TCClientExtra(TCPBClient):
 
         super().__init__(host, port, debug, trace)
         self._add_to_host_port_to_ID()
+
+    def cleanup(self):
+        print('CLOSING LOG FILE')
+        if self._log:
+            self._log.close()
 
     def __del__(self):
         if self._log:
@@ -691,20 +697,53 @@ class TCJobBatch():
         # timings['Wall_Time'] = np.sum(list(timings.values()))
         return timings
 
+class TCRunnerOptions:
+    #   TeraChem runner options
+    host:str = '10.1.1.154'
+    port:int = 9876
+    server_root: str = '.'
+    job_options: dict = {}
+    state_options: dict = {
+        'max_state': 1, 'grads': 'all'
+    }
+
+    #   TeraChem runner job specific options
+    spec_job_opts: dict[str, dict] = {}
+
+    #    TeraChem runner job options for first frame only
+    initial_frame_opts: dict = {
+        'n_frames': 0
+    }
+    #   TeraChem runner client assignments based on job names
+    client_assignments: list[list[str]] = []
+
+    #   log TC job results
+    log_jobs: bool = True
+
+    #   pysces should start it's own TeraChem servers
+    server_gpus: list = []
+
+    # Terachem frequency files
+    fname_tc_xyz: str = "tmp/tc_hf/hf.spherical.freq/Geometry.xyz"
+    fname_tc_geo_freq: str = "tmp/tc_hf/hf.spherical.freq/Geometry.frequencies.dat"
+    fname_tc_redmas: str = "tmp/tc_hf/hf.spherical.freq/Reduced.mass.dat"
+    fname_tc_freq: str = "tmp/tc_hf/hf.spherical.freq/Frequencies.dat"
+
 class TCRunner():
     def __init__(self, 
                  hosts: str,
                  ports: int,
                  atoms: list,
-                 tc_options: dict,
+                 job_options: dict,
                  tc_spec_job_opts: dict[str, dict] = None,
-                 tc_initial_frame_options: dict = None,
+                 tc_initial_frame_opts: dict = None,
                  tc_client_assignments: list[list[str]] = [],
                  server_roots = '.',
                  tc_server_gpus:  bool=[],
                  tc_state_options: dict={}, 
                  max_wait=20,
                  ) -> None:
+        
 
         if isinstance(hosts, str):
             hosts = [hosts]
@@ -737,7 +776,7 @@ class TCRunner():
         self._spec_job_opts = tc_spec_job_opts
 
         #   job options for first step only
-        self._initial_frame_options = tc_initial_frame_options
+        self._initial_frame_options = tc_initial_frame_opts
         if self._initial_frame_options is not None:
             if 'n_frames' not in self._initial_frame_options:
                 self._initial_frame_options['n_frames'] = 0
@@ -757,7 +796,7 @@ class TCRunner():
         print('--------------------------------------')
         print(f'Number of Atoms: {len(atoms)}')
         print('TC Job Options:')
-        for k, v in tc_options.items():
+        for k, v in job_options.items():
             print(f'    {k:20s}: {v}')
 
         print('\n TC Job Specific Options:')
@@ -816,7 +855,7 @@ class TCRunner():
         self._port = ports[0]
 
         self._atoms = np.copy(atoms)
-        self._base_options = tc_options.copy()
+        self._base_options = job_options.copy()
 
         self._cas_guess = None
         self._scf_guess = None
@@ -848,11 +887,11 @@ class TCRunner():
             with open(_DEBUG_TRAJ, 'rb') as file:
                 self._debug_traj = pickle.load(file)
 
-        #   for cleanup
-        self._finalizer = weakref.finalize(self, self._cleanup)
 
-
-    def _cleanup(self):
+    def cleanup(self):
+        print('IN TCRUNNER CLEANUP')
+        for client in self._client_list:
+            client.cleanup()
         self._disconnect_clients()
         if _SAVE_DEBUG_TRAJ:
             with open(_SAVE_DEBUG_TRAJ, 'wb') as file:
@@ -862,7 +901,7 @@ class TCRunner():
         return self
 
     def __exit__(self, type, value, traceback):
-        self._cleanup()
+        self.cleanup()
 
     def _disconnect_clients(self):
         if _DEBUG_TRAJ:
@@ -1695,5 +1734,5 @@ def format_output_LSCIVR(job_data: list[dict]):
                 ivr_trans_dips = None
     print(" ---------------------------------")
 
-    return all_energies, ivr_energies, ivr_grads, ivr_nacs, ivr_trans_dips
+    return None, all_energies, ivr_energies, ivr_grads, ivr_nacs, ivr_trans_dips
     # return energies, grads, nacs

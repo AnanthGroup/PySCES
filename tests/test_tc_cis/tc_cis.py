@@ -1,12 +1,12 @@
 import unittest
 import pandas
-import io
 import numpy as np
 import os
-from tools import parse_xyz_data, assert_dictionary, cleanup, reset_directory
 import json
 import pysces
-
+import sys
+sys.path.insert(1, os.path.join(os.path.dirname(pysces.__file__), '../../tests'))
+from tools import parse_xyz_data, assert_dictionary, cleanup, reset_directory
 
 class Test_TC_CIS(unittest.TestCase):
     def __init__(self, methodName: str = "runTest") -> None:
@@ -25,7 +25,7 @@ class Test_TC_CIS(unittest.TestCase):
 
 
         pysces.reset_settings()
-        pysces.run_simulation() 
+        pysces.run_simulation()
 
         #   check simple panda readable data
         for file in ['corr.txt', 'electric_pq.txt', 'energy.txt', 'grad.txt', 'nac.txt']:

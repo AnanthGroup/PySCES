@@ -1538,7 +1538,7 @@ def scipy_rk4(elecE, grad, nac, yvar, dt, au_mas):
 def rk4(initq, initp, tStop, H, restart, amu_mat, U, AN_mat):
     logger = SimulationLogger(dir=logging_dir, save_jobs=tcr_log_jobs, hdf5=hdf5_logging)
 
-    if QC_RUNNER == 'terachem':
+    if es_runner == 'terachem':
         from pysces.qcRunners.TeraChem import TCRunner, format_output_LSCIVR
         logger.state_labels = [f'S{x}' for x in tcr_state_options['grads']]
     
@@ -1571,12 +1571,12 @@ def rk4(initq, initp, tStop, H, restart, amu_mat, U, AN_mat):
         qC, pC = q[nel:], p[nel:]
         y = np.concatenate((q, p))
 
-        if QC_RUNNER == 'terachem':
+        if es_runner == 'terachem':
             tc_runner = TCRunner(tcr_host, tcr_port, atoms, tcr_job_options, 
                                  server_roots=tcr_server_root, 
                                  tc_state_options=tcr_state_options, 
                                  tc_spec_job_opts=tcr_spec_job_opts, 
-                                 tc_initial_frame_options=tcr_initial_frame_opts, 
+                                 tc_initial_frame_opts=tcr_initial_frame_opts, 
                                  tc_client_assignments=tcr_client_assignments,
                                  tc_server_gpus=tcr_server_gpus)
             tc_runner._prev_ref_job = tcr_ref_job
@@ -1592,21 +1592,21 @@ def rk4(initq, initp, tStop, H, restart, amu_mat, U, AN_mat):
     #   Run first electronic structure calculation if we are not restarting,
     #   or if we are restarting and the electronic structure information is missing
     if restart == 0 or len(elecE) == 0 or len(grad) == 0 or len(nac) == 0:
-        if QC_RUNNER == 'gamess':
+        if es_runner == 'gamess':
             elecE, grad, nac, _ = run_gamess_at_geom(input_name, AN_mat, qC, atoms)
-        elif QC_RUNNER == 'terachem':
+        elif es_runner == 'terachem':
             tc_runner = TCRunner(tcr_host, tcr_port, atoms, tcr_job_options, 
                                  server_roots=tcr_server_root, 
                                  tc_state_options=tcr_state_options, 
                                  tc_spec_job_opts=tcr_spec_job_opts, 
-                                 tc_initial_frame_options=tcr_initial_frame_opts, 
+                                 tc_initial_frame_opts=tcr_initial_frame_opts, 
                                  tc_client_assignments=tcr_client_assignments,
                                  tc_server_gpus=tcr_server_gpus)
             job_batch = tc_runner.run_TC_new_geom(qC/ang2bohr)
             timings = job_batch.timings
             _,       all_energies, elecE, grad, nac, trans_dips = format_output_LSCIVR(job_batch.results_list)
         else:
-            timings, all_energies, elecE, grad, nac, trans_dips = QC_RUNNER.run_new_geom(qC/ang2bohr, p[nel:])
+            timings, all_energies, elecE, grad, nac, trans_dips = es_runner.run_new_geom(qC/ang2bohr, p[nel:])
 
         # Total initial energy at t=0
         init_energy = get_energy(au_mas, q, p, elecE)
@@ -1648,14 +1648,14 @@ def rk4(initq, initp, tStop, H, restart, amu_mat, U, AN_mat):
 
         qC = y[nel:ndof]
 
-        if QC_RUNNER == 'gamess':
+        if es_runner == 'gamess':
             elecE, grad, nac, _ = run_gamess_at_geom(input_name, AN_mat, qC, atoms)
-        elif QC_RUNNER == 'terachem':
+        elif es_runner == 'terachem':
             job_batch = tc_runner.run_TC_new_geom(qC/ang2bohr)
             timings = job_batch.timings
             _, all_energies, elecE, grad, nac, trans_dips  = format_output_LSCIVR(job_batch.results_list)
         else:
-            timings, all_energies, elecE, grad, nac, trans_dips = QC_RUNNER.run_new_geom(qC/ang2bohr, y[-natom*3:])
+            timings, all_energies, elecE, grad, nac, trans_dips = es_runner.run_new_geom(qC/ang2bohr, y[-natom*3:])
         
         #correct nac sign
         nac = sign_flipper.correct_nac_sign(nac, trans_dips)
@@ -1682,6 +1682,8 @@ def rk4(initq, initp, tStop, H, restart, amu_mat, U, AN_mat):
                 f.write('Propagated to the final time step.\n')
 
     write_restart(restart_file_out, [Y[-1][:ndof], Y[-1][ndof:]], sign_flipper.nac_hist, sign_flipper.tdm_hist, energy[-1], t, nel, 'rk4', elecE, grad, nac, com_ang)
+    if es_runner == 'terachem':
+        tc_runner.cleanup()
 
     coord = np.zeros((2,ndof,len(Y)))
     for i in range(len(Y)):

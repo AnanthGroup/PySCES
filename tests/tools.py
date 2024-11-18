@@ -1,9 +1,12 @@
 import numpy as np
 import io
+import gc
 import unittest
 import os
 import shutil
 import inspect
+import time
+import psutil
 
 def parse_xyz_data(file_loc):
     n_atoms = None
@@ -44,13 +47,34 @@ def assert_dictionary(testcase: unittest.TestCase, dict_ref, dict_tst, atol=1e-6
             array_tst = np.array(dict_tst[key])
             np.testing.assert_allclose(array_ref, array_tst, atol=atol, rtol=rtol, err_msg=msg)
 
+def check_for_open_files():
+    # Trigger garbage collection
+    gc.collect()
+
+    # Find all file objects that are still open
+    open_files = [obj for obj in gc.get_objects() if isinstance(obj, io.IOBase) and not obj.closed]
+
+    if open_files:
+        print("Unclosed file objects detected:")
+        for f in open_files:
+            print("File: ", f)
+            # print(f"File: {f.name}, Mode: {f.mode}")
+    else:
+        print("No unclosed file objects found.")
+
 def cleanup(*files_and_dirs):
+    
     #   clean up
     for file in ['progress.out', 'corr.out', 'restart.json', 'restart.out', 'cas.dat', 'cas.inp', 'cas_old.inp', 'cas.out']:
         if os.path.isfile(file):
             os.remove(file)
     if os.path.isdir('logs'):
-        shutil.rmtree('logs')
+        try:
+            shutil.rmtree('logs')
+
+        except OSError:
+            print('Could not delete logs directory, check open files')
+            check_for_open_files()
 
     #   remove directories logs.*
     for file in os.listdir():

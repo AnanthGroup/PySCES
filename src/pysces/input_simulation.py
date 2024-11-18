@@ -15,7 +15,7 @@ from pysces import input_simulation as opts
 from subprocess import Popen
 from typing import Callable
 import numpy as np
-
+from .qcRunners.TeraChem import TCRunnerOptions
 
 ########## DEFAULT SETTINGS ##########
 
@@ -59,7 +59,7 @@ restart_file_in = 'restart.out'
 restart_file_out = 'restart.json'
 
 #   type of QC runner, either 'gamess' or 'terachem'
-QC_RUNNER: str | Callable[[list], int] = 'gamess'
+es_runner: str | Callable[[list], int] = 'gamess'
 #QC_RUNNER = 'terachem'
 
 #   TeraChem runner options
@@ -116,7 +116,9 @@ tcr_ref_job = None
 ########## END DEFAULT SETTINGS ##########
 
 
+
 ########## GLOBAL SETTINGS, SHOULD NOT BE SET BY USER ##########
+tc_runner_opts = TCRunnerOptions()
 _set_defaults = False
 defaults = {}
 if not _set_defaults:
@@ -131,6 +133,8 @@ def reset_settings():
 nnuc = 3*natom
 ndof = nnuc + nel
 com_ang = np.array([0.0, 0.0, 0.0])
+##### END GLOBAL SETTINGS #####
+
 
 def input_local_settings():
     '''
@@ -176,36 +180,45 @@ def _check_settings(local: dict):
     opts.nnuc = 3*opts.natom # number of nuclear DOFs
     opts.ndof = opts.nel + opts.nnuc 
 
+    #   legacy settings
     if 'q0' not in local:
         opts.q0 = [0.0]*nel
     if 'p0' not in local:
         opts.p0 = [0.0]*nel
-
+    if 'QC_RUNNER' in globals():
+        opts.es_runner = globals()['QC_RUNNER']
+        print('IN QC_RUNNER')
 
     #   set input format to the same type of QC runner
     if opts.mol_input_format == '':
-        opts.mol_input_format = opts.QC_RUNNER
+        opts.mol_input_format = opts.es_runner
 
     #   logging directory
 
 
     #   TeraChem settings
-    if opts.QC_RUNNER == 'terachem':
-        max_state = opts.tcr_state_options.get('max_state', False)
-        grads = opts.tcr_state_options.get('grads', False)
+    for k, v in globals().items():
+        if k.startswith('tcr_'):
+            tc_runner_opts.__dict__[k[4:]] = v
+        elif k.startswith('fname_tc_'):
+            tc_runner_opts.__dict__[k] = v
+
+    if opts.es_runner == 'terachem':
+        max_state = tc_runner_opts.state_options.get('max_state', False)
+        grads = tc_runner_opts.state_options.get('grads', False)
         
         if max_state and not grads:
             grads = list(range(max_state + 1))
-            opts.tcr_state_options['grads'] = grads
+            tc_runner_opts.state_options['grads'] = grads
         elif grads and not max_state:
             max_state = max(grads)
-            opts.tcr_state_options['max_state'] = max_state
+            tc_runner_opts.state_options['max_state'] = max_state
         elif grads and max_state:
             if max_state != max(grads):
                 raise ValueError('"max_state" and highest "grads" index in "tcr_run_options" do not match')
         
-        if 'nacs' not in opts.tcr_state_options:
-            opts.tcr_state_options['nacs'] = 'all'
+        if 'nacs' not in tc_runner_opts.state_options:
+            tc_runner_opts.state_options['nacs'] = 'all'
 
         opts.nel = len(grads)
         if nel != len(opts.q0) or nel != len(opts.p0):
@@ -249,7 +262,7 @@ def print_settings():
         print(f'Integrator time step:               {Hrk4} a.u.')
 
     print(f'Normal mode frequency scaling:      {frq_scale}')
-    print(f'Electronic structure runner:        {QC_RUNNER}')
+    print(f'Electronic structure runner:        {es_runner}')
     print(f'Molecule input format:              {mol_input_format}')
     print(f'Restart file will be written to     {restart_file_in}')
     print(f'current working directory:          {os.path.abspath(os.path.curdir)}')
