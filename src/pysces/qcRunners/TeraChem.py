@@ -77,7 +77,6 @@ class TCClientExtra(TCPBClient):
         self._add_to_host_port_to_ID()
 
     def cleanup(self):
-        print('CLOSING LOG FILE')
         if self._log:
             self._log.close()
 
@@ -729,22 +728,21 @@ class TCRunnerOptions:
     fname_tc_redmas: str = "tmp/tc_hf/hf.spherical.freq/Reduced.mass.dat"
     fname_tc_freq: str = "tmp/tc_hf/hf.spherical.freq/Frequencies.dat"
 
-class TCRunner():
-    def __init__(self, 
-                 hosts: str,
-                 ports: int,
-                 atoms: list,
-                 job_options: dict,
-                 tc_spec_job_opts: dict[str, dict] = None,
-                 tc_initial_frame_opts: dict = None,
-                 tc_client_assignments: list[list[str]] = [],
-                 server_roots = '.',
-                 tc_server_gpus:  bool=[],
-                 tc_state_options: dict={}, 
-                 max_wait=20,
-                 ) -> None:
-        
 
+class TCRunner():
+    def __init__(self, atoms: list, tc_opts: TCRunnerOptions, max_wait=20) -> None:
+        
+        hosts = tc_opts.host
+        ports = tc_opts.port
+        server_roots = tc_opts.server_root
+        job_options = tc_opts.job_options
+        tc_spec_job_opts = tc_opts.spec_job_opts
+        tc_initial_frame_opts = tc_opts.initial_frame_opts
+        tc_client_assignments = tc_opts.client_assignments
+        tc_server_gpus = tc_opts.server_gpus
+        tc_state_options = tc_opts.state_options
+    
+    
         if isinstance(hosts, str):
             hosts = [hosts]
         if isinstance(ports, int):
@@ -889,7 +887,6 @@ class TCRunner():
 
 
     def cleanup(self):
-        print('IN TCRUNNER CLEANUP')
         for client in self._client_list:
             client.cleanup()
         self._disconnect_clients()

@@ -1572,13 +1572,7 @@ def rk4(initq, initp, tStop, H, restart, amu_mat, U, AN_mat):
         y = np.concatenate((q, p))
 
         if es_runner == 'terachem':
-            tc_runner = TCRunner(tcr_host, tcr_port, atoms, tcr_job_options, 
-                                 server_roots=tcr_server_root, 
-                                 tc_state_options=tcr_state_options, 
-                                 tc_spec_job_opts=tcr_spec_job_opts, 
-                                 tc_initial_frame_opts=tcr_initial_frame_opts, 
-                                 tc_client_assignments=tcr_client_assignments,
-                                 tc_server_gpus=tcr_server_gpus)
+            tc_runner = TCRunner(atoms, tc_runner_opts)
             tc_runner._prev_ref_job = tcr_ref_job
 
     elif restart == 0:
@@ -1595,13 +1589,7 @@ def rk4(initq, initp, tStop, H, restart, amu_mat, U, AN_mat):
         if es_runner == 'gamess':
             elecE, grad, nac, _ = run_gamess_at_geom(input_name, AN_mat, qC, atoms)
         elif es_runner == 'terachem':
-            tc_runner = TCRunner(tcr_host, tcr_port, atoms, tcr_job_options, 
-                                 server_roots=tcr_server_root, 
-                                 tc_state_options=tcr_state_options, 
-                                 tc_spec_job_opts=tcr_spec_job_opts, 
-                                 tc_initial_frame_opts=tcr_initial_frame_opts, 
-                                 tc_client_assignments=tcr_client_assignments,
-                                 tc_server_gpus=tcr_server_gpus)
+            tc_runner = TCRunner(atoms, tc_runner_opts)
             job_batch = tc_runner.run_TC_new_geom(qC/ang2bohr)
             timings = job_batch.timings
             _,       all_energies, elecE, grad, nac, trans_dips = format_output_LSCIVR(job_batch.results_list)
