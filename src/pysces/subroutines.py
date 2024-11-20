@@ -1541,7 +1541,6 @@ def rk4(initq, initp, tStop, H, restart, amu_mat, U, AN_mat):
     all_energies = None
     timings      = {}
     input_name   = 'cas'
-    # job_batch    = None
     qc_runner_data = None
     au_mas       = np.diag(amu_mat) * amu2au # masses of atoms in atomic unit (vector)
     t            = 0.0
@@ -1563,11 +1562,10 @@ def rk4(initq, initp, tStop, H, restart, amu_mat, U, AN_mat):
     logger.atoms = atoms
 
     if qc_runner == 'terachem':
-        from pysces.qcRunners.TeraChem import TCRunner, format_output_LSCIVR
+        from pysces.qcRunners.TeraChem import TCRunner
         logger.state_labels = [f'S{x}' for x in tcr_state_options['grads']]
         tc_runner = TCRunner(atoms, tc_runner_opts)
         tc_runner._prev_ref_job = tcr_ref_job
-
 
     #   Initialization
     if restart == 1:
@@ -1575,10 +1573,6 @@ def rk4(initq, initp, tStop, H, restart, amu_mat, U, AN_mat):
         t = initial_time
         qC, pC = q[nel:], p[nel:]
         y = np.concatenate((q, p))
-
-        # if qc_runner == 'terachem':
-        #     tc_runner = TCRunner(atoms, tc_runner_opts)
-        #     tc_runner._prev_ref_job = tcr_ref_job
 
     elif restart == 0:
         q[:nel], p[:nel] = initq[:nel], initp[:nel]
@@ -1594,12 +1588,8 @@ def rk4(initq, initp, tStop, H, restart, amu_mat, U, AN_mat):
         if qc_runner == 'gamess':
             elecE, grad, nac, _ = run_gamess_at_geom(input_name, AN_mat, qC, atoms)
         elif qc_runner == 'terachem':
-            # tc_runner = TCRunner(atoms, tc_runner_opts)
             timings, all_energies, elecE, grad, nac, trans_dips = tc_runner.run_new_geom(geom=qC/ang2bohr)
             qc_runner_data = tc_runner._prev_job_batch
-            # job_batch = tc_runner.run_new_geom(geom=qC/ang2bohr)
-            # timings = job_batch.timings
-            # _,       all_energies, elecE, grad, nac, trans_dips = format_output_LSCIVR(job_batch.results_list)
         else:
             timings, all_energies, elecE, grad, nac, trans_dips = qc_runner.run_new_geom(qC/ang2bohr, p[nel:])
 
