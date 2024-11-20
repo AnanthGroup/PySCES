@@ -4,6 +4,7 @@ from tcpb import terachem_server_pb2 as pb
 
 from pysces.input_simulation import logging_dir, TCRunnerOptions
 from pysces.common import PhaseVars, QCRunner
+from pysces.h5file import H5File, H5Dataset, H5Group, h5py
 
 from datetime import datetime
 import functools
@@ -20,6 +21,8 @@ import psutil
 import concurrent.futures
 import copy
 import pickle
+import json
+from copy import deepcopy
 from typing import Literal
 import itertools
 from collections import deque
@@ -845,6 +848,7 @@ class TCRunner(QCRunner):
         self._prev_jobs: list[TCJob] = []
         self._frame_counter = 0
         self._prev_ref_job = None
+        self._prev_job_batch: TCJobBatch = None
 
         job_batch_history = deque(maxlen=4)
 
@@ -854,6 +858,8 @@ class TCRunner(QCRunner):
             with open(_DEBUG_TRAJ, 'rb') as file:
                 self._debug_traj = pickle.load(file)
 
+    def report(self):
+        return self._prev_job_batch
 
     def cleanup(self):
         self._disconnect_clients()
@@ -1096,9 +1102,10 @@ class TCRunner(QCRunner):
             with open(_SAVE_DEBUG_TRAJ, 'wb') as file:
                 pickle.dump(self._debug_traj, file)
 
-        
+        all_energies, elecE, grad, nac, trans_dips = format_output_LSCIVR(job_batch.results_list)
+        self._prev_job_batch = job_batch
                 
-        return job_batch
+        return job_batch.timings, all_energies, elecE, grad, nac, trans_dips
 
     def _run_TC_new_geom_kernel(self, geom):
         self._n_calls += 1
@@ -1715,5 +1722,5 @@ def format_output_LSCIVR(job_data: list[dict]):
                 ivr_trans_dips = None
     print(" ---------------------------------")
 
-    return None, all_energies, ivr_energies, ivr_grads, ivr_nacs, ivr_trans_dips
-    # return energies, grads, nacs
+    return all_energies, ivr_energies, ivr_grads, ivr_nacs, ivr_trans_dips
+

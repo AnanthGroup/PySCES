@@ -72,6 +72,9 @@ class QCRunner:
     def run_new_geom(self, phase_vars: PhaseVars, geom=None):
         pass
 
+    def report(self):
+        pass
+
     def cleanup(self):
         pass
     

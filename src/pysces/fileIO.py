@@ -8,6 +8,7 @@ import yaml
 import argparse
 import sys
 from .qcRunners import TeraChem as TC
+from .qcRunners.TeraChem import TCJob, TCJobBatch
 from .h5file import H5File, H5Group, H5Dataset
 # from .input_simulation import extra_loggers, logging_mode
 from . import input_simulation as opts
@@ -374,7 +375,7 @@ def write_restart(file_loc: str,
     
 #   TODO: Convert to a @dataclass
 class LoggerData():
-    def __init__(self, time, atoms=None, total_E=None, elec_E=None, grads=None, NACs=None, timings=None, elec_p=None, elec_q=None, nuc_p=None, nuc_q=None, state_labels=None, jobs_data=None, all_energies = None) -> None:
+    def __init__(self, time, atoms=None, total_E=None, elec_E=None, grads=None, NACs=None, timings=None, elec_p=None, elec_q=None, nuc_p=None, nuc_q=None, state_labels=None, qc_runner_data=None, all_energies = None) -> None:
         self.time = time
         self.atoms = atoms
         self.total_E = total_E
@@ -390,7 +391,7 @@ class LoggerData():
         self.all_energies = all_energies
 
         #   place holder for all other types of data
-        self.jobs_data: dict | TC.TCJobBatch = jobs_data
+        self.jobs_data: dict | TCJobBatch = qc_runner_data
 
 class SimulationLogger():
     def __init__(self, save_energy=True, save_grad=True, save_nac=True, save_corr=True, save_timigs=True, dir=None, save_geo=True, save_elec=True, save_p=True, save_jobs=True, atoms=None, hdf5=False, hdf5_name='') -> None:
@@ -409,6 +410,7 @@ class SimulationLogger():
                     if not os.path.exists(f'logs_{n}.h5'):
                         shutil.move('logs.h5', f'logs_{n}.h5')
                         break
+            print('OPENING H5 FILE')
             self._h5_file = H5File('logs.h5', opts.logging_mode)
             if hdf5_name == '':
                 hdf5_name = 'electronic'
@@ -452,8 +454,8 @@ class SimulationLogger():
         #     self._h5_file.to_file_and_dir()
 
 
-    def write(self, time, total_E=None, elec_E=None, grads=None, NACs=None, timings=None, elec_p=None, elec_q=None, nuc_p=None, nuc_q=None, jobs_data=None, all_energies=None):
-        data = LoggerData(time, self.atoms, total_E, elec_E, grads, NACs, timings, elec_p, elec_q, nuc_p, None, self.state_labels, jobs_data, all_energies)
+    def write(self, time, total_E=None, elec_E=None, grads=None, NACs=None, timings=None, elec_p=None, elec_q=None, nuc_p=None, nuc_q=None, qc_runner_data=None, all_energies=None):
+        data = LoggerData(time, self.atoms, total_E, elec_E, grads, NACs, timings, elec_p, elec_q, nuc_p, None, self.state_labels, qc_runner_data, all_energies)
         for logger in self._loggers:
             logger.write(data)
 
@@ -517,7 +519,6 @@ class TCJobsLogger_OLD():
         self._file.flush()
 
 class TCJobsLogger():
-    # def __init__(self, file_loc: str, file: h5py.File =None) -> None:
     def __init__(self, file: str = None, h5_file=None) -> None:
         self._file = None
         self._file_loc = None
@@ -625,6 +626,8 @@ class TCJobsLogger():
         H5File.append_dataset(group['geom'], cleaned_batch.results_list[0]['geom'])
         for job in cleaned_batch.jobs:
             results = job.results.copy()
+            if job.name == 'gradient_0':
+                print('IN GRADIENT_0: ', results['dipole_moment'])
             results.pop('geom')
             results.pop('atoms')
             for key in group[job.name]:
@@ -638,8 +641,9 @@ class TCJobsLogger():
                     prev_vals = group[job.name][key][:][-1]
                     fill_result = np.zeros_like(prev_vals)
                     H5File.append_dataset(group[job.name][key], fill_result)
-            H5File.append_dataset(group[job.name]['tc.out'], json.dumps(results['tc.out']))
-            results.pop('tc.out')
+            if 'tc.out' in results:
+                H5File.append_dataset(group[job.name]['tc.out'], json.dumps(results['tc.out']))
+                results.pop('tc.out')
             H5File.append_dataset(group[job.name]['timestep'], data.time)
 
             #   everything else goes into 'other'
