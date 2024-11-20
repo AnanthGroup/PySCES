@@ -7,21 +7,27 @@ import pysces
 import sys
 sys.path.insert(1, os.path.join(os.path.dirname(pysces.__file__), '../../tests'))
 from tools import parse_xyz_data, assert_dictionary, cleanup, reset_directory
+from pysces.qcRunners.TeraChem import TCJobBatch, TCJob
 
 class Test_TC_CIS(unittest.TestCase):
     def __init__(self, methodName: str = "runTest") -> None:
         super().__init__(methodName)
 
-    def test_jobs(self):
-        this_dir = os.path.abspath(os.path.curdir)
-        reset_directory()
-        os.chdir('test_tc_cis')
+    def setUp(self) -> None:
+        #   reset class variables
+        TCJobBatch._TCJobBatch__batch_counter = 0
+        TCJob._TCJob__job_counter = 0
 
         #   Load the reference nacs and use their values as sign references
         #   This will be later fixed with overlaps
         # ref_nacs = np.loadtxt('logs_ref/nac.txt', skiprows=3, max_rows=18)
         # pysces.SignFlipper._debug = True
         # pysces.SignFlipper._ref_nacs = ref_nacs
+
+    def test_jobs(self):
+        this_dir = os.path.abspath(os.path.curdir)
+        reset_directory()
+        os.chdir('test_tc_cis')
 
 
         pysces.reset_settings()

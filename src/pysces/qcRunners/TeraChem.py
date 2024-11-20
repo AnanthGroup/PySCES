@@ -1,15 +1,15 @@
-#!/usr/bin/env python
-# Basic energy calculation
+from tcpb import TCProtobufClient as TCPBClient
+from tcpb.exceptions import ServerError
+from tcpb import terachem_server_pb2 as pb
+
+from pysces.input_simulation import logging_dir, TCRunnerOptions
+from pysces.common import PhaseVars, QCRunner
+
 from datetime import datetime
 import functools
 import os
 import threading
 import numpy as np
-from tcpb import TCProtobufClient as TCPBClient
-from tcpb.exceptions import ServerError
-from tcpb import terachem_server_pb2 as pb
-from pysces import input_simulation as opts
-from pysces.common_obj import PhaseVars
 import time
 import warnings
 import shutil
@@ -30,7 +30,6 @@ _server_processes = {}
 
 #   debug flags
 _DEBUG = bool(int(os.environ.get('DEBUG', False)))
-
 _DEBUG_TRAJ = os.environ.get('DEBUG_TRAJ', False)
 _SAVE_BATCH = os.environ.get('SAVE_BATCH', False)
 _SAVE_DEBUG_TRAJ = os.environ.get('SAVE_DEBUG_TRAJ', False)
@@ -64,7 +63,7 @@ class TCClientExtra(TCPBClient):
         
         self._log = None
         if log:
-            log_file_loc = os.path.join(opts.logging_dir, f'{host}_{port}.log')
+            log_file_loc = os.path.join(logging_dir, f'{host}_{port}.log')
             self._log = open(log_file_loc, 'a')
             self.log_message(f'Client started on {host}:{port}')
         self.server_root = server_root
@@ -569,6 +568,8 @@ class TCJobBatch():
         self.__batchID = TCJobBatch.__batch_counter
 
         caller_info = self._get_caller_info()
+
+        print('CURRENT JOB COUNTER: ', TCJobBatch.__batch_counter)
         
 
     def _get_caller_info(self):
@@ -696,42 +697,10 @@ class TCJobBatch():
         # timings['Wall_Time'] = np.sum(list(timings.values()))
         return timings
 
-class TCRunnerOptions:
-    #   TeraChem runner options
-    host:str = '10.1.1.154'
-    port:int = 9876
-    server_root: str = '.'
-    job_options: dict = {}
-    state_options: dict = {
-        'max_state': 1, 'grads': 'all'
-    }
 
-    #   TeraChem runner job specific options
-    spec_job_opts: dict[str, dict] = {}
-
-    #    TeraChem runner job options for first frame only
-    initial_frame_opts: dict = {
-        'n_frames': 0
-    }
-    #   TeraChem runner client assignments based on job names
-    client_assignments: list[list[str]] = []
-
-    #   log TC job results
-    log_jobs: bool = True
-
-    #   pysces should start it's own TeraChem servers
-    server_gpus: list = []
-
-    # Terachem frequency files
-    fname_tc_xyz: str = "tmp/tc_hf/hf.spherical.freq/Geometry.xyz"
-    fname_tc_geo_freq: str = "tmp/tc_hf/hf.spherical.freq/Geometry.frequencies.dat"
-    fname_tc_redmas: str = "tmp/tc_hf/hf.spherical.freq/Reduced.mass.dat"
-    fname_tc_freq: str = "tmp/tc_hf/hf.spherical.freq/Frequencies.dat"
-
-
-class TCRunner():
+class TCRunner(QCRunner):
     def __init__(self, atoms: list, tc_opts: TCRunnerOptions, max_wait=20) -> None:
-        
+        super().__init__()
         hosts = tc_opts.host
         ports = tc_opts.port
         server_roots = tc_opts.server_root
@@ -887,8 +856,6 @@ class TCRunner():
 
 
     def cleanup(self):
-        for client in self._client_list:
-            client.cleanup()
         self._disconnect_clients()
         if _SAVE_DEBUG_TRAJ:
             with open(_SAVE_DEBUG_TRAJ, 'wb') as file:
@@ -899,6 +866,12 @@ class TCRunner():
 
     def __exit__(self, type, value, traceback):
         self.cleanup()
+
+    def __eq__(self, o: object) -> bool:
+        if isinstance(o, str):
+            if o == 'TCRunner' or o.lower() == 'terachem':
+                return True
+        return super().__eq__(o)
 
     def _disconnect_clients(self):
         if _DEBUG_TRAJ:
@@ -1082,11 +1055,12 @@ class TCRunner():
         self._max_time_list.append(max_time)
         self._max_time = np.mean(self._max_time_list)*5
 
-    def run_TC_new_geom(self, phase_vars: PhaseVars, geom=None):
+    def run_new_geom(self, phase_vars: PhaseVars=None, geom=None):
 
         if phase_vars is not None:
             geom = phase_vars.nuc_q*qcel.constants.bohr2angstroms
         elif geom is not None:
+            #   legacy support for geom, assumed to be in angstroms
             pass
         else:
             raise ValueError('Either phase_vars or geom must be provided')
@@ -1102,7 +1076,7 @@ class TCRunner():
 
             self._client.restart(max_wait=20)
             print('Started new TC Server: re-running current step')
-            job_batch = self.run_TC_new_geom(geom)
+            job_batch = self.run_new_geom(geom)
 
         #   correct signs from previous job
         # use the highest gradient state as the reference job
@@ -1121,6 +1095,8 @@ class TCRunner():
             print("SAVING DEBUG TRAJ FILE: ", _SAVE_DEBUG_TRAJ)
             with open(_SAVE_DEBUG_TRAJ, 'wb') as file:
                 pickle.dump(self._debug_traj, file)
+
+        
                 
         return job_batch
 

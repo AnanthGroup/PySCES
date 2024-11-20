@@ -9,13 +9,47 @@ Created on Wed May  3 19:05:28 2023
 """
 Repository of simulation variables
 """
-import sys, os
+import os
+import sys
 import shutil
 from pysces import input_simulation as opts
 from subprocess import Popen
 from typing import Callable
 import numpy as np
-from .qcRunners.TeraChem import TCRunnerOptions
+
+
+class TCRunnerOptions:
+    #   TeraChem runner options
+    host:str = '10.1.1.154'
+    port:int = 9876
+    server_root: str = '.'
+    job_options: dict = {}
+    state_options: dict = {
+        'max_state': 1, 'grads': 'all'
+    }
+
+    #   TeraChem runner job specific options
+    spec_job_opts: dict[str, dict] = {}
+
+    #    TeraChem runner job options for first frame only
+    initial_frame_opts: dict = {
+        'n_frames': 0
+    }
+    #   TeraChem runner client assignments based on job names
+    client_assignments: list[list[str]] = []
+
+    #   log TC job results
+    log_jobs: bool = True
+
+    #   pysces should start it's own TeraChem servers
+    server_gpus: list = []
+
+    # Terachem frequency files
+    fname_tc_xyz: str = "tmp/tc_hf/hf.spherical.freq/Geometry.xyz"
+    fname_tc_geo_freq: str = "tmp/tc_hf/hf.spherical.freq/Geometry.frequencies.dat"
+    fname_tc_redmas: str = "tmp/tc_hf/hf.spherical.freq/Reduced.mass.dat"
+    fname_tc_freq: str = "tmp/tc_hf/hf.spherical.freq/Frequencies.dat"
+
 
 ########## DEFAULT SETTINGS ##########
 
@@ -59,7 +93,7 @@ restart_file_in = 'restart.out'
 restart_file_out = 'restart.json'
 
 #   type of QC runner, either 'gamess' or 'terachem'
-es_runner: str | Callable[[list], int] = 'gamess'
+qc_runner: str | Callable[[list], int] = 'gamess'
 #QC_RUNNER = 'terachem'
 
 #   TeraChem runner options
@@ -136,6 +170,7 @@ com_ang = np.array([0.0, 0.0, 0.0])
 ##### END GLOBAL SETTINGS #####
 
 
+
 def input_local_settings():
     '''
         Load in settings from the local input file
@@ -186,12 +221,12 @@ def _check_settings(local: dict):
     if 'p0' not in local:
         opts.p0 = [0.0]*nel
     if 'QC_RUNNER' in globals():
-        opts.es_runner = globals()['QC_RUNNER']
+        opts.qc_runner = globals()['QC_RUNNER']
         print('IN QC_RUNNER')
 
     #   set input format to the same type of QC runner
     if opts.mol_input_format == '':
-        opts.mol_input_format = opts.es_runner
+        opts.mol_input_format = opts.qc_runner
 
     #   logging directory
 
@@ -203,7 +238,7 @@ def _check_settings(local: dict):
         elif k.startswith('fname_tc_'):
             tc_runner_opts.__dict__[k] = v
 
-    if opts.es_runner == 'terachem':
+    if opts.qc_runner == 'terachem':
         max_state = tc_runner_opts.state_options.get('max_state', False)
         grads = tc_runner_opts.state_options.get('grads', False)
         
@@ -262,7 +297,7 @@ def print_settings():
         print(f'Integrator time step:               {Hrk4} a.u.')
 
     print(f'Normal mode frequency scaling:      {frq_scale}')
-    print(f'Electronic structure runner:        {es_runner}')
+    print(f'Electronic structure runner:        {qc_runner}')
     print(f'Molecule input format:              {mol_input_format}')
     print(f'Restart file will be written to     {restart_file_in}')
     print(f'current working directory:          {os.path.abspath(os.path.curdir)}')
@@ -286,3 +321,4 @@ def print_settings():
 
 # _check_settings()
 # _set_seed()
+

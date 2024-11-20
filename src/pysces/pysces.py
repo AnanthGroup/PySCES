@@ -13,13 +13,14 @@ Main code to run LSC-IVR dynamics
 import os
 import numpy as np
 import argparse
-from pysces.input_gamess import * 
+from pysces.input_gamess import *
+# import pysces.subroutines as subs
 from pysces.subroutines import *
 from pysces.fileIO import print_ascii_art, run_restart_module
 from pysces.h5file import run_h5_module
 __location__ = ''
 
-from pysces.input_simulation import * 
+# from pysces.input_simulation import * 
 
 
 def main():

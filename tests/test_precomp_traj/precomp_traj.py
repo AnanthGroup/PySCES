@@ -10,14 +10,25 @@ import pysces
 class Test_Precompute(unittest.TestCase):
     def __init__(self, methodName: str = "runTest") -> None:
         super().__init__(methodName)
+        self._DEBUG_TRAJ = None
+
+    def setUp(self) -> None:
+        pysces.qcRunners.TeraChem.TCJob.__job_counter = 0
+        pysces.qcRunners.TeraChem.TCJobBatch.__batch_counter = 0
+        self._DEBUG_TRAJ = pysces.qcRunners.TeraChem._DEBUG_TRAJ
+
+    def tearDown(self) -> None:
+        pysces.qcRunners.TeraChem._DEBUG_TRAJ = self._DEBUG_TRAJ
 
     def test_jobs(self):
         reset_directory()
         os.chdir('test_precomp_traj')
 
-        pysces.qcRunners.TeraChem._DEBUG_TRAJ = 'debug_traj.pkl'
+        # orig_debug_val = pysces.qcRunners.TeraChem._DEBUG_TRAJ
         pysces.reset_settings()
+        pysces.qcRunners.TeraChem._DEBUG_TRAJ = 'debug_traj.pkl'
         pysces.run_simulation()
+        # pysces.qcRunners.TeraChem._DEBUG_TRAJ = orig_debug_val
 
         #   check simple panda readable data
         for file in ['corr.txt', 'electric_pq.txt', 'energy.txt', 'grad.txt', 'nac.txt']:
@@ -44,6 +55,7 @@ class Test_Precompute(unittest.TestCase):
         with open('restart.json') as file:
             restart_tst = json.load(file)
         assert_dictionary(self, restart_ref, restart_tst)
+
 
         cleanup()
 

@@ -12,7 +12,7 @@ from .h5file import H5File, H5Group, H5Dataset
 # from .input_simulation import extra_loggers, logging_mode
 from . import input_simulation as opts
 from .serialization import serialize
-from .common_obj import PhaseVars, ESVars
+from .common import PhaseVars, ESVars
 
 ANG_2_BOHR = 1.8897259886
 
@@ -234,6 +234,7 @@ def read_restart(file_loc: str='restart.out', ndof: int=0, integrator: str='RK4'
 
             if 'com' in data: 
                 opts.com_ang = np.array(data['com'])
+                print('IN READING RESTART: ', opts.com_ang)
    
             elecE = np.array(data.get('elec_E', np.array([])))
             grads = np.array(data.get('grads', np.array([])))
@@ -670,7 +671,6 @@ class NucGeoLogger():
         if not self._initialized:
             self._initialize(qCart_ang)
 
-        print('In NucGeoLogger.write()', com, opts.com_ang)
         if com is None:
             com = opts.com_ang
 
@@ -797,8 +797,9 @@ class TimingsLogger(BaseLogger):
         #   compute total
         total = 0.0
         for key, value in times.items():
-            if 'gradient_' in key or 'nac_' in key or 'energy_' in key:
-                total += value
+            total += value
+            # if 'gradient_' in key or 'nac_' in key or 'energy_' in key:
+                # total += value
 
         if self._file:
             # Write timings
@@ -810,7 +811,7 @@ class TimingsLogger(BaseLogger):
 
         #   print a sumamry for this timestep
         print("Electronic Structure Timings:")
-        g_0, g_n, d_0n, d_nm = 0.0, 0.0, 0.0, 0.0
+        g_0, g_n, d_0n, d_nm, other = 0.0, 0.0, 0.0, 0.0, 0.0
         for key, value in times.items():
             if 'gradient_0' == key:
                 g_0 = value
@@ -824,12 +825,15 @@ class TimingsLogger(BaseLogger):
             elif 'nac_' in key:
                 d_nm += value
                 self._totals['nac_n_m'] += value
+            else:
+                other += value
         self._totals['total'] += total
         
-        print(f'    Ground state gradient:  { g_0:.2f} s')
+        print(f'    Ground state gradient:   {g_0:.2f} s')
         print(f'    Excited state gradients: {g_n:.2f} s')
         print(f'    Ground-Excited NACs:     {d_0n:.2f} s')
         print(f'    Excited-Excited NACs:    {d_nm:.2f} s')
+        print(f'    Other:                   {other:.2f} s')
         print(f'    Total:                   {total:.2f} s')
         print("")
         self._n_steps += 1

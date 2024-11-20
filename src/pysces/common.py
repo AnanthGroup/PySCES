@@ -3,6 +3,8 @@ from scipy.interpolate import interp1d
 from collections import deque
 from pysces.input_simulation import * 
 from typing import Optional
+from abc import abstractmethod
+
 
 class PhaseVars:
     def __init__(self, elec_q0=None, elec_p0=None, nuc_q0=None, nuc_p0=None):
@@ -62,6 +64,17 @@ class PhaseVarHistory:
 
         return PhaseVars.from_concatenated(self._interp_func(time))
     
+class QCRunner:
+    def __init__(self):
+        pass
+
+    @abstractmethod
+    def run_new_geom(self, phase_vars: PhaseVars, geom=None):
+        pass
+
+    def cleanup(self):
+        pass
+    
 class ESVars:
     def __init__(self, 
                 all_energies: Optional[np.array] = None, 
@@ -77,11 +90,15 @@ class ESVars:
 
         all_energies : np.ndarray
             All energies of the system, including those of the states being propogated on
-        elecE : np.ndarray
+        elecE : np.ndarray, shape=(nstates,)
             Electronic energies being propogated on. Corresponds to the gradients and NACs.
             This is a subset of all_energies.
-        grads : np.ndarray
-
+        grads : np.ndarray, shape=(nstates, ndof)
+            Gradients of the electronic energies being propogated on.
+        nacs : np.ndarray, shape=(nstates, nstates, ndof)
+            Non-adiabatic couplings between the electronic energies being propogated.
+        trans_dips : np.ndarray, shape=(nstates, nstates, 3)
+            Transition dipoles between the electronic energies being propogated.
         '''
 
         self.all_energies = all_energies

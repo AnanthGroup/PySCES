@@ -21,7 +21,8 @@ import random
 import pandas
 import time
 from collections import deque
-from pysces.input_simulation import * 
+from pysces.input_simulation import *
+from pysces import input_simulation as opts # we should start moving the global variables to the opts module
 from pysces.input_gamess import nacme_option as opt 
 from pysces.fileIO import SimulationLogger, write_restart, read_restart
 from pysces.interpolation import SignFlipper
@@ -76,7 +77,6 @@ def get_geo_hess():
     return(amu_mat, xyz_ang, frq, redmas, L, U, atom_number_mat)
 
 def get_geo_hess_terachem():
-    global com_ang
     ##--------------------------------------------------
     ## 1 & 2 Read Cartesian coordinate of initial geometry
     ##--------------------------------------------------
@@ -191,8 +191,8 @@ def get_geo_hess_terachem():
     # compute center of mass and remove from geometry
     amu = np.array(amu)
     xyz_shaped = xyz_ang.reshape((-1, 3))
-    com_ang = np.average(xyz_shaped, axis=0, weights=amu)
-    xyz_ang = (xyz_shaped - com_ang).flatten()
+    opts.com_ang = np.average(xyz_shaped, axis=0, weights=amu)
+    xyz_ang = (xyz_shaped - opts.com_ang).flatten()
 
     atom_number_mat = [] # Returns an empty array. Not necessary for terachem option
     return(amu_mat, xyz_ang, frq, redmas, L, U, atom_number_mat)
@@ -200,7 +200,6 @@ def get_geo_hess_terachem():
 
 def get_geo_hess_gamess():
     # Read Cartesian coordinate of initial geometry
-    global com_ang
     atom_number = []
     xyz_ang = np.zeros(nnuc)
     atom_number_mat = np.zeros((nnuc, nnuc))
@@ -274,8 +273,8 @@ def get_geo_hess_gamess():
     #   compute center of mass and remove from geometry
     amu = np.array(amu)
     xyz_shaped = xyz_ang.reshape((-1, 3))
-    com_ang = np.average(xyz_shaped, axis=0, weights=amu)
-    xyz_ang = (xyz_shaped - com_ang).flatten()
+    opts.com_ang = np.average(xyz_shaped, axis=0, weights=amu)
+    xyz_ang = (xyz_shaped - opts.com_ang).flatten()
 
     return amu_mat, xyz_ang, frq, redmas, L, U, atom_number_mat
 
@@ -459,7 +458,7 @@ def rotate_norm_to_cart(qN, pN, U, amu_mat):
 #####################################################
 def record_nuc_geo(restart, total_time, atoms, qCart, logger:SimulationLogger=None):
     if logger is not None:
-        return logger._nuc_geo_logger.write(total_time, atoms, qCart/ang2bohr, com_ang)
+        return logger._nuc_geo_logger.write(total_time, atoms, qCart/ang2bohr, opts.com_ang)
     f = open(os.path.join(__location__, 'nuc_geo.xyz'), 'a')
     
 
@@ -469,9 +468,9 @@ def record_nuc_geo(restart, total_time, atoms, qCart, logger:SimulationLogger=No
     for i in range(natom):
         f.write('{:<5s}{:>12.6f}{:>12.6f}{:>12.6f} \n'.format(
             atoms[i],
-            qCart_ang[3*i+0] + com_ang[0],
-            qCart_ang[3*i+1] + com_ang[1],
-            qCart_ang[3*i+2] + com_ang[2]))
+            qCart_ang[3*i+0] + opts.com_ang[0],
+            qCart_ang[3*i+1] + opts.com_ang[1],
+            qCart_ang[3*i+2] + opts.com_ang[2]))
     f.close()
     return()
 
@@ -1538,7 +1537,7 @@ def scipy_rk4(elecE, grad, nac, yvar, dt, au_mas):
 def rk4(initq, initp, tStop, H, restart, amu_mat, U, AN_mat):
     logger = SimulationLogger(dir=logging_dir, save_jobs=tcr_log_jobs, hdf5=hdf5_logging)
 
-    if es_runner == 'terachem':
+    if qc_runner == 'terachem':
         from pysces.qcRunners.TeraChem import TCRunner, format_output_LSCIVR
         logger.state_labels = [f'S{x}' for x in tcr_state_options['grads']]
     
@@ -1571,7 +1570,7 @@ def rk4(initq, initp, tStop, H, restart, amu_mat, U, AN_mat):
         qC, pC = q[nel:], p[nel:]
         y = np.concatenate((q, p))
 
-        if es_runner == 'terachem':
+        if qc_runner == 'terachem':
             tc_runner = TCRunner(atoms, tc_runner_opts)
             tc_runner._prev_ref_job = tcr_ref_job
 
@@ -1586,15 +1585,15 @@ def rk4(initq, initp, tStop, H, restart, amu_mat, U, AN_mat):
     #   Run first electronic structure calculation if we are not restarting,
     #   or if we are restarting and the electronic structure information is missing
     if restart == 0 or len(elecE) == 0 or len(grad) == 0 or len(nac) == 0:
-        if es_runner == 'gamess':
+        if qc_runner == 'gamess':
             elecE, grad, nac, _ = run_gamess_at_geom(input_name, AN_mat, qC, atoms)
-        elif es_runner == 'terachem':
+        elif qc_runner == 'terachem':
             tc_runner = TCRunner(atoms, tc_runner_opts)
-            job_batch = tc_runner.run_TC_new_geom(qC/ang2bohr)
+            job_batch = tc_runner.run_new_geom(geom=qC/ang2bohr)
             timings = job_batch.timings
             _,       all_energies, elecE, grad, nac, trans_dips = format_output_LSCIVR(job_batch.results_list)
         else:
-            timings, all_energies, elecE, grad, nac, trans_dips = es_runner.run_new_geom(qC/ang2bohr, p[nel:])
+            timings, all_energies, elecE, grad, nac, trans_dips = qc_runner.run_new_geom(qC/ang2bohr, p[nel:])
 
         # Total initial energy at t=0
         init_energy = get_energy(au_mas, q, p, elecE)
@@ -1636,14 +1635,14 @@ def rk4(initq, initp, tStop, H, restart, amu_mat, U, AN_mat):
 
         qC = y[nel:ndof]
 
-        if es_runner == 'gamess':
+        if qc_runner == 'gamess':
             elecE, grad, nac, _ = run_gamess_at_geom(input_name, AN_mat, qC, atoms)
-        elif es_runner == 'terachem':
-            job_batch = tc_runner.run_TC_new_geom(qC/ang2bohr)
+        elif qc_runner == 'terachem':
+            job_batch = tc_runner.run_new_geom(geom=qC/ang2bohr)
             timings = job_batch.timings
             _, all_energies, elecE, grad, nac, trans_dips  = format_output_LSCIVR(job_batch.results_list)
         else:
-            timings, all_energies, elecE, grad, nac, trans_dips = es_runner.run_new_geom(qC/ang2bohr, y[-natom*3:])
+            timings, all_energies, elecE, grad, nac, trans_dips = qc_runner.run_new_geom(qC/ang2bohr, y[-natom*3:])
         
         #correct nac sign
         nac = sign_flipper.correct_nac_sign(nac, trans_dips)
@@ -1663,14 +1662,14 @@ def rk4(initq, initp, tStop, H, restart, amu_mat, U, AN_mat):
         # Record nuclear geometry, logs, and restarts
         record_nuc_geo(restart, t, atoms, qC, logger)
         logger.write(t, total_E=new_energy, elec_E=elecE,  grads=grad, NACs=nac, timings=timings, elec_q=y[0:nel], elec_p=y[ndof:ndof+nel], nuc_p=y[-natom*3:], jobs_data=job_batch, all_energies=all_energies)
-        write_restart(restart_file_out, [Y[-1][:ndof], Y[-1][ndof:]], sign_flipper.nac_hist, sign_flipper.tdm_hist, new_energy, t, nel, 'rk4', elecE, grad, nac, com_ang)
+        write_restart(restart_file_out, [Y[-1][:ndof], Y[-1][ndof:]], sign_flipper.nac_hist, sign_flipper.tdm_hist, new_energy, t, nel, 'rk4', elecE, grad, nac, opts.com_ang)
 
         if t == tStop:
             with open(os.path.join(__location__, 'progress.out'), 'a') as f:
                 f.write('Propagated to the final time step.\n')
 
-    write_restart(restart_file_out, [Y[-1][:ndof], Y[-1][ndof:]], sign_flipper.nac_hist, sign_flipper.tdm_hist, energy[-1], t, nel, 'rk4', elecE, grad, nac, com_ang)
-    if es_runner == 'terachem':
+    write_restart(restart_file_out, [Y[-1][:ndof], Y[-1][ndof:]], sign_flipper.nac_hist, sign_flipper.tdm_hist, energy[-1], t, nel, 'rk4', elecE, grad, nac, opts.com_ang)
+    if qc_runner == 'terachem':
         tc_runner.cleanup()
 
     coord = np.zeros((2,ndof,len(Y)))

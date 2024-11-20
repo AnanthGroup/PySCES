@@ -15,6 +15,7 @@ class Test_GAMESS_Restart(unittest.TestCase):
     def test_jobs(self):
         reset_directory()
         os.chdir('test_gamess_restart')
+        cleanup('logs', 'logs_1', 'logs_2', 'logs_combo') # in case of previous failed tests
 
         with open('geo_gamess', 'w') as file:
             file.write('6\n')
@@ -29,6 +30,7 @@ class Test_GAMESS_Restart(unittest.TestCase):
         pysces.reset_settings()
         pysces.run_simulation()
         shutil.move('logs', 'logs_1')
+
 
         shutil.copy2('input_simulation_local_2.py', 'input_simulation_local.py')
         pysces.reset_settings()

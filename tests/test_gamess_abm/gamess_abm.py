@@ -70,7 +70,8 @@ class Test_GAMESS_ABM(unittest.TestCase):
 
     def test_jobs(self):
         reset_directory()
-        os.chdir('test_gamess_wigner_abm')
+        os.chdir('test_gamess_abm')
+        cleanup('logs', 'nuc_geo.xyz', 'corr.out', 'energy.out', 'restart.out')
 
         with open('geo_gamess', 'w') as file:
             file.write('6\n')
