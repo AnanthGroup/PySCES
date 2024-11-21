@@ -1588,7 +1588,7 @@ def rk4(initq, initp, tStop, H, restart, amu_mat, U, AN_mat):
         if qc_runner == 'gamess':
             elecE, grad, nac, _ = run_gamess_at_geom(input_name, AN_mat, qC, atoms)
         elif qc_runner == 'terachem':
-            timings, all_energies, elecE, grad, nac, trans_dips = tc_runner.run_new_geom(geom=qC/ang2bohr)
+            all_energies, elecE, grad, nac, trans_dips, timings = tc_runner.run_new_geom(geom=qC/ang2bohr)
             qc_runner_data = tc_runner._prev_job_batch
         else:
             timings, all_energies, elecE, grad, nac, trans_dips = qc_runner.run_new_geom(qC/ang2bohr, p[nel:])
@@ -1636,7 +1636,7 @@ def rk4(initq, initp, tStop, H, restart, amu_mat, U, AN_mat):
         if qc_runner == 'gamess':
             elecE, grad, nac, _ = run_gamess_at_geom(input_name, AN_mat, qC, atoms)
         elif qc_runner == 'terachem':
-            timings, all_energies, elecE, grad, nac, trans_dips = tc_runner.run_new_geom(geom=qC/ang2bohr)
+            all_energies, elecE, grad, nac, trans_dips, timings = tc_runner.run_new_geom(geom=qC/ang2bohr)
             qc_runner_data = tc_runner._prev_job_batch
         else:
             timings, all_energies, elecE, grad, nac, trans_dips = qc_runner.run_new_geom(qC/ang2bohr, y[-natom*3:])

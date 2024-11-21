@@ -1105,7 +1105,7 @@ class TCRunner(QCRunner):
         all_energies, elecE, grad, nac, trans_dips = format_output_LSCIVR(job_batch.results_list)
         self._prev_job_batch = job_batch
                 
-        return job_batch.timings, all_energies, elecE, grad, nac, trans_dips
+        return (all_energies, elecE, grad, nac, trans_dips, job_batch.timings)
 
     def _run_TC_new_geom_kernel(self, geom):
         self._n_calls += 1
