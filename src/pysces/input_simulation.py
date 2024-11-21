@@ -134,7 +134,7 @@ mol_input_format = ''
 logging_dir = 'logs'
 
 #   HDF5 File logging
-hdf5_logging = False
+hdf5_logging = True
 
 logging_mode = 'a'
 

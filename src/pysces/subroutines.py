@@ -1562,6 +1562,7 @@ def rk4(initq, initp, tStop, H, restart, amu_mat, U, AN_mat):
     timings      = {}
     input_name   = 'cas'
     qc_runner_data = None
+    qc_runner_data = None
     au_mas       = np.diag(amu_mat) * amu2au # masses of atoms in atomic unit (vector)
     t            = 0.0
     initial_time = 0.0
