@@ -13,7 +13,7 @@ from .h5file import H5File, H5Group, H5Dataset
 # from .input_simulation import extra_loggers, logging_mode
 from . import input_simulation as opts
 from .serialization import serialize
-from .common import PhaseVars, ESVars
+from .common import PhaseVars, ESResults
 
 ANG_2_BOHR = 1.8897259886
 
@@ -371,9 +371,8 @@ def write_restart(file_loc: str,
     else:
         exit(f'ERROR: only RK4 is implimented fileIO')
 
-
     
-#   TODO: Convert to a @dataclass
+#   TODO: Convert to a @dataclass and use objects in common module
 class LoggerData():
     def __init__(self, time, atoms=None, total_E=None, elec_E=None, grads=None, NACs=None, timings=None, elec_p=None, elec_q=None, nuc_p=None, nuc_q=None, state_labels=None, qc_runner_data=None, all_energies = None) -> None:
         self.time = time
@@ -410,7 +409,6 @@ class SimulationLogger():
                     if not os.path.exists(f'logs_{n}.h5'):
                         shutil.move('logs.h5', f'logs_{n}.h5')
                         break
-            print('OPENING H5 FILE')
             self._h5_file = H5File('logs.h5', opts.logging_mode)
             if hdf5_name == '':
                 hdf5_name = 'electronic'
@@ -453,17 +451,36 @@ class SimulationLogger():
         # if self._h5_file:
         #     self._h5_file.to_file_and_dir()
 
+    def write_LEGACY(self, 
+                     time, 
+                     total_E=None, 
+                     elec_E=None, 
+                     grads=None, 
+                     NACs=None, 
+                     timings=None, 
+                     elec_p=None, 
+                     elec_q=None, 
+                     nuc_p=None, 
+                     nuc_q=None, 
+                     qc_runner_data=None, 
+                     all_energies=None):
+        self.write(ESResults(all_energies, elec_E, grads, NACs, timings), PhaseVars(time, elec_q, elec_p, nuc_q, nuc_p), total_E, qc_runner_data)
 
-    def write(self, time, total_E=None, elec_E=None, grads=None, NACs=None, timings=None, elec_p=None, elec_q=None, nuc_p=None, nuc_q=None, qc_runner_data=None, all_energies=None):
-        data = LoggerData(time, self.atoms, total_E, elec_E, grads, NACs, timings, elec_p, elec_q, nuc_p, None, self.state_labels, qc_runner_data, all_energies)
+    def write(self, 
+              es_results: ESResults, 
+              phase_vars: PhaseVars, 
+              total_E=None, 
+              qc_runner_data=None):
+        data = LoggerData(phase_vars.time, self.atoms, total_E, es_results.elecE, es_results.grads, es_results.nacs, es_results.timings, phase_vars.elec_p, phase_vars.elec_q, phase_vars.nuc_p, None, self.state_labels, qc_runner_data, es_results.all_energies)
+
         for logger in self._loggers:
             logger.write(data)
 
         if self._h5_group:
             H5File.append_dataset(self._h5_group['time'], data.time)
-            if 'atoms' not in self._h5_group:
-                out_data = [np.void(str.encode(x)) for x in data.atoms]
-                out_data = np.array(data.atoms, dtype='S10')
+            # if 'atoms' not in self._h5_group:
+            #     out_data = [np.void(str.encode(x)) for x in data.atoms]
+            #     out_data = np.array(data.atoms, dtype='S10')
                 # g = self._h5_group.create_dataset('atoms', data=out_data)
 
         if self._h5_file:
@@ -604,7 +621,6 @@ class TCJobsLogger():
             jobs_data = self._next_dataset
             self._next_dataset = None
         else:
-            print('fileIO.py: No jobs data found')
             return
         
         results: list[dict] = deepcopy(jobs_data.results_list)
@@ -782,6 +798,11 @@ class TimingsLogger(BaseLogger):
         print()
 
     def _initialize(self, data: LoggerData):
+        if data.timings is None:
+            if self._file:
+                self._file.close()
+                self._file = None
+            return
         if self._file:
             self._file.write(f'{"Total_QC":>12s}')
             for key, value in data.timings.items():
@@ -796,7 +817,9 @@ class TimingsLogger(BaseLogger):
 
     def write(self, data: LoggerData):
         super().write(data)
-
+        if not self._file and not self._h5_dataset:
+            return
+        
         times = data.timings
         #   compute total
         total = 0.0

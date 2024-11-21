@@ -3,7 +3,7 @@ from tcpb.exceptions import ServerError
 from tcpb import terachem_server_pb2 as pb
 
 from pysces.input_simulation import logging_dir, TCRunnerOptions
-from pysces.common import PhaseVars, QCRunner
+from pysces.common import PhaseVars, QCRunner, ESResults
 from pysces.h5file import H5File, H5Dataset, H5Group, h5py
 
 from datetime import datetime
@@ -36,6 +36,8 @@ _DEBUG = bool(int(os.environ.get('DEBUG', False)))
 _DEBUG_TRAJ = os.environ.get('DEBUG_TRAJ', False)
 _SAVE_BATCH = os.environ.get('SAVE_BATCH', False)
 _SAVE_DEBUG_TRAJ = os.environ.get('SAVE_DEBUG_TRAJ', False)
+
+ang2bohr = 1.8897259886         # angstroms to bohr
 
 
 def synchronized(function):
@@ -1061,10 +1063,10 @@ class TCRunner(QCRunner):
         self._max_time_list.append(max_time)
         self._max_time = np.mean(self._max_time_list)*5
 
-    def run_new_geom(self, phase_vars: PhaseVars=None, geom=None):
+    def run_new_geom(self, phase_vars: PhaseVars=None, geom=None) -> ESResults:
 
         if phase_vars is not None:
-            geom = phase_vars.nuc_q*qcel.constants.bohr2angstroms
+            geom = phase_vars.nuc_q/ang2bohr
         elif geom is not None:
             #   legacy support for geom, assumed to be in angstroms
             pass
@@ -1102,9 +1104,17 @@ class TCRunner(QCRunner):
             with open(_SAVE_DEBUG_TRAJ, 'wb') as file:
                 pickle.dump(self._debug_traj, file)
 
-        return (*format_output_LSCIVR(job_batch.results_list), job_batch.timings)
+        all_energies, energies, grads, nacs, trans_dips = format_output_LSCIVR(job_batch.results_list)
+        es_result = ESResults(all_energies, energies, grads, nacs, trans_dips, job_batch.timings)
+        return es_result
+    
+    def run_new_geom_LEGACY(self, phase_vars: PhaseVars=None, geom=None):
+        res = self.run_new_geom(phase_vars, geom)
+        return (res.all_energies, res.elecE, res.grads, res.nacs, res.trans_dips, res.timings)
+
+        # return (*format_output_LSCIVR(job_batch.results_list), job_batch.timings)
                 
-        # return job_batch
+        # # return job_batch
 
     def _run_TC_new_geom_kernel(self, geom):
         self._n_calls += 1

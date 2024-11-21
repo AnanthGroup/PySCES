@@ -1,5 +1,5 @@
 import pysces.subroutines as subs
-from pysces.common import PhaseVars, ESVars, QCRunner
+from pysces.common import PhaseVars, ESResults, QCRunner
 import qcelemental as qcel
 import time
 
@@ -30,5 +30,5 @@ class GamessRunner(QCRunner):
         elecE, grad, nac = subs.run_gamess_at_geom(self.input_name, self.AN_mat, geom, self.atoms)
         timings = {'Total': time.time() - start_time}
 
-        out_data = ESVars(elecE, elecE, grad, nac, None)
+        out_data = ESResults(elecE, elecE, grad, nac, None)
         return out_data, timings

@@ -3,10 +3,13 @@ import pandas
 import io
 import numpy as np
 import os
+import pysces
+import sys
+sys.path.insert(1, os.path.join(os.path.dirname(pysces.__file__), '../../tests'))
 from tools import parse_xyz_data, assert_dictionary, cleanup, reset_directory
 import json
 
-import pysces
+
 
 class Test_GAMESS_RK4(unittest.TestCase):
     def __init__(self, methodName: str = "runTest") -> None:
@@ -55,4 +58,7 @@ class Test_GAMESS_RK4(unittest.TestCase):
         assert_dictionary(self, restart_ref, restart_tst)
 
         cleanup('logs', 'logs_1', 'logs_2', 'logs_combo')
+
+if __name__ == '__main__':
+    unittest.main()
     
