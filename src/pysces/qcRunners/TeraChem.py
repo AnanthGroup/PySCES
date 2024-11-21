@@ -1096,9 +1096,9 @@ class TCRunner(QCRunner):
             with open(_SAVE_DEBUG_TRAJ, 'wb') as file:
                 pickle.dump(self._debug_traj, file)
 
-        
+        return (*format_output_LSCIVR(job_batch.results_list), job_batch.timings)
                 
-        return job_batch
+        # return job_batch
 
     def _run_TC_new_geom_kernel(self, geom):
         self._n_calls += 1
@@ -1715,5 +1715,4 @@ def format_output_LSCIVR(job_data: list[dict]):
                 ivr_trans_dips = None
     print(" ---------------------------------")
 
-    return None, all_energies, ivr_energies, ivr_grads, ivr_nacs, ivr_trans_dips
-    # return energies, grads, nacs
+    return all_energies, ivr_energies, ivr_grads, ivr_nacs, ivr_trans_dips

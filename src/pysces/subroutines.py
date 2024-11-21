@@ -26,6 +26,7 @@ from pysces import input_simulation as opts # we should start moving the global 
 from pysces.input_gamess import nacme_option as opt 
 from pysces.fileIO import SimulationLogger, write_restart, read_restart
 from pysces.interpolation import SignFlipper
+from pysces.common import PhaseVars, PhaseVarHistory, QCRunner
 # __location__ = os.path.realpath(os.path.join(os.getcwd(), os.path.dirname(__file__)))
 __location__ = ''
 
@@ -1534,12 +1535,27 @@ def scipy_rk4(elecE, grad, nac, yvar, dt, au_mas):
     return(result.y.flatten())
 
 
-def rk4(initq, initp, tStop, H, restart, amu_mat, U, AN_mat):
-    logger = SimulationLogger(dir=logging_dir, save_jobs=tcr_log_jobs, hdf5=hdf5_logging)
-
-    if qc_runner == 'terachem':
+def get_qc_runner(atoms, AN_mat):
+    if opts.qc_runner == 'terachem':
         from pysces.qcRunners.TeraChem import TCRunner, format_output_LSCIVR
-        logger.state_labels = [f'S{x}' for x in tcr_state_options['grads']]
+        qc_runner = TCRunner(atoms, tc_runner_opts)
+        qc_runner._prev_ref_job = tcr_ref_job
+        opts.state_labels = [f'S{x}' for x in tcr_state_options['grads']]
+        return qc_runner
+    elif opts.qc_runner == 'gamess':
+        from pysces.qcRunners.Gamess import GamessRunner
+        qc_runner = GamessRunner(atoms, AN_mat)
+        return qc_runner
+    elif isinstance(opts.qc_runner, QCRunner):
+        return opts.qc_runner
+    else:
+        sys.exit("Invalid QC Runner. Exitting.")
+
+
+def rk4_with_inteprolation(initq, initp, tStop, H, restart, amu_mat, U, AN_mat):
+    atoms = get_atom_label()
+    qc_runner = get_qc_runner(atoms, AN_mat)
+    logger = SimulationLogger(dir=logging_dir, save_jobs=tcr_log_jobs, hdf5=hdf5_logging, atoms=atoms)
     
     trans_dips   = None
     all_energies = None
@@ -1559,9 +1575,6 @@ def rk4(initq, initp, tStop, H, restart, amu_mat, U, AN_mat):
     # hist_length = 2 #this is the only implemented length
     sign_flipper = SignFlipper(nel, 2, nnuc, 'LSC')
 
-    # Get atom labels
-    atoms = get_atom_label()
-    logger.atoms = atoms
 
     #   Initialization
     if restart == 1:
@@ -1570,9 +1583,119 @@ def rk4(initq, initp, tStop, H, restart, amu_mat, U, AN_mat):
         qC, pC = q[nel:], p[nel:]
         y = np.concatenate((q, p))
 
-        if qc_runner == 'terachem':
-            tc_runner = TCRunner(atoms, tc_runner_opts)
-            tc_runner._prev_ref_job = tcr_ref_job
+    elif restart == 0:
+        q[:nel], p[:nel] = initq[:nel], initp[:nel]
+        qN, pN  = initq[nel:], initp[nel:]                # collections of nuclear variables in normal coordinate
+        qC, pC  = rotate_norm_to_cart(qN, pN, U, amu_mat) # collections of nuclear variables in Cartesian coordinate
+        q[nel:], p[nel:] = qC, pC
+        y = np.concatenate((q, p))
+        nac_hist, tdm_hist = np.empty(0), np.empty(0)
+
+    #   Run first electronic structure calculation if we are not restarting,
+    #   or if we are restarting and the electronic structure information is missing
+    if restart == 0 or len(elecE) == 0 or len(grad) == 0 or len(nac) == 0:
+        timings, all_energies, elecE, grad, nac, trans_dips = qc_runner.run_new_geom(geom=qC/ang2bohr)
+
+        # Total initial energy at t=0
+        init_energy = get_energy(au_mas, q, p, elecE)
+
+        # Record nuclear geometry in angstrom and log the rest
+        record_nuc_geo(restart, t, atoms, qC, logger)
+        logger.write(t, init_energy, elecE,  grad, nac, timings, elec_p=p[0:nel], elec_q=q[0:nel], nuc_p=p[nel:], jobs_data=job_batch, all_energies=all_energies)
+
+    # Create nac history for sign-flip extrapolation
+    # sign_flipper.set_history(nac, np.empty(0), trans_dips, np.empty(0))
+    sign_flipper.set_history(nac, nac_hist, trans_dips, tdm_hist)
+    # exit()
+
+    opt['guess'] = 'moread'
+    X,Y = [],[]
+    X.append(t)
+    Y.append(y)
+    energy      = [init_energy]
+
+    ### Runge-Kutta routine ###
+    while t < tStop:
+        print(f"##### Performing MD Step Time: {t:8.2f} a.u. ##### ")
+
+        H  = min(H, tStop-t)
+        y  = scipy_rk4(elecE,grad,nac,y,H,au_mas)
+        t += H
+        X.append(t)
+        Y.append(y)
+        
+        # ES calculation at new y
+        qC = y[nel:ndof]
+
+        timings, all_energies, elecE, grad, nac, trans_dips = qc_runner.run_new_geom(geom=qC/ang2bohr)
+        
+        #correct nac sign
+        nac = sign_flipper.correct_nac_sign(nac, trans_dips)
+
+        # Compute energy
+        new_energy = get_energy(au_mas, y[:ndof], y[ndof:], elecE)
+
+        # Check energy conservation
+        if (init_energy-new_energy)/init_energy > 0.02: # 2% deviation = terrible without doubt
+            sys.exit("Energy conservation failed during the propagation. Exitting.")
+
+        # Update & store energy
+        energy.append(new_energy)
+
+        # Record nuclear geometry, logs, and restarts
+        record_nuc_geo(restart, t, atoms, qC, logger)
+        logger.write(t, total_E=new_energy, elec_E=elecE,  grads=grad, NACs=nac, timings=timings, elec_q=y[0:nel], elec_p=y[ndof:ndof+nel], nuc_p=y[-natom*3:], jobs_data=job_batch, all_energies=all_energies)
+        write_restart(restart_file_out, [Y[-1][:ndof], Y[-1][ndof:]], sign_flipper.nac_hist, sign_flipper.tdm_hist, new_energy, t, nel, 'rk4', elecE, grad, nac, opts.com_ang)
+
+    write_restart(restart_file_out, [Y[-1][:ndof], Y[-1][ndof:]], sign_flipper.nac_hist, sign_flipper.tdm_hist, energy[-1], t, nel, 'rk4', elecE, grad, nac, opts.com_ang)
+    qc_runner.cleanup()
+
+    coord = np.zeros((2,ndof,len(Y)))
+    for i in range(len(Y)):
+        coord[0,:,i] = Y[i][:ndof]
+        coord[1,:,i] = Y[i][ndof:]
+
+    return (np.array(X), coord, initial_time)
+
+def rk4(initq, initp, tStop, H, restart, amu_mat, U, AN_mat):
+
+    #   Initialize variables
+    trans_dips   = None
+    all_energies = None
+    timings      = {}
+    input_name   = 'cas'
+    qc_runner_data = None
+    au_mas       = np.diag(amu_mat) * amu2au # masses of atoms in atomic unit (vector)
+    t            = 0.0
+    initial_time = 0.0
+    q, p         = np.zeros(ndof), np.zeros(ndof)  # collections of all mapping variables
+    elecE, grad, nac = np.empty(0), np.empty(0), np.empty(0)
+
+    #   very first step does not need a GAMESS guess
+    opt['guess'] = ''
+
+    # History length for nonadiabatic coupling vector and transition dipole moments
+    # hist_length = 2 #this is the only implemented length
+    sign_flipper = SignFlipper(nel, 2, nnuc, 'LSC')
+
+    logger = SimulationLogger(dir=logging_dir, save_jobs=tcr_log_jobs, hdf5=hdf5_logging)
+
+    # Get atom labels
+    atoms = get_atom_label()
+    logger.atoms = atoms
+
+    if qc_runner == 'terachem':
+        from pysces.qcRunners.TeraChem import TCRunner
+        logger.state_labels = [f'S{x}' for x in tcr_state_options['grads']]
+        tc_runner = TCRunner(atoms, tc_runner_opts)
+        tc_runner._prev_ref_job = tcr_ref_job
+
+    #   Initialization
+    if restart == 1:
+        q, p, nac_hist, tdm_hist, init_energy, initial_time, elecE, grad, nac = read_restart(file_loc=restart_file_in, ndof=ndof)
+        t = initial_time
+        qC, pC = q[nel:], p[nel:]
+        y = np.concatenate((q, p))
 
     elif restart == 0:
         q[:nel], p[:nel] = initq[:nel], initp[:nel]
@@ -1588,10 +1711,8 @@ def rk4(initq, initp, tStop, H, restart, amu_mat, U, AN_mat):
         if qc_runner == 'gamess':
             elecE, grad, nac, _ = run_gamess_at_geom(input_name, AN_mat, qC, atoms)
         elif qc_runner == 'terachem':
-            tc_runner = TCRunner(atoms, tc_runner_opts)
-            job_batch = tc_runner.run_new_geom(geom=qC/ang2bohr)
-            timings = job_batch.timings
-            _,       all_energies, elecE, grad, nac, trans_dips = format_output_LSCIVR(job_batch.results_list)
+            all_energies, elecE, grad, nac, trans_dips, timings = tc_runner.run_new_geom(geom=qC/ang2bohr)
+            qc_runner_data = tc_runner._prev_job_batch
         else:
             timings, all_energies, elecE, grad, nac, trans_dips = qc_runner.run_new_geom(qC/ang2bohr, p[nel:])
 
@@ -1600,7 +1721,7 @@ def rk4(initq, initp, tStop, H, restart, amu_mat, U, AN_mat):
 
         # Record nuclear geometry in angstrom and log the rest
         record_nuc_geo(restart, t, atoms, qC, logger)
-        logger.write(t, init_energy, elecE,  grad, nac, timings, elec_p=p[0:nel], elec_q=q[0:nel], nuc_p=p[nel:], jobs_data=job_batch, all_energies=all_energies)
+        logger.write(t, init_energy, elecE,  grad, nac, timings, elec_p=p[0:nel], elec_q=q[0:nel], nuc_p=p[nel:], qc_runner_data=qc_runner_data, all_energies=all_energies)
 
     # Create nac history for sign-flip extrapolation
     # sign_flipper.set_history(nac, np.empty(0), trans_dips, np.empty(0))
@@ -1638,9 +1759,8 @@ def rk4(initq, initp, tStop, H, restart, amu_mat, U, AN_mat):
         if qc_runner == 'gamess':
             elecE, grad, nac, _ = run_gamess_at_geom(input_name, AN_mat, qC, atoms)
         elif qc_runner == 'terachem':
-            job_batch = tc_runner.run_new_geom(geom=qC/ang2bohr)
-            timings = job_batch.timings
-            _, all_energies, elecE, grad, nac, trans_dips  = format_output_LSCIVR(job_batch.results_list)
+            all_energies, elecE, grad, nac, trans_dips, timings = tc_runner.run_new_geom(geom=qC/ang2bohr)
+            qc_runner_data = tc_runner._prev_job_batch
         else:
             timings, all_energies, elecE, grad, nac, trans_dips = qc_runner.run_new_geom(qC/ang2bohr, y[-natom*3:])
         
@@ -1661,7 +1781,7 @@ def rk4(initq, initp, tStop, H, restart, amu_mat, U, AN_mat):
 
         # Record nuclear geometry, logs, and restarts
         record_nuc_geo(restart, t, atoms, qC, logger)
-        logger.write(t, total_E=new_energy, elec_E=elecE,  grads=grad, NACs=nac, timings=timings, elec_q=y[0:nel], elec_p=y[ndof:ndof+nel], nuc_p=y[-natom*3:], jobs_data=job_batch, all_energies=all_energies)
+        logger.write(t, total_E=new_energy, elec_E=elecE,  grads=grad, NACs=nac, timings=timings, elec_q=y[0:nel], elec_p=y[ndof:ndof+nel], nuc_p=y[-natom*3:], qc_runner_data=qc_runner_data, all_energies=all_energies)
         write_restart(restart_file_out, [Y[-1][:ndof], Y[-1][ndof:]], sign_flipper.nac_hist, sign_flipper.tdm_hist, new_energy, t, nel, 'rk4', elecE, grad, nac, opts.com_ang)
 
         if t == tStop:
@@ -1678,7 +1798,6 @@ def rk4(initq, initp, tStop, H, restart, amu_mat, U, AN_mat):
         coord[1,:,i] = Y[i][ndof:]
 
     return (np.array(X), coord, initial_time)
-
 
 '''
 Main driver of RK4 and electronic structure 
