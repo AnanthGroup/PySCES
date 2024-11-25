@@ -1,7 +1,8 @@
 import numpy as np
 from scipy.interpolate import interp1d
 from collections import deque
-from pysces.input_simulation import * 
+# from pysces.input_simulation import * 
+import pysces.input_simulation as opts
 from typing import Optional
 from abc import abstractmethod
 
@@ -21,6 +22,8 @@ class PhaseVars:
     
     @staticmethod
     def from_vec(time, vec):
+        nel = opts.nel
+        nnuc = opts.natom*3
         ndof = nel + nnuc
         out_vars = PhaseVars(time)
         out_vars.elec_q = vec[:nel]
@@ -41,44 +44,63 @@ class PhaseVars:
             return None
         return np.concatenate((self.elec_p, self.nuc_p))
 
-class PhaseVarHistory(PhaseVars):
-    def __init__(self):
-        super().__init__(None)
-        self.initialize_attributes()
-        self._history = []
+class PhaseVarHistory(deque):
+
+    def __init__(self) -> None:
+        super().__init__()
         self._cache = {}
-        self._attribute_names = None  # Will be initialized on first access
 
     def append(self, obj):
         if not isinstance(obj, PhaseVars):
             raise TypeError("Only PhaseVars objects can be added to history.")
-        self._history.append(obj)
-        self._cache.clear()  # Clear cache when new data is added
+        super().append(obj)
+        self._cache.clear()
 
-    def _get_history(self, attr_name):
-        if attr_name in self._cache:
-            return self._cache[attr_name]
-        result = np.array([getattr(obj, attr_name) for obj in self._history])
-        self._cache[attr_name] = result
-        return result
+    def __getattribute__(self, __name: str):
+        if __name in ['time', 'elec_q', 'elec_p', 'nuc_q', 'nuc_p', 'elec_nuc_q', 'elec_nuc_p', 'get_vec']:
+            if __name in self._cache:
+                return self._cache[__name]
+            else:
+                # self._cache[__name] = [getattr(obj, __name) for obj in self]
+                self._cache[__name] = super().__getattribute__(__name)
+                return self._cache[__name]
 
-    def initialize_attributes(self):
-        # Dynamically create properties for all attributes in PhaseVars
-        names = dir(self)
-        for attr_name in names:
-            if not attr_name.startswith("_") and not callable(getattr(self, attr_name, None)):
-                self._create_property(attr_name)
+        return super().__getattribute__(__name)
 
-    def _create_property(self, attr_name):
-        # Define a property dynamically
-        def property_func(self):
-            return self._get_history(attr_name)
+    @property
+    def time(self):
+        return np.array([obj.time for obj in self])
+    
+    @property
+    def elec_q(self):
+        return np.array([obj.elec_q for obj in self])
+    
+    @property
+    def elec_p(self):
+        return np.array([obj.elec_p for obj in self])
+    
+    @property
+    def nuc_q(self):
+        return np.array([obj.nuc_q for obj in self])
+    
+    @property
+    def nuc_p(self):
+        return np.array([obj.nuc_p for obj in self])
+    
+    @property
+    def elec_nuc_q(self):
+        return np.array([obj.elec_nuc_q for obj in self])
+    
+    @property
+    def elec_nuc_p(self):
+        return np.array([obj.elec_nuc_p for obj in self])
+    
+    @property
+    def get_vec(self):
+        return np.array([obj.get_vec() for obj in self])
 
-        setattr(
-            self.__class__,
-            attr_name,
-            property(property_func)
-        )
+
+
 
 # class PhaseVarHistory:
 #     def __init__(self, initial_vars: PhaseVars = None, max_history=None) -> None:

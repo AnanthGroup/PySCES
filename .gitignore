@@ -25,3 +25,4 @@ _*.py
 tmp/*
 
 tests/**/*.log
+tests/test_tc_interp

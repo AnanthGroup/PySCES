@@ -1711,7 +1711,7 @@ def rk4(initq, initp, tStop, H, restart, amu_mat, U, AN_mat):
 def rk4_with_inteprolation(initq, initp, tStop, H, restart, amu_mat, U, AN_mat):
     atoms = get_atom_label()
     qc_runner = get_qc_runner(atoms, AN_mat)
-    logger = SimulationLogger(dir=logging_dir, save_jobs=tcr_log_jobs, hdf5=hdf5_logging, atoms=atoms)
+    logger = SimulationLogger(dir=logging_dir, save_jobs=tcr_log_jobs, hdf5=hdf5_logging, atoms=atoms, save_timigs=False)
     
     job_batch    = None
     au_mas       = np.diag(amu_mat) * amu2au # masses of atoms in atomic unit (vector)
@@ -1750,6 +1750,7 @@ def rk4_with_inteprolation(initq, initp, tStop, H, restart, amu_mat, U, AN_mat):
         record_nuc_geo(restart, t, atoms, phase_vars.nuc_q, logger)
         logger.write(es, phase_vars, init_energy, job_batch)
 
+  
 
     # Create nac history for sign-flip extrapolation
     sign_flipper.set_history(es.nacs, nac_hist, es.trans_dips, tdm_hist)
@@ -1771,7 +1772,6 @@ def rk4_with_inteprolation(initq, initp, tStop, H, restart, amu_mat, U, AN_mat):
         energy = get_energy(au_mas, phase_vars.elec_nuc_q, phase_vars.elec_nuc_p, es.elecE)
         if (init_energy-energy)/init_energy > 0.02: # 2% deviation = terrible without doubt
             sys.exit("Energy conservation failed during the propagation. Exitting.")
-
 
         # Record nuclear geometry, logs, and restarts
         record_nuc_geo(restart, t, atoms, phase_vars.nuc_q, logger)

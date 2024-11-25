@@ -3,8 +3,8 @@ from tcpb.exceptions import ServerError
 from tcpb import terachem_server_pb2 as pb
 
 from pysces.input_simulation import logging_dir, TCRunnerOptions
-from pysces.common import PhaseVars, QCRunner, ESResults
-from pysces.h5file import H5File, H5Dataset, H5Group, h5py
+from pysces.common import PhaseVars, PhaseVarHistory, QCRunner, ESResults
+from pysces.interpolation import GradEstimator
 
 from datetime import datetime
 import functools
@@ -27,6 +27,7 @@ from typing import Literal
 import itertools
 from collections import deque
 import qcelemental as qcel
+from scipy.interpolate import interp1d
 
 
 _server_processes = {}
@@ -37,8 +38,8 @@ _DEBUG_TRAJ = os.environ.get('DEBUG_TRAJ', False)
 _SAVE_BATCH = os.environ.get('SAVE_BATCH', False)
 _SAVE_DEBUG_TRAJ = os.environ.get('SAVE_DEBUG_TRAJ', False)
 
-ang2bohr = 1.8897259886         # angstroms to bohr
-
+ANG_2_BOHR = 1.8897259886         # angstroms to bohr
+AMU_2_AU = 1.822888486*10**3      # atomic mass unit to a.u. of mass
 
 def synchronized(function):
     ''''Decorator to make sure that only one thread can access the function at a time'''
@@ -409,7 +410,6 @@ def compute_job_sync(client: TCClientExtra, jobType="energy", geom=None, unitTyp
         dict: Results mirroring recv_job_async
     """
 
-    # print("Submitting Job...")
     client.log_message("Submitting Job...")
     accepted = client.send_job_async(jobType, geom, unitType, **kwargs)
     while accepted is False:
@@ -452,8 +452,11 @@ class TCJob():
         self.end_time = 0
         self._results = {}
         self.client: TCClientExtra = client
+        self.batch: TCJobBatch = None
 
-        if job_type not in ['energy', 'gradient', 'coupling']:
+        if job_type == 'gradient_est':
+            pass
+        elif job_type not in ['energy', 'gradient', 'coupling']:
             raise ValueError('TCJob job_type must be either "energy", "gradient", or "coupling"')
 
         assert self.excited_type in ('cas', 'cis')
@@ -509,6 +512,7 @@ class TCJob():
     @results.setter
     def results(self, value):
         self._results = value
+        self.batch._completed_jobs[self.jobID] = value
 
     def set_guess(self, prev_results: list[dict]):
         job_opts = self.opts
@@ -551,6 +555,19 @@ class TCJob():
         if os.path.isfile(str(scf_guess)):
             job_opts['guess'] = scf_guess
 
+class _CustomJobList(list):
+    def __init__(self, parent_batch, *args):
+        super().__init__(*args)
+        self.parent_batch = parent_batch
+
+    def append(self, job: TCJob, allow_duplicates=True):
+        if not allow_duplicates:
+            if job.jobID in [j.jobID for j in self]:
+                raise ValueError(f'JobID {job.jobID} already in batch')
+        super().append(job)
+        # Link the job to the batch
+        job.batch = self.parent_batch
+
 class TCJobBatch():
     '''
         Combines multiple TCJobs into one wrapper
@@ -558,24 +575,25 @@ class TCJobBatch():
     __batch_counter = 0
     def __init__(self, jobs: list[TCJob] | list['TCJobBatch'] = []) -> None:
         if len(jobs) == 0:
-            self.jobs = []
+            self.jobs = _CustomJobList(self)
         
         if len(jobs) > 0:
             if isinstance(jobs[0], TCJobBatch):
                 jobs = list(itertools.chain(*[j.jobs for j in jobs]))
-        
-        #   sort by ID
-        id_list = [j.jobID for j in jobs]
-        order = np.argsort(id_list)
-        self.jobs = [jobs[i] for i in order]
+            
+            # Sort by ID
+            id_list = [j.jobID for j in jobs]
+            order = np.argsort(id_list)
+            self.jobs = _CustomJobList(self, [jobs[i] for i in order])
 
         TCJobBatch.__batch_counter += 1
         self.__batchID = TCJobBatch.__batch_counter
 
-        caller_info = self._get_caller_info()
+        # Link jobs to the batch
+        for job in self.jobs:
+            job.batch = self
 
-        print('CURRENT JOB COUNTER: ', TCJobBatch.__batch_counter)
-        
+        self._completed_jobs = {}
 
     def _get_caller_info(self):
         # This helps identify the function that created the object
@@ -646,6 +664,21 @@ class TCJobBatch():
             jobs = [x for x in self.jobs if x.client == client]
         else:
             raise ValueError('client must be either an integer or a TCClientExtra object')
+        return TCJobBatch(jobs)
+    
+    def get_by_options(self, opts: dict, match_type: Literal['all', 'any'] = 'all'):
+        jobs = []
+        if match_type == 'all':
+            for j in self.jobs:
+                if set(j.opts.items()).issubset(opts.items()):
+                    jobs.append(j)
+        elif match_type == 'any':
+            for j in self.jobs:
+                if len(set(j.opts.items()).intersection(opts.items())) > 0:
+                    jobs.append(j)
+        else:
+            raise ValueError('match_type must be either "all" or "any"')
+        
         return TCJobBatch(jobs)
 
     def set_client(self, client: TCClientExtra):
@@ -827,6 +860,7 @@ class TCRunner(QCRunner):
         self._port = ports[0]
 
         self._atoms = np.copy(atoms)
+        self._masses = np.array([[qcel.periodictable.to_mass(symbol)]*3 for symbol in atoms]).flatten()
         self._base_options = job_options.copy()
 
         self._cas_guess = None
@@ -860,6 +894,13 @@ class TCRunner(QCRunner):
             with open(_DEBUG_TRAJ, 'rb') as file:
                 self._debug_traj = pickle.load(file)
 
+        #   inteprolation
+        self._energy_history = deque(maxlen=10)
+        self.phase_var_history = PhaseVarHistory()
+        self.grad_estimator = {g: GradEstimator(order=2, interval=3.0, name=f'grad_{g}') for g in self._grads}
+        self._grad_estimates = {g: None for g in self._grads}
+
+            
     def report(self):
         return self._prev_job_batch
 
@@ -1064,9 +1105,9 @@ class TCRunner(QCRunner):
         self._max_time = np.mean(self._max_time_list)*5
 
     def run_new_geom(self, phase_vars: PhaseVars=None, geom=None) -> ESResults:
-
         if phase_vars is not None:
-            geom = phase_vars.nuc_q/ang2bohr
+            geom = phase_vars.nuc_q/ANG_2_BOHR
+            self.phase_var_history.append(phase_vars)
         elif geom is not None:
             #   legacy support for geom, assumed to be in angstroms
             pass
@@ -1086,19 +1127,6 @@ class TCRunner(QCRunner):
             print('Started new TC Server: re-running current step')
             job_batch = self.run_new_geom(geom)
 
-        #   correct signs from previous job
-        # use the highest gradient state as the reference job
-        # if correct_signs:
-        #     grad_batch = job_batch.get_by_type('gradient')
-        #     curr_ref_job = grad_batch.sorted_jobs_by_state()[-1]
-        #     if self._prev_ref_job is None:
-        #         self._prev_ref_job = curr_ref_job
-        #     #   update jobs form tc.out file, and correct with esp charges
-        #     for job in job_batch.jobs:
-        #         print('Correcting signs for job ', job.name)
-        #         _correct_signs(job, self._prev_ref_job)
-        #     self._prev_ref_job = curr_ref_job
-
         if _SAVE_DEBUG_TRAJ:
             print("SAVING DEBUG TRAJ FILE: ", _SAVE_DEBUG_TRAJ)
             with open(_SAVE_DEBUG_TRAJ, 'wb') as file:
@@ -1112,11 +1140,8 @@ class TCRunner(QCRunner):
         res = self.run_new_geom(phase_vars, geom)
         return (res.all_energies, res.elecE, res.grads, res.nacs, res.trans_dips, res.timings)
 
-        # return (*format_output_LSCIVR(job_batch.results_list), job_batch.timings)
-                
-        # # return job_batch
 
-    def _run_TC_new_geom_kernel(self, geom):
+    def _run_TC_new_geom_kernel(self, geom) -> TCJobBatch:
         self._n_calls += 1
         client = self._client
         atoms = self._atoms
@@ -1250,16 +1275,163 @@ class TCRunner(QCRunner):
 
             job_batch.append(TCJob(geom, job_opts.copy(), 'coupling', excited_type, max(nac1, nac2), name))
 
+        if len(job_batch) == 0:
+            raise ValueError('No jobs to run')
+
+        #   start by taking the highest gradient job
+        #   and only compute the energy to check inteprolations
+        #   TODO: include a longer history than just three points
+        curr_time = self.phase_var_history.time[-1]
+        # grad_ests_ready = [g.check_if_ready() for g in self.grad_estimator.values()]
+        # print('READY: ', grad_ests_ready)
+        # if all(grad_ests_ready):
+            
+        # job_opts = base_options.copy()
+        # job_opts.update(excited_options)
+        # eng_results = self.compute_job_sync_with_restart('energy', geom, 'angstrom', **job_opts)
+        # self._energy_history.append(eng_results['energy'])
+        # for g, grad_est in self.grad_estimator.items():
+
+        #     required_run, reason = grad_est.check_run_deriv(curr_time)
+        #     if not required_run:
+        #         prev_time = self.phase_var_history.time[-2]
+        #         curr_time = self.phase_var_history.time[-1]
+                
+        #         time_hist = self.phase_var_history.time
+        #         vel_hist = self.phase_var_history.nuc_p/(self._masses * AMU_2_AU)
+        #         interp_vel = interp1d(time_hist, vel_hist, axis=0, kind='cubic')
+
+        #         time_pts = np.linspace(prev_time, curr_time, 100)
+        #         vel_pts = interp_vel(time_pts)
+        #         guess_energy = grad_est.guess_f(self._energy_history[-2][g], time_pts, vel_pts)
+        #         energy_diff = guess_energy - eng_results['energy'][g]
+        #         print(f'    Gradient {g} error: {energy_diff} a.u. = {energy_diff * 27.2114} eV')
+        #         if abs(energy_diff) > 0.001:
+        #             required_run = True
+        #             reason = 'guess energy error'            
+        #     print(f'    Gradient {g} run deriv: {required_run}: {reason}')
+            
+
+        #     if not required_run:
+        #         job = job_batch.get_by_name(f'gradient_{g}').jobs[0]
+        #         job_batch.jobs.remove(job)
+        #         self._grad_estimates[g] = grad_est._evaluate(curr_time)
+        #     else:
+        #         self._grad_estimates[g] = None
+
+        self._interpolation_setup(job_batch, excited_type)
+
         job_batch = self._send_jobs_to_clients(job_batch)
         self._frame_counter += 1
         self._prev_jobs = job_batch.jobs
 
+        self._interpolation_finalize(job_batch, excited_type)
+
+        # for g, grad_est in self.grad_estimator.items():
+        #     if self._grad_estimates[g] is None:
+        #         job = job_batch.get_by_name(f'gradient_{g}').jobs[0]
+        #         grad = job.results['gradient']
+        #         energy = job.results['energy']
+        #         if g > 0:
+        #             energy = energy[g]
+        #         grad_est.update_history(curr_time, grad, energy)
+        #     else:
+        #         est_job = TCJob(geom, {}, 'gradient_est', excited_type, -1, 'gradient_est')
+        #         job_batch.jobs.append(est_job)
+        #         est_job.results = {'run': 'gradient_est', 
+        #                            'energy': eng_results['energy'], 
+        #                            'gradient': self._grad_estimates[g], 
+        #                            f'{excited_type}target': g,
+        #                            }
+                
+
         return job_batch
+    
+    def _interpolation_setup(self, job_batch: TCJobBatch, excited_type: Literal['cis', 'cas']):
+
+        #   first find a job to copy the options from for the energy job
+        #   couplings are guarenteed to have excited_options
+        ref_job = job_batch.get_by_type('coupling').jobs[0]
+        eng_opts = ref_job.opts.copy()
+        for x in ('nacstate1', 'nacstate2', 'couplings', 'gradients'):
+            eng_opts.pop(x, None)
+        eng_results = self.compute_job_sync_with_restart('energy', ref_job.geom, 'angstrom', **eng_opts)
+        self._energy_history.append(eng_results['energy'])
+
+        print('PHASE HISTORY: ', self.phase_var_history.time)
+
+        if len(self.phase_var_history.time) < 3:
+            grads_to_run = {g: (True, 'Energy history too short') for g in self._grads}
+        else:
+            grads_to_run = {}
+            #   setup the velocities for the gradient estimator
+            curr_time = self.phase_var_history.time[-1]
+            prev_time = self.phase_var_history.time[-2]
+            time_hist = self.phase_var_history.time
+            vel_history = self.phase_var_history.nuc_p/(self._masses * AMU_2_AU)
+            interp_vel = interp1d(time_hist, vel_history, axis=0, kind='quadratic') # TODO: change to the same order as the grad interpolator
+            time_pts = np.linspace(prev_time, curr_time, 100)
+            vel_pts = interp_vel(time_pts)
+
+            #   compute estimates for the gradients and if they are good enough
+            print('Inteprolation Gradient Estimates')
+            print('   Current Time: ', curr_time)
+            print('   Gradient    Estimate      Actual      Error (a.u.)       Error (eV)')
+            print('   ---------------------------------------------------------------------')
+            
+            for g, grad_est in self.grad_estimator.items():
+                required_run, reason = grad_est.check_run_deriv(curr_time)
+                if not required_run:
+                    guess_energy = grad_est.guess_f(self._energy_history[-2][g], time_pts, vel_pts)
+                    energy_diff = guess_energy - eng_results['energy'][g]
+                    print(f'        {g}        {guess_energy: .6f}    {eng_results["energy"][g]: .6f}    {energy_diff: .8f}    {energy_diff * 27.2114: .6f}')
+                    #print(f'    Gradient {g} error: {energy_diff} a.u. = {energy_diff * 27.2114} eV')
+                    if abs(energy_diff) > 0.001:
+                        required_run = True
+                        reason = 'guess energy error'
+                grads_to_run[g] = (required_run, reason)   
+
+
+        print('   ---------------------------------------------------------------------')
+        print('')
+        print('Gradients to Run')
+        print('   Gradient    Run?    Reason')
+        print('   -------------------------')
+        for g, (required_run, reason) in grads_to_run.items():
+            print(f'        {g}        {required_run}    {reason}')
+        print('   -------------------------')
+
+        for g, grad_est in self.grad_estimator.items():
+            if not grads_to_run[g][0]:
+                job = job_batch.get_by_name(f'gradient_{g}').jobs[0]
+                job_batch.jobs.remove(job)
+                self._grad_estimates[g] = grad_est._evaluate(curr_time)
+            else:
+                self._grad_estimates[g] = None
+
+    def _interpolation_finalize(self, job_batch: TCJobBatch, excited_type: Literal['cis', 'cas']):
+        geom = job_batch.get_by_type('coupling').jobs[0].geom
+        for g, grad_est in self.grad_estimator.items():
+            if self._grad_estimates[g] is None:
+                job = job_batch.get_by_name(f'gradient_{g}').jobs[0]
+                grad = job.results['gradient']
+                energy = job.results['energy']
+                if g > 0:
+                    energy = energy[g]
+                grad_est.update_history(self.phase_var_history.time[-1], grad, energy)
+            else:
+                est_job = TCJob(geom, {}, 'gradient_est', excited_type, -1, 'gradient_est')
+                job_batch.jobs.append(est_job)
+                est_job.results = {'run': 'gradient_est', 
+                                   'energy': self._energy_history[-1], 
+                                   'gradient': self._grad_estimates[g], 
+                                   f'{excited_type}target': g,
+                                   }
 
 
     def _send_jobs_to_clients(self, jobs_batch: TCJobBatch):
 
-        # REMOVE ME
+        # DEBUG ONLY
         if _SAVE_BATCH:
             batch_file = os.path.join(_SAVE_BATCH, f'_jobs_{jobs_batch.batchID}.pkl')
             if os.path.isfile(batch_file):
@@ -1295,7 +1467,6 @@ class TCRunner(QCRunner):
             clients_IDs_for_other = []
 
             #   assign clients specified in the client_assignments
-            
             for i, names in enumerate(self._client_assignments):
                 names_list = names.copy()
                 if 'other' in names_list:
@@ -1593,8 +1764,6 @@ def _correct_signs(job: TCJob, ref_job: TCJob):
         idx2 = job.results['nacstate2']
         job.results['nacme'] = (np.array(job.results['nacme'])*min_signs[idx1]*min_signs[idx2]).tolist()
 
-    
-
 def _run_batch_jobs(jobs_batch: TCJobBatch, prev_results=[]):
 
     for j in jobs_batch.jobs:
@@ -1649,9 +1818,6 @@ def format_output_LSCIVR(job_data: list[dict]):
     atoms = job_data[0]['atoms']
     n_atoms = len(atoms)
     
-    # energies = np.zeros(n_elec)
-    # grads = np.zeros((n_elec, n_atoms*3))
-    # nacs = np.zeros((n_elec, n_elec, n_atoms*3))
     energies = {}
     all_energies = []
     grads = {}
@@ -1682,6 +1848,10 @@ def format_output_LSCIVR(job_data: list[dict]):
                             trans_dips[(state_1, state_2)] = job['cis_transition_dipoles'][count]
                             trans_dips[(state_2, state_1)] = job['cis_transition_dipoles'][count]
                         count += 1
+        elif job['run'] == 'gradient_est':
+            state = job.get('cistarget', job.get('castarget', 0))
+            grads[state] = np.array(job['gradient']).flatten()
+            energies[state] = job['energy'][state]
 
 
     #   make sure there are the correct number of gradients and NACs

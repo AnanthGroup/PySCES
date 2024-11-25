@@ -124,3 +124,25 @@ class Tester(unittest.TestCase):
     def __dell__(self):
         if self.print_log:
             print(self.logger.getvalue())
+
+class ArrayCompareMessage:
+    def __init__(self, tst, ref):
+        self.tst = np.array(tst)
+        self.ref = np.array(ref)
+
+    def __str__(self):
+        out_str = ''
+        #   get the index of the array. It can be of arbitray shape
+        for idx, ref_val in np.ndenumerate(self.ref):
+            tst_val = self.tst[idx]
+            idx_str = ''
+            for i in idx:
+                idx_str += f'{i:3d},'
+            abs_diff = np.abs(tst_val - ref_val)
+            if ref_val == 0:
+                rel_diff = abs_diff
+            else:
+                rel_diff = abs_diff / np.abs(ref_val)
+            
+            out_str += f'[{idx_str}] tst: {tst_val:12.5e} ref: {ref_val:12.5e} abs_diff: {abs_diff:12.5e} rel_diff: {rel_diff:12.5e}\n'
+        return out_str

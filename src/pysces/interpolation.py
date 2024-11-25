@@ -2,26 +2,46 @@ import numpy as np
 from collections import deque
 from scipy.integrate import simps
 from scipy.interpolate import interp1d
+from typing import Literal
 class GradEstimator():
 
 
-    def __init__(self, order, history_size, interval=1, name='UNKNOWN'):
+    def __init__(self, order: Literal[1, 2, 3], history_size=None, interval=1.0, name='UNKNOWN'):
+
+        if order not in [1, 2, 3]:
+            raise ValueError("order must be 1, 2, or 3")
+
+        if history_size is None:
+            history_size = order + 1
+        elif history_size < order + 1:
+            raise ValueError("history_size must be at least order + 1")
+        
         self.order = order
         self.history_size = history_size
         self.interval = interval
         self.history_grads = deque(maxlen=history_size)
         self.history_t = deque(maxlen=history_size)
         self.history_f = deque(maxlen=history_size)
-        self.polynomial_coeffs = None
+        # self.polynomial_coeffs = None
+        self._interp_func = None
         self.name = name
+        self._interp_kind = {1: 'linear', 2: 'quadratic', 3: 'cubic'}[order]
 
 
     def update_history(self, new_t, new_grads, new_f):
 
         #   before we update, let's get one more extrapolation to check how close we are
-        if self.polynomial_coeffs is not None:
-            guess = np.polyval(self.polynomial_coeffs, new_t)
-            guess = guess.reshape(self.history_grads[0].shape)
+        # if self.polynomial_coeffs is not None:
+        #     guess = np.polyval(self.polynomial_coeffs, new_t)
+        #     guess = guess.reshape(self.history_grads[0].shape)
+        #     error = np.abs(guess - new_grads)
+        #     max_error = np.max(error)
+        #     rms_error = np.sqrt(np.mean(error**2))
+        #     print(f'Before updating extrapolation history in {self.name} at time {new_t}: ')
+        #     print(f'    {max_error=:.5e}, {rms_error=:.5e}')
+
+        if self._interp_func is not None:
+            guess = self._evaluate(new_t)
             error = np.abs(guess - new_grads)
             max_error = np.max(error)
             rms_error = np.sqrt(np.mean(error**2))
@@ -32,41 +52,53 @@ class GradEstimator():
         self.history_t.append(new_t)
         self.history_f.append(new_f)
         print(f'Updating {self.name} history at time {new_t}')
-        if len(self.history_grads) == self.history_size:
+        if len(self.history_grads) > self.order:
             self._fit_polynomial()
 
     def _fit_polynomial(self):
-        # Flatten the matrices and stack them into a 2D array
         stacked_history = np.vstack([np.ravel(matrix) for matrix in self.history_grads])
-        # Fit a polynomial to each column of the 2D array
-        self.polynomial_coeffs = np.polyfit(self.history_t, stacked_history, self.order)
-
+        self._interp_func = interp1d(self.history_t, stacked_history, 
+                                     kind=self._interp_kind, 
+                                     axis=0, 
+                                     fill_value='extrapolate')
+        
     def _evaluate(self, time):
-        return np.polyval(self.polynomial_coeffs, time)
+        return self._interp_func(time)
+
+    # def _fit_polynomial(self):
+    #     # Flatten the matrices and stack them into a 2D array
+    #     stacked_history = np.vstack([np.ravel(matrix) for matrix in self.history_grads])
+    #     # Fit a polynomial to each column of the 2D array
+    #     self.polynomial_coeffs = np.polyfit(self.history_t, stacked_history, self.order)
+
+    # def _evaluate(self, time):
+    #     return np.polyval(self.polynomial_coeffs, time)
     
     def __call__(self, t) -> np.ndarray:
         pass
 
     def check_if_ready(self):
-        return len(self.history_grads) == self.history_size
+        return len(self.history_grads) > self.order
     
     def check_run_deriv(self, new_time):
-        if len(self.history_grads) < self.history_size:
+        if len(self.history_grads) <= self.order:
             return True, 'History not long enough'
-        elif (1+new_time - len(self.history_grads)) % self.interval == 0:
+        elif new_time - self.history_t[-1] >= self.interval:
             return True, 'Interval reached'
         else:
             return False, 'OK'
     
     def guess_f(self, f0, times, velocities):
-        if self.polynomial_coeffs is None:
-            raise ValueError("Not enough history to fit a polynomial yet")            
+        if not self._evaluate:
+            raise ValueError("Not enough history to estimate yet")            
 
         grads = self._evaluate(times)
-        prod = grads * velocities[:, None]
-        axis = len(grads.shape) - 2
-        delta_f = simps(prod, times, axis=axis)
+        prod = grads * velocities
+        prod = np.sum(prod, axis=prod.ndim-1)
+        delta_f = simps(prod, times, axis=0)
         extrap_f = f0 + delta_f
+
+
 
         return extrap_f
 
