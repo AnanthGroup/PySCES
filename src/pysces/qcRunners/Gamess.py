@@ -30,5 +30,5 @@ class GamessRunner(QCRunner):
         elecE, grad, nac = subs.run_gamess_at_geom(self.input_name, self.AN_mat, geom, self.atoms)
         timings = {'Total': time.time() - start_time}
 
-        out_data = ESResults(elecE, elecE, grad, nac, None)
+        out_data = ESResults(phase_vars.time, elecE, elecE, grad, nac, None)
         return out_data, timings

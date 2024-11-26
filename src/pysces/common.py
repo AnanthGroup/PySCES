@@ -99,41 +99,9 @@ class PhaseVarHistory(deque):
     def get_vec(self):
         return np.array([obj.get_vec() for obj in self])
 
-
-
-
-# class PhaseVarHistory:
-#     def __init__(self, initial_vars: PhaseVars = None, max_history=None) -> None:
-#         if initial_vars is None:
-#             initial_vars = PhaseVars()
-
-#         self.var_history = deque([initial_vars.get_vec()], maxlen=max_history)
-#         self.time_history = deque([initial_vars.time], maxlen=max_history)
-
-#         self._interp_func = None
-#         self._need_to_recalculate_interp = True
-
-#     def append(self, phase_vars: PhaseVars) -> None:
-#         if phase_vars.time < self.time_history[-1]:
-#             raise ValueError("Time must be increasing")
-
-#         self.var_history.append(phase_vars.get_vec())
-#         self.time_history.append(phase_vars.time)
-
-
-#     def evaluate(self, time) -> PhaseVars:
-#         #   redo the interpolation function
-#         if len(self.var_history) > 2:
-#             self._interp_func = interp1d(self.time_history, np.array(self.var_history).T, kind='quadratic', axis=0, fill_value='extrapolate')
-#         elif len(self.var_history) == 2:
-#             self._interp_func = interp1d(self.time_history, np.array(self.var_history).T, kind='linear', axis=0, fill_value='extrapolate')
-#         else:
-#             self._interp_func = lambda t: self.var_history[0] 
-
-#         return PhaseVars.from_vec(self._interp_func(time))
-    
 class ESResults:
-    def __init__(self, 
+    def __init__(self,
+                time: Optional[float] = None,
                 all_energies: Optional[np.array] = None, 
                 elecE: Optional[np.array] = None, 
                 grads: Optional[np.array] = None,
@@ -145,7 +113,8 @@ class ESResults:
         '''
         Parameters
         ----------
-
+        time : float
+            Simulation time at which the results are obtained
         all_energies : np.ndarray
             All energies of the system, including those of the states being propogated on
         elecE : np.ndarray, shape=(nstates,)
@@ -159,12 +128,66 @@ class ESResults:
             Transition dipoles between the electronic energies being propogated.
         '''
 
+        self.time = time
         self.all_energies = all_energies
         self.elecE = elecE
         self.grads = grads
         self.nacs = nacs
         self.trans_dips = trans_dips
         self.timings = timings
+
+        if all_energies is not None and self.elecE is None:
+            self.elecE = all_energies
+
+class ESResultsHistory(deque):
+    def __init__(self):
+        super().__init__()
+        self._cache = {}
+
+    def append(self, obj):
+        if not isinstance(obj, ESResults):
+            raise TypeError("Only ESResults objects can be added to history.")
+        super().append(obj)
+        self._cache.clear()
+
+    def __getattribute__(self, __name: str):
+        if __name in ['time', 'all_energies', 'elecE', 'grads', 'nacs', 'trans_dips', 'timings']:
+            if __name in self._cache:
+                return self._cache[__name]
+            else:
+                self._cache[__name] = np.array([getattr(obj, __name) for obj in self])
+                return self._cache[__name]
+
+        return super().__getattribute__(__name)
+
+    @property
+    def time(self):
+        return np.array([obj.time for obj in self])
+
+    @property
+    def all_energies(self):
+        return np.array([obj.all_energies for obj in self])
+
+    @property
+    def elecE(self):
+        return np.array([obj.elecE for obj in self])
+
+    @property
+    def grads(self):
+        return np.array([obj.grads for obj in self])
+
+    @property
+    def nacs(self):
+        return np.array([obj.nacs for obj in self])
+
+    @property
+    def trans_dips(self):
+        return np.array([obj.trans_dips for obj in self])
+
+    @property
+    def timings(self):
+        return np.array([obj.timings for obj in self])
+
 
 class QCRunner:
     def __init__(self):

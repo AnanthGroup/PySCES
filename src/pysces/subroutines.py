@@ -1732,7 +1732,7 @@ def rk4_with_inteprolation(initq, initp, tStop, H, restart, amu_mat, U, AN_mat):
         q, p, nac_hist, tdm_hist, init_energy, initial_time, elecE, grad, nac = read_restart(file_loc=restart_file_in, ndof=ndof)
         t = initial_time
         phase_vars = PhaseVars(t, q[:nel], p[:nel], q[nel:], p[nel:])
-        es = ESResults(None, elecE, grad, nac, None)
+        es = ESResults(None, None, elecE, grad, nac, None)
         phase_vars_hist.append(phase_vars)
 
 

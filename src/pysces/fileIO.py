@@ -464,7 +464,7 @@ class SimulationLogger():
                      nuc_q=None, 
                      qc_runner_data=None, 
                      all_energies=None):
-        self.write(ESResults(all_energies, elec_E, grads, NACs, timings), PhaseVars(time, elec_q, elec_p, nuc_q, nuc_p), total_E, qc_runner_data)
+        self.write(ESResults(time, all_energies, elec_E, grads, NACs, timings), PhaseVars(time, elec_q, elec_p, nuc_q, nuc_p), total_E, qc_runner_data)
 
     def write(self, 
               es_results: ESResults, 

@@ -42,7 +42,7 @@ class GradEstimator():
 
         if self._interp_func is not None:
             guess = self._evaluate(new_t)
-            error = np.abs(guess - new_grads)
+            error = np.abs(guess - new_grads.ravel())
             max_error = np.max(error)
             rms_error = np.sqrt(np.mean(error**2))
             print(f'Before updating extrapolation history in {self.name} at time {new_t}: ')
@@ -53,9 +53,9 @@ class GradEstimator():
         self.history_f.append(new_f)
         print(f'Updating {self.name} history at time {new_t}')
         if len(self.history_grads) > self.order:
-            self._fit_polynomial()
+            self._interpolate()
 
-    def _fit_polynomial(self):
+    def _interpolate(self):
         stacked_history = np.vstack([np.ravel(matrix) for matrix in self.history_grads])
         self._interp_func = interp1d(self.history_t, stacked_history, 
                                      kind=self._interp_kind, 
