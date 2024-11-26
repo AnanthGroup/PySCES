@@ -25,3 +25,5 @@ _*.py
 tmp/*
 
 tests/**/*.log
+tests/.coverage
+tests/htmlcov

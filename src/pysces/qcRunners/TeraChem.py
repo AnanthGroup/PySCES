@@ -193,8 +193,8 @@ class TCClientExtra(TCPBClient):
             job_dir = os.path.join(self.server_root, oldest_res['job_dir'])
             
             if os.path.isdir(job_dir):
-                print('Removing directiory: ', job_dir)
-                print('Current job dir: ', self.prev_results['job_dir'])
+                # print('Removing directiory: ', job_dir)
+                # print('Current job dir: ', self.prev_results['job_dir'])
                 shutil.rmtree(job_dir)
             else:
                 print('Warning: no job directory found at')
@@ -698,7 +698,7 @@ class TCJobBatch():
         # timings['Wall_Time'] = np.sum(list(timings.values()))
         return timings
 
-
+'''
 class TCRunner(QCRunner):
     def __init__(self, atoms: list, tc_opts: TCRunnerOptions, max_wait=20) -> None:
         super().__init__()
@@ -822,7 +822,158 @@ class TCRunner(QCRunner):
 
         self._print_options_summary()
 
+'''
+class TCRunner(QCRunner):
+    def __init__(self, atoms: list, tc_opts: TCRunnerOptions, max_wait=20) -> None:
+        super().__init__()
         
+        # Atoms and max_wait
+        self._atoms = np.copy(atoms)
+        self._max_wait = max_wait
+
+        # Hosts, ports, and server roots
+        self._hosts = tc_opts.host
+        self._ports = tc_opts.port
+        self._server_roots = tc_opts.server_root
+        self._prepare_server_info()  # Validate and process server information
+
+        # Job-related options
+        self._job_options = tc_opts.job_options
+        self._tc_spec_job_opts = tc_opts.spec_job_opts
+        self._tc_initial_frame_opts = tc_opts.initial_frame_opts
+        self._spec_job_opts = None
+        self._base_options = None
+        self._initial_frame_options = None
+        self._initialize_job_options()  # Initialize job options
+
+        # State-related options
+        self._tc_client_assignments = tc_opts.client_assignments
+        self._tc_server_gpus = tc_opts.server_gpus
+        self._tc_state_options = tc_opts.state_options
+        self._grads = None
+        self._max_state = None
+        self._NACs = None
+        self._initialize_state_options()  # Initialize state options
+
+        # Server and client management
+        self._host_list = []
+        self._port_list = []
+        self._server_root_list = []
+        self._client_list = []
+        self._client = None
+        self._host = None
+        self._port = None
+        self._setup_servers_and_clients()  # Set up servers and clients
+
+        # Guesses for SCF/CAS/CI calculations
+        self._cas_guess = None
+        self._scf_guess = None
+        self._ci_guess = None
+
+        # Timing and stall handling
+        self._max_time_list = []
+        self._max_time = None
+        self._restart_on_stall = True
+        self._n_calls = 0
+
+        # Job tracking and debugging
+        self._prev_results = []
+        self._prev_jobs: list[TCJob] = []
+        self._frame_counter = 0
+        self._prev_ref_job = None
+        self._prev_job_batch: TCJobBatch = None
+        self.job_batch_history = deque(maxlen=4)
+
+        # Debug trajectory
+        self._debug_traj = []
+        self._load_debug_trajectory()  # Load debug trajectory if applicable
+        self._initial_ref_nacs = tc_opts._initial_ref_nacs
+
+        # Print options summary
+        self._print_options_summary()
+
+    def _prepare_server_info(self):
+        """Ensure server roots are valid paths and check server configuration."""
+        if isinstance(self._hosts, str):
+            self._hosts = [self._hosts]
+        if isinstance(self._ports, int):
+            self._ports = [self._ports]
+        if isinstance(self._server_roots, str):
+            self._server_roots = [self._server_roots]
+
+        for i, root in enumerate(self._server_roots):
+            os.makedirs(root, exist_ok=True)
+            self._server_roots[i] = os.path.abspath(root)
+
+        if len({len(self._hosts), len(self._ports), len(self._server_roots)}) != 1:
+            raise ValueError('Number of servers must match the number of port numbers and root locations')
+
+    def _setup_servers_and_clients(self):
+        """Set up servers and clients."""
+        if len(self._tc_server_gpus) != 0:
+            self._hosts = []
+            if len(self._tc_server_gpus) != len(self._ports):
+                raise ValueError('Number of GPUs must match the number of servers')
+
+            for i, port in enumerate(self._ports):
+                host = start_TC_server(port, self._tc_server_gpus[i], self._server_roots[i])
+                self._hosts.append(host)
+
+        print('Starting TCRunner')
+        print('          Server Information          ')
+        print('--------------------------------------')
+        for i in range(len(self._hosts)):
+            print(f'Client {i+1}')
+            print(f'    Host:        {self._hosts[i]}')
+            print(f'    Port:        {self._ports[i]}')
+            print(f'    Server Root: {self._server_roots[i]}')
+
+        self._host_list = self._hosts
+        self._port_list = self._ports
+        self._server_root_list = self._server_roots
+
+        for h, p, s in zip(self._hosts, self._ports, self._server_roots):
+            if _DEBUG_TRAJ:
+                self._client_list.append(None)
+                print('DEBUG_TRAJ set, TeraChem clients will not be opened')
+                break
+            client = TCClientExtra(host=h, port=p, server_root=s)
+            client.startup(max_wait=self._max_wait)
+            self._client_list.append(client)
+
+        self._client = self._client_list[0]
+        self._host = self._hosts[0]
+        self._port = self._ports[0]
+
+    def _initialize_state_options(self):
+        """Initialize state-related options."""
+        if self._tc_state_options.get('grads', False):
+            self._grads = self._tc_state_options['grads']
+            self._max_state = max(self._grads)
+        elif self._tc_state_options.get('max_state', False):
+            self._max_state = self._tc_state_options['max_state']
+            self._grads = list(range(self._max_state + 1))
+        else:
+            raise ValueError('either "max_state" or a list of "grads" must be specified')
+
+        self._NACs = self._tc_state_options.pop('nacs', 'all')
+
+    def _initialize_job_options(self):
+        """Initialize job options."""
+        self._spec_job_opts = self._tc_spec_job_opts
+        self._base_options = self._job_options.copy()
+
+        self._initial_frame_options = self._tc_initial_frame_opts
+        if self._initial_frame_options is not None:
+            if 'n_frames' not in self._initial_frame_options:
+                self._initial_frame_options['n_frames'] = 0
+
+    def _load_debug_trajectory(self):
+        """Load debug trajectory if _DEBUG_TRAJ is set."""
+        if _DEBUG_TRAJ:
+            with open(_DEBUG_TRAJ, 'rb') as file:
+                self._debug_traj = pickle.load(file)
+
 
     def _print_options_summary(self):
         print('--------------------------------------')
@@ -1110,6 +1261,16 @@ class TCRunner(QCRunner):
 
         all_energies, elecE, grad, nac, trans_dips = format_output_LSCIVR(job_batch.results_list)
         self._prev_job_batch = job_batch
+        
+        #   DEBUG: correct signs of NACs for the first frame
+        if self._initial_ref_nacs is not None:
+            print('SETTING INITIAL NACS FROM SETTINGS')
+            for i in range(nac.shape[0]):
+                for j in range(1, nac.shape[1]):
+                    sign = np.sign(np.dot(nac[i, j], self._initial_ref_nacs[i, j]))
+                    nac[i, j] = sign*nac[i, j]
+                    nac[j, i] = -nac[i, j]
+            self._initial_ref_nacs = None
                 
         return (all_energies, elecE, grad, nac, trans_dips, job_batch.timings)
 
@@ -1287,13 +1448,13 @@ class TCRunner(QCRunner):
         
 
         n_clients = len(self._client_list)
-        if len(self._client_assignments) > 0:
+        if len(self._tc_client_assignments) > 0:
             all_job_names = [j.name for j in jobs_batch.jobs]
             clients_IDs_for_other = []
 
             #   assign clients specified in the client_assignments
             
-            for i, names in enumerate(self._client_assignments):
+            for i, names in enumerate(self._tc_client_assignments):
                 names_list = names.copy()
                 if 'other' in names_list:
                     clients_IDs_for_other.append(i)

@@ -50,6 +50,10 @@ class TCRunnerOptions:
     fname_tc_redmas: str = "tmp/tc_hf/hf.spherical.freq/Reduced.mass.dat"
     fname_tc_freq: str = "tmp/tc_hf/hf.spherical.freq/Frequencies.dat"
 
+    #   sometimes nacs can have different signs,
+    #   this is a reference for the first frame
+    _initial_ref_nacs = None
+
 
 ########## DEFAULT SETTINGS ##########
 
@@ -233,7 +237,7 @@ def _check_settings(local: dict):
 
     #   TeraChem settings
     for k, v in globals().items():
-        if k.startswith('tcr_'):
+        if k.startswith('tcr_') or k.startswith('_tcr_'):
             tc_runner_opts.__dict__[k[4:]] = v
         elif k.startswith('fname_tc_'):
             tc_runner_opts.__dict__[k] = v

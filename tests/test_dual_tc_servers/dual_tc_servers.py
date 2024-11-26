@@ -17,9 +17,8 @@ class Test_Dual_TC_Servers(unittest.TestCase):
         os.chdir('test_dual_tc_servers')
 
         pysces.reset_settings()
-        ref_nacs = np.loadtxt('logs_ref/nac.txt', skiprows=3, max_rows=18)
-        pysces.SignFlipper._debug = True
-        pysces.SignFlipper._ref_nac = ref_nacs
+        # pysces.SignFlipper._debug = True
+        # pysces.SignFlipper._ref_nac = ref_nacs
         
         if os.path.isfile('../host_ports.txt'):
             from numpy import loadtxt

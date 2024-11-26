@@ -20,6 +20,7 @@ QC_RUNNER = 'terachem'
 tcr_host = ['localhost']
 tcr_host = ['10.1.1.165']
 tcr_port = [1234]
+tcr_server_root = ['/scratch/cmyers7/single_servers/']
 tcr_job_options = {
         'method': 'hf',
         'basis': 'sto-3g',

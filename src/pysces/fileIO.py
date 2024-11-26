@@ -626,8 +626,6 @@ class TCJobsLogger():
         H5File.append_dataset(group['geom'], cleaned_batch.results_list[0]['geom'])
         for job in cleaned_batch.jobs:
             results = job.results.copy()
-            if job.name == 'gradient_0':
-                print('IN GRADIENT_0: ', results['dipole_moment'])
             results.pop('geom')
             results.pop('atoms')
             for key in group[job.name]:
