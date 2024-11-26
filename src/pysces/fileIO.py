@@ -918,7 +918,7 @@ class EnergyLogger(BaseLogger):
         
         if self._h5_group:
             self._h5_dataset = self._h5_group.create_dataset('energy', shape=(0, len(labels)+1), maxshape=(None, len(labels)+1))
-            self._h5_dataset.attrs.create('labels', labels + ['total'])
+            self._h5_dataset.attrs.create('labels', list(labels) + ['total'])
 
     def write(self, data: LoggerData):
         super().write(data)

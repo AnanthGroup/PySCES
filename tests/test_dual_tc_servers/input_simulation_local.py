@@ -23,7 +23,7 @@ if os.path.isfile('../host_ports.txt'):
     host_ports = loadtxt('../host_ports.txt', dtype=str)
     tcr_host = host_ports[:, 0]
     tcr_port = host_ports[:, 1].astype(int)
-    tcr_server_root = ['.']*len(tcr_host)
+    tcr_server_root = host_ports[:, 2]
 else:
     tcr_host = ['localhost', 'localhost']
     tcr_port = [1234, 1235]

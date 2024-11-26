@@ -278,6 +278,7 @@ class SignFlipper():
             for i in range(self.n_states):
                 for j in range(i+1, self.n_states):
                     sign = np.sign(np.dot(nac[i,j], self._ref_nac[i,j]))
+                    print(f"Sign of NAC between {i} and {j} is {sign}")
                     nac[i, j] = sign * nac[i, j]
                     nac[j, i] = sign * nac[j, i]
             self._ref_nac = None
