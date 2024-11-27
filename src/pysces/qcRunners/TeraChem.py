@@ -715,7 +715,7 @@ class TCRunner(QCRunner):
 
         # Job-related options
         self._spec_job_opts = {}
-        self._base_options = {}
+        self._orig_options = {}
         self._initial_frame_options = {}
         self._initialize_job_options(tc_opts)  # Initialize job options
 
@@ -725,6 +725,17 @@ class TCRunner(QCRunner):
         self._max_state = None
         self._NACs = None
         self._initialize_state_options(tc_opts)  # Initialize state options
+
+        #   Base and excited state options
+        self._excited_type = None
+        self._base_options = {}
+        self._excited_options = {}
+        self._initialize_base_and_excited_options()
+
+        #   Gradient and NAC specific job options
+        self.grad_job_options = {}
+        self.nac_job_options = {}
+        self._initialize_grad_nac_options()
 
         # Server and client management
         self._server_root_list = []
@@ -743,7 +754,6 @@ class TCRunner(QCRunner):
         self._max_time_list = []
         self._max_time = None
         self._restart_on_stall = True
-        self._n_calls = 0
 
         # Job tracking and debugging
         self._prev_results = []
@@ -763,9 +773,7 @@ class TCRunner(QCRunner):
 
         # self._base_options = {}
         # self._excited_options = {}
-        self.grad_job_options = {}
-        self.nac_job_options = {}
-
+        
 
     def _prepare_server_info(self):
         """Ensure server roots are valid paths and check server configuration."""
@@ -783,6 +791,127 @@ class TCRunner(QCRunner):
         if len({len(self._hosts), len(self._ports), len(self._server_roots)}) != 1:
             raise ValueError('Number of servers must match the number of port numbers and root locations')
 
+    def _initialize_job_options(self, tc_opts: TCRunnerOptions):
+        """Initialize job options."""
+        # self._base_options = tc_opts.job_options.copy()
+        for k, v in tc_opts.job_options.items():
+            self._orig_options[k.lower()] = v
+
+        if tc_opts.spec_job_opts is not None:
+            for k, v in tc_opts.spec_job_opts.items():
+                self._spec_job_opts[k.lower()] = v
+
+        if tc_opts.initial_frame_opts is not None:
+            for k, v in tc_opts.initial_frame_opts.items():
+                self._initial_frame_options[k.lower()] = v
+
+    def _initialize_state_options(self, tc_opts: TCRunnerOptions):
+        """Initialize state-related options."""
+        if tc_opts.state_options.get('grads', False):
+            self._grads = tc_opts.state_options['grads']
+            self._max_state = max(self._grads)
+        elif tc_opts.state_options.get('max_state', False):
+            self._max_state = tc_opts.state_options['max_state']
+            self._grads = list(range(self._max_state + 1))
+        else:
+            raise ValueError('either "max_state" or a list of "grads" must be specified')
+
+        self._NACs = tc_opts.state_options.pop('nacs', 'all')
+        if self._NACs == 'all':
+            self._NACs = list(itertools.combinations(self._grads, 2))
+    
+    def _initialize_base_and_excited_options(self):
+        orig_opts = self._orig_options.copy()
+        max_state = self._max_state
+        excited_options = {}
+        base_options = {}
+        excited_type = None
+        cas_possible_opts = ['casscf', 'casci', 'closed', 'active', 'cassinglets', 'castarget', 'castargetmult', 'fon']
+
+        if orig_opts.get('cis', '') == 'yes':
+            #   CI and TDDFT
+            excited_type = 'cis'
+            for key, val in orig_opts.items():
+                if key[0:3] == 'cis':
+                    excited_options[key] = val
+                else:
+                    base_options[key] = val
+            self._ci_guess = 'cis_restart_' + str(os.getpid())
+        elif orig_opts.get('casscf', '') == 'yes' or orig_opts.get('casci', '') == 'yes':
+            excited_type = 'cas'
+            #   CAS-CI and CAS-SCF
+            for key, val in orig_opts.items():
+                if key in cas_possible_opts:
+                    excited_options[key] = val
+                else:
+                    base_options[key] = val
+        else:
+            base_options.update(orig_opts)
+        
+
+        #   make sure we are computing enough states
+        if excited_type == 'cis':
+            if excited_options.get('cisnumstates', 0) < max_state:
+                warnings.warn(f'Number of states in TC options is less than `max_state`. Increasing number of states to {max_state}')
+                excited_options['cisnumstates'] = max_state + 1
+        if excited_type == 'cas':
+            if excited_options.get('cassinglets', 0) < max_state:
+                warnings.warn(f'Number of states in TC options is less than `max_state`. Increasing number of states to {max_state}')
+                excited_options['cassinglets'] = max_state + 1
+
+        if max_state > 0:
+            base_options['cisrestart'] = 'cis_restart_' + str(os.getpid())
+        base_options['purify'] = False
+        base_options['atoms'] = self._atoms
+
+        self._base_options = base_options.copy()
+        self._excited_options = excited_options.copy()
+        self._excited_type = excited_type
+
+    def _initialize_grad_nac_options(self):
+        #   create gradient job properties
+
+        base_options = self._base_options.copy()
+        excited_options = self._excited_options.copy()
+
+        #   gradient computations have to be separated from NACs
+        for job_i, state in enumerate(self._grads):
+            name = f'gradient_{state}'
+            job_opts = base_options.copy()
+            if name in self._spec_job_opts:
+                job_opts.update(self._spec_job_opts[name])
+
+            if self._excited_type == 'cas':
+                job_opts.update(excited_options)
+                job_opts['castarget'] = state
+
+            elif state > 0:
+                if self._excited_type == 'cis':
+                    job_opts.update(excited_options)
+                    job_opts['cistarget'] = state
+
+            self.grad_job_options[name] = job_opts
+
+        #   create NAC job properties
+        for job_i, (nac1, nac2) in enumerate(self._NACs):
+            name = f'nac_{nac1}_{nac2}'
+            job_opts = base_options.copy()
+            job_opts.update(excited_options)
+            if name in self._spec_job_opts:
+                job_opts.update(self._spec_job_opts[name])
+
+            if self._excited_type == 'cis':
+                job_opts.update(excited_options)
+                job_opts['cistarget'] = state
+            elif self._excited_type == 'cas':
+                job_opts.update(excited_options)
+                job_opts['castarget'] = state
+
+            job_opts['nacstate1'] = nac1
+            job_opts['nacstate2'] = nac2
+
+            self.nac_job_options[name] = job_opts
+
     def _setup_servers_and_clients(self, tc_opts: TCRunnerOptions):
         """Set up servers and clients."""
         if len(tc_opts.server_gpus) != 0:
@@ -795,8 +924,9 @@ class TCRunner(QCRunner):
                 self._hosts.append(host)
 
         print('Starting TCRunner')
+        print('')
         print('          Server Information          ')
-        print('--------------------------------------')
+        print('------------------------------------------------------------')
         for i in range(len(self._hosts)):
             print(f'Client {i+1}')
             print(f'    Host:        {self._hosts[i]}')
@@ -819,38 +949,6 @@ class TCRunner(QCRunner):
         self._host = self._hosts[0]
         self._port = self._ports[0]
 
-    def _initialize_state_options(self, tc_opts: TCRunnerOptions):
-        """Initialize state-related options."""
-        if tc_opts.state_options.get('grads', False):
-            self._grads = tc_opts.state_options['grads']
-            self._max_state = max(self._grads)
-        elif tc_opts.state_options.get('max_state', False):
-            self._max_state = tc_opts.state_options['max_state']
-            self._grads = list(range(self._max_state + 1))
-        else:
-            raise ValueError('either "max_state" or a list of "grads" must be specified')
-
-        self._NACs = tc_opts.state_options.pop('nacs', 'all')
-        if self._NACs == 'all':
-            self._NACs = list(itertools.combinations(self._grads, 2))
-
-            
-    def _initialize_job_options(self, tc_opts: TCRunnerOptions):
-        """Initialize job options."""
-        # self._base_options = tc_opts.job_options.copy()
-        for k, v in tc_opts.job_options.items():
-            self._base_options[k.lower()] = v
-
-        if tc_opts.spec_job_opts is not None:
-            for k, v in tc_opts.spec_job_opts.items():
-                self._spec_job_opts[k.lower()] = v
-
-        if tc_opts.initial_frame_opts is not None:
-            for k, v in tc_opts.initial_frame_opts.items():
-                self._initial_frame_options[k.lower()] = v
-
-
-
     def _load_debug_trajectory(self):
         """Load debug trajectory if _DEBUG_TRAJ is set."""
         if _DEBUG_TRAJ:
@@ -859,38 +957,61 @@ class TCRunner(QCRunner):
 
 
     def _print_options_summary(self):
-        print('--------------------------------------')
+        exclude_keys = ['atoms', 'cisrestart']
+        print('------------------------------------------------------------')
         print()
         print('            Job Information           ')
         print('--------------------------------------')
         print(f'Number of Atoms: {len(self._atoms)}')
-        print('TC Job Options:')
-        for k, v in self._base_options.items():
-            print(f'    {k:20s}: {v}')
-
-        print('\n TC Job Specific Options:')
-        if self._spec_job_opts is None:
-            print('    None')
-        else:
-            for k, v in self._spec_job_opts.items():
-                print('    ', k)
-                for kk, vv in v.items():
-                    print(f'        {kk:20s}: {vv}')
-
-        print('\n TC Initial Frame Options:')
-        if self._initial_frame_options is None:
-            print('    None')
-        else:
-            for k, v in self._initial_frame_options.items():
-                print(f'    {k:20s}: {v}')
-        
-        print('\n TC State Options:')
-        print('   Max State:', self._max_state)
+        print(f'Max State:       {self._max_state}')
         grad_str = ''
         for g in self._grads:
             grad_str += f'{g}, '
         grad_str = grad_str[0:-2]
-        print('   Gradients:', grad_str)
+        print( 'Gradients:      ',grad_str)
+        print('')
+        print('TC Job Base Options:')
+        for k, v in self._base_options.items():
+            if k in ['atoms', 'cisrestart']:
+                continue
+            # print(f'    {k:20s}: {v}')
+            print(f'    {k + " ":.<24s} {v}')
+
+        print('\n TC Job Excited Options:')
+        for k, v in self._excited_options.items():
+            print(f'    {k + " ":.<24s} {v}')
+
+        print('\n TC Job Specific Options:')
+        if len(self._spec_job_opts) == 0:
+            print('    None')
+        else:
+            for k, v in self._spec_job_opts.items():
+                print(f'    {k}:')
+                for kk, vv in v.items():
+                    print(f'        {kk + " ":.<24s} {vv}')
+
+        print('\n TC Initial Frame Options:')
+        if len(self._initial_frame_options) == 0:
+            print('    None')
+        else:
+            for k, v in self._initial_frame_options.items():
+                print(f'    {k + " ":.<24s} {v}')
+
+        print('\n TC Gradient Specific Options:')
+        for k, v in self.grad_job_options.items():
+            print(f'    {k}:')
+            for kk, vv in v.items():
+                if (kk in exclude_keys) or (kk in self._excited_options) or (kk in self._base_options):
+                    continue
+                print(f'        {kk + " ":.<20s} {vv}')
+
+        print('\n TC NAC Specific Options:')
+        for k, v in self.nac_job_options.items():
+            print(f'    {k}:')
+            for kk, vv in v.items():
+                if (kk in exclude_keys) or (kk in self._excited_options) or (kk in self._base_options):
+                    continue
+                print(f'        {kk + " ":.<20s} {vv}')
         print('--------------------------------------')
         print()
 
@@ -1146,117 +1267,31 @@ class TCRunner(QCRunner):
         return (all_energies, elecE, grad, nac, trans_dips, job_batch.timings)
 
     def _run_TC_new_geom_kernel(self, geom):
-        self._n_calls += 1
-        atoms = self._atoms
-        opts = self._base_options.copy()
-        max_state = self._max_state
-        self._job_counter = 0
-    
-        #   convert all keys to lowercase
-        orig_opts = {}
-        for key, val in opts.items():
-            orig_opts[key.lower()] = val
-
-        #   Determine the type of excited state calculations to run, if any.
-        #   Also remove any non-excited state options for the 'base_options'
-        excited_options = {}
-        base_options = {}
-        excited_type = None
-        cis_possible_opts = ['cis', 'cisrestart', 'cisnumstates', 'cistarget']
-        cas_possible_opts = ['casscf', 'casci', 'closed', 'active', 'cassinglets', 'castarget', 'castargetmult', 'fon']
-
-        if orig_opts.get('cis', '') == 'yes':
-            #   CI and TDDFT
-            excited_type = 'cis'
-            for key, val in orig_opts.items():
-                if key in cis_possible_opts:
-                    excited_options[key] = val
-                else:
-                    base_options[key] = val
-            self._ci_guess = 'cis_restart_' + str(os.getpid())
-        elif orig_opts.get('casscf', '') == 'yes' or orig_opts.get('casci', '') == 'yes':
-            excited_type = 'cas'
-            #   CAS-CI and CAS-SCF
-            for key, val in orig_opts.items():
-                if key in cas_possible_opts:
-                    excited_options[key] = val
-                else:
-                    base_options[key] = val
-        else:
-            base_options.update(orig_opts)
         
-        #   options for the first few steps only
+        #   frame specific job options
+        frame_opts = {}
         if self._initial_frame_options is not None:
             if self._frame_counter < self._initial_frame_options['n_frames']:
-                base_options.update(self._initial_frame_options)
-
-
-        #   make sure we are computing enough states
-        if excited_type == 'cis':
-            if excited_options.get('cisnumstates', 0) < max_state:
-                warnings.warn(f'Number of states in TC options is less than `max_state`. Increasing number of states to {max_state}')
-                excited_options['cisnumstates'] = max_state + 1
-        if excited_type == 'cas':
-            if excited_options.get('cassinglets', 0) < max_state:
-                warnings.warn(f'Number of states in TC options is less than `max_state`. Increasing number of states to {max_state}')
-                excited_options['cassinglets'] = max_state + 1
-
-        if max_state > 0:
-            base_options['cisrestart'] = 'cis_restart_' + str(os.getpid())
-        base_options['purify'] = False
-        base_options['atoms'] = atoms
-
-
-        job_batch = TCJobBatch()
+                frame_opts.update(self._initial_frame_options)
 
         #   run energy only if gradients and NACs are not requested
         if len(self._grads) == 0 and len(self._NACs) == 0:
-            job_opts = base_options.copy()
+            job_opts = self._base_options.copy()
             results = self.compute_job_sync_with_restart('energy', geom, 'angstrom', **job_opts)
             results['run'] = 'energy'
             results.update(job_opts)
-
             return TCJobBatch([results])
 
-        #   create gradient job properties
-        #   gradient computations have to be separated from NACs
-        for job_i, state in enumerate(self._grads):
-            name = f'gradient_{state}'
-            job_opts = base_options.copy()
-            if name in self._spec_job_opts:
-                job_opts.update(self._spec_job_opts[name])
+        #   create gradient jobs
+        job_batch = TCJobBatch()
+        for name, opts in self.grad_job_options.items():
+            state = opts.get(f'{self._excited_type}target', 0)
+            job_batch.append(TCJob(geom, opts | frame_opts, 'gradient', self._excited_type, state, name))
 
-            if excited_type == 'cas':
-                job_opts.update(excited_options)
-                job_opts['castarget'] = state
-
-            elif state > 0:
-                if excited_type == 'cis':
-                    job_opts.update(excited_options)
-                    job_opts['cistarget'] = state
-
-            job_batch.append(TCJob(geom, job_opts.copy(), 'gradient', excited_type, state, name))
-
-
-        #   create NAC job properties
-        for job_i, (nac1, nac2) in enumerate(self._NACs):
-            name = f'nac_{nac1}_{nac2}'
-            job_opts = base_options.copy()
-            job_opts.update(excited_options)
-            if name in self._spec_job_opts:
-                job_opts.update(self._spec_job_opts[name])
-
-            if excited_type == 'cis':
-                job_opts.update(excited_options)
-                job_opts['cistarget'] = state
-            elif excited_type == 'cas':
-                job_opts.update(excited_options)
-                job_opts['castarget'] = state
-
-            job_opts['nacstate1'] = nac1
-            job_opts['nacstate2'] = nac2
-
-            job_batch.append(TCJob(geom, job_opts.copy(), 'coupling', excited_type, max(nac1, nac2), name))
+        #   create NAC jobs
+        for name, opts in self.nac_job_options.items():
+            state = max(opts['nacstate1'], opts['nacstate2'])
+            job_batch.append(TCJob(geom, opts | frame_opts, 'coupling', self._excited_type, state, name))
 
         job_batch = self._send_jobs_to_clients(job_batch)
         self._frame_counter += 1
