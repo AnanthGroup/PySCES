@@ -590,6 +590,7 @@ class TCJobBatch():
 
         # TCJobBatch.__batch_counter += 1
         # self.__batchID = TCJobBatch.__batch_counter
+        self._complete = False
 
         caller_info = self._get_caller_info()
         
@@ -787,7 +788,7 @@ class TCRunner(QCRunner):
         # Guesses for SCF/CAS/CI calculations
         self._cas_guess = None
         self._scf_guess = None
-        self._ci_guess = None
+        self._cis_guess = None
 
         # Timing and stall handling
         self._max_time_list = []
@@ -807,6 +808,14 @@ class TCRunner(QCRunner):
         self._debug_traj = []
         self._load_debug_trajectory()  # Load debug trajectory if applicable
         self._initial_ref_nacs = tc_opts._initial_ref_nacs
+
+        #   inteprolation
+        # self._energy_history = deque(maxlen=10)
+        self._masses = np.array([[qcel.periodictable.to_mass(symbol)]*3 for symbol in atoms]).flatten()
+        self._es_history = ESResultsHistory()
+        self._phase_var_history = PhaseVarHistory()
+        self._grad_estimator = {g: GradEstimator(order=2, interval=3.0, name=f'grad_{g}') for g in self._grads}
+        self._grad_estimates = {g: None for g in self._grads}
 
         # Print options summary
         self._print_options_summary()
@@ -1205,7 +1214,7 @@ class TCRunner(QCRunner):
                     excited_options[key] = val
                 else:
                     base_options[key] = val
-            self._ci_guess = 'cis_restart_' + str(os.getpid())
+
         elif orig_opts.get('casscf', '') == 'yes' or orig_opts.get('casci', '') == 'yes':
             excited_type = 'cas'
             #   CAS-CI and CAS-SCF
