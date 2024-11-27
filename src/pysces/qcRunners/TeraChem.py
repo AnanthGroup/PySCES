@@ -758,32 +758,25 @@ class TCRunner(QCRunner):
         self._prepare_server_info()  # Validate and process server information
 
         # Job-related options
-        self._job_options = tc_opts.job_options
-        self._tc_spec_job_opts = tc_opts.spec_job_opts
-        self._tc_initial_frame_opts = tc_opts.initial_frame_opts
-        self._spec_job_opts = None
-        self._base_options = None
-        self._initial_frame_options = None
-        self._initialize_job_options()  # Initialize job options
+        self._spec_job_opts = {}
+        self._base_options = {}
+        self._initial_frame_options = {}
+        self._initialize_job_options(tc_opts)  # Initialize job options
 
         # State-related options
         self._tc_client_assignments = tc_opts.client_assignments
-        self._tc_server_gpus = tc_opts.server_gpus
-        self._tc_state_options = tc_opts.state_options
         self._grads = None
         self._max_state = None
         self._NACs = None
-        self._initialize_state_options()  # Initialize state options
+        self._initialize_state_options(tc_opts)  # Initialize state options
 
         # Server and client management
-        self._host_list = []
-        self._port_list = []
         self._server_root_list = []
         self._client_list = []
         self._client = None
         self._host = None
         self._port = None
-        self._setup_servers_and_clients()  # Set up servers and clients
+        self._setup_servers_and_clients(tc_opts)  # Set up servers and clients
 
         # Guesses for SCF/CAS/CI calculations
         self._cas_guess = None
@@ -820,6 +813,12 @@ class TCRunner(QCRunner):
         # Print options summary
         self._print_options_summary()
 
+        # self._base_options = {}
+        # self._excited_options = {}
+        self.grad_job_options = {}
+        self.nac_job_options = {}
+
+
     def _prepare_server_info(self):
         """Ensure server roots are valid paths and check server configuration."""
         if isinstance(self._hosts, str):
@@ -836,15 +835,15 @@ class TCRunner(QCRunner):
         if len({len(self._hosts), len(self._ports), len(self._server_roots)}) != 1:
             raise ValueError('Number of servers must match the number of port numbers and root locations')
 
-    def _setup_servers_and_clients(self):
+    def _setup_servers_and_clients(self, tc_opts: TCRunnerOptions):
         """Set up servers and clients."""
-        if len(self._tc_server_gpus) != 0:
+        if len(tc_opts.server_gpus) != 0:
             self._hosts = []
-            if len(self._tc_server_gpus) != len(self._ports):
+            if len(tc_opts.server_gpus) != len(self._ports):
                 raise ValueError('Number of GPUs must match the number of servers')
 
             for i, port in enumerate(self._ports):
-                host = start_TC_server(port, self._tc_server_gpus[i], self._server_roots[i])
+                host = start_TC_server(port, tc_opts.server_gpus[i], self._server_roots[i])
                 self._hosts.append(host)
 
         print('Starting TCRunner')
@@ -856,8 +855,7 @@ class TCRunner(QCRunner):
             print(f'    Port:        {self._ports[i]}')
             print(f'    Server Root: {self._server_roots[i]}')
 
-        self._host_list = self._hosts
-        self._port_list = self._ports
+
         self._server_root_list = self._server_roots
 
         for h, p, s in zip(self._hosts, self._ports, self._server_roots):
@@ -873,28 +871,37 @@ class TCRunner(QCRunner):
         self._host = self._hosts[0]
         self._port = self._ports[0]
 
-    def _initialize_state_options(self):
+    def _initialize_state_options(self, tc_opts: TCRunnerOptions):
         """Initialize state-related options."""
-        if self._tc_state_options.get('grads', False):
-            self._grads = self._tc_state_options['grads']
+        if tc_opts.state_options.get('grads', False):
+            self._grads = tc_opts.state_options['grads']
             self._max_state = max(self._grads)
-        elif self._tc_state_options.get('max_state', False):
-            self._max_state = self._tc_state_options['max_state']
+        elif tc_opts.state_options.get('max_state', False):
+            self._max_state = tc_opts.state_options['max_state']
             self._grads = list(range(self._max_state + 1))
         else:
             raise ValueError('either "max_state" or a list of "grads" must be specified')
 
-        self._NACs = self._tc_state_options.pop('nacs', 'all')
+        self._NACs = tc_opts.state_options.pop('nacs', 'all')
+        if self._NACs == 'all':
+            self._NACs = list(itertools.combinations(self._grads, 2))
 
-    def _initialize_job_options(self):
+            
+    def _initialize_job_options(self, tc_opts: TCRunnerOptions):
         """Initialize job options."""
-        self._spec_job_opts = self._tc_spec_job_opts
-        self._base_options = self._job_options.copy()
+        # self._base_options = tc_opts.job_options.copy()
+        for k, v in tc_opts.job_options.items():
+            self._base_options[k.lower()] = v
 
-        self._initial_frame_options = self._tc_initial_frame_opts
-        if self._initial_frame_options is not None:
-            if 'n_frames' not in self._initial_frame_options:
-                self._initial_frame_options['n_frames'] = 0
+        if tc_opts.spec_job_opts is not None:
+            for k, v in tc_opts.spec_job_opts.items():
+                self._spec_job_opts[k.lower()] = v
+
+        if tc_opts.initial_frame_opts is not None:
+            for k, v in tc_opts.initial_frame_opts.items():
+                self._initial_frame_options[k.lower()] = v
+
+
 
     def _load_debug_trajectory(self):
         """Load debug trajectory if _DEBUG_TRAJ is set."""
@@ -1189,8 +1196,6 @@ class TCRunner(QCRunner):
         atoms = self._atoms
         opts = self._base_options.copy()
         max_state = self._max_state
-        gradients = self._grads
-        couplings = self._NACs
         self._job_counter = 0
     
         #   convert all keys to lowercase
@@ -1231,22 +1236,6 @@ class TCRunner(QCRunner):
             if self._frame_counter < self._initial_frame_options['n_frames']:
                 base_options.update(self._initial_frame_options)
 
-        #   determine the range of gradients and couplings to compute
-        grads = []
-        NACs = []
-        if gradients:
-            if gradients == 'all':
-                grads = list(range(max_state+1))
-            else: grads = gradients
-
-        if couplings:
-            if couplings == 'all':
-                for i in sorted(grads):
-                    for j in sorted(grads):
-                        if j <= i:
-                            continue
-                        NACs.append((i, j))
-
 
         #   make sure we are computing enough states
         if excited_type == 'cis':
@@ -1264,14 +1253,12 @@ class TCRunner(QCRunner):
         base_options['atoms'] = atoms
 
 
-        n_clients = len(self._client_list)
         job_batch = TCJobBatch()
 
         #   run energy only if gradients and NACs are not requested
-        if len(grads) == 0 and len(NACs) == 0:
+        if len(self._grads) == 0 and len(self._NACs) == 0:
             job_opts = base_options.copy()
             results = self.compute_job_sync_with_restart('energy', geom, 'angstrom', **job_opts)
-            # times[f'energy'] = time.time() - start
             results['run'] = 'energy'
             results.update(job_opts)
 
@@ -1279,7 +1266,7 @@ class TCRunner(QCRunner):
 
         #   create gradient job properties
         #   gradient computations have to be separated from NACs
-        for job_i, state in enumerate(grads):
+        for job_i, state in enumerate(self._grads):
             name = f'gradient_{state}'
             job_opts = base_options.copy()
             if name in self._spec_job_opts:
@@ -1298,7 +1285,7 @@ class TCRunner(QCRunner):
 
 
         #   create NAC job properties
-        for job_i, (nac1, nac2) in enumerate(NACs):
+        for job_i, (nac1, nac2) in enumerate(self._NACs):
             name = f'nac_{nac1}_{nac2}'
             job_opts = base_options.copy()
             job_opts.update(excited_options)
