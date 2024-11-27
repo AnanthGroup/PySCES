@@ -1,3 +1,5 @@
+import numpy as np
+
 #   number of atoms in the molecule
 natom = 6
 nel = 3 # number of electronic states
@@ -23,7 +25,7 @@ if os.path.isfile('../host_ports.txt'):
     host_ports = loadtxt('../host_ports.txt', dtype=str)
     tcr_host = host_ports[:, 0]
     tcr_port = host_ports[:, 1].astype(int)
-    tcr_server_root = ['.']*len(tcr_host)
+    tcr_server_root = host_ports[:, 2]
 else:
     tcr_host = ['localhost', 'localhost']
     tcr_port = [1234, 1235]
@@ -46,6 +48,14 @@ tcr_job_options = {
 tcr_state_options = {
     'max_state': 2
 }
+
+ref_nacs_in = np.loadtxt('logs_ref/nac.txt', skiprows=3, max_rows=18)
+ref_nacs = np.zeros((3, 3, 18))
+ref_nacs[0, 1] = ref_nacs_in[:, 0]
+ref_nacs[0, 2] = ref_nacs_in[:, 1]
+ref_nacs[1, 2] = ref_nacs_in[:, 2]
+ref_nacs += -ref_nacs.transpose(1, 0, 2)
+_tcr_initial_ref_nacs = ref_nacs
 
 # Terachem files
 fname_tc_xyz      = "freq/mol.xyz"

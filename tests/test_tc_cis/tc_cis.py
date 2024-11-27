@@ -39,8 +39,8 @@ class Test_TC_CIS(unittest.TestCase):
             data_tst = pandas.read_csv(f'logs/{file}', sep='\s+', comment='#')
             for key in data_ref:
                 np.testing.assert_allclose(data_tst[key], data_ref[key], 
-                                           rtol=1e-5, verbose=True,
-                                           err_msg=f'file: {file}')
+                                           atol=1e-7, verbose=True,
+                                           err_msg=f'file: {file} key: {key}')
         
         #   check data in xyz formats
         for file in ['nuc_geo.xyz', 'nuclear_P.txt']:

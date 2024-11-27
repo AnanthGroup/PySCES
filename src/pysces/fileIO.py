@@ -642,8 +642,6 @@ class TCJobsLogger():
         H5File.append_dataset(group['geom'], cleaned_batch.results_list[0]['geom'])
         for job in cleaned_batch.jobs:
             results = job.results.copy()
-            if job.name == 'gradient_0':
-                print('IN GRADIENT_0: ', results['dipole_moment'])
             results.pop('geom')
             results.pop('atoms')
             for key in group[job.name]:
@@ -941,7 +939,7 @@ class EnergyLogger(BaseLogger):
         
         if self._h5_group:
             self._h5_dataset = self._h5_group.create_dataset('energy', shape=(0, len(labels)+1), maxshape=(None, len(labels)+1))
-            self._h5_dataset.attrs.create('labels', labels + ['total'])
+            self._h5_dataset.attrs.create('labels', list(labels) + ['total'])
 
     def write(self, data: LoggerData):
         super().write(data)
