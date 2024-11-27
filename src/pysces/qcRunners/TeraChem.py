@@ -508,7 +508,7 @@ class TCJob():
     def results(self, value):
         self._results = value
 
-    def set_guess(self, prev_results: list[dict]):
+    def get_guess_opts(self, prev_results: list[dict]):
         job_opts = self.opts
         server_root = self.client.server_root
         if len(prev_results) != 0:
@@ -521,6 +521,7 @@ class TCJob():
 
         cas_guess = None
         scf_guess = None
+        cis_guess = None
         if self.state > 0:
             if self.excited_type == 'cas':
                 for prev_job in reversed(prev_results):
@@ -533,7 +534,8 @@ class TCJob():
                 #   we do not consider cis file because it is not stored in each job dorectory; we set it ourselves
                 host_port_str = f'{self.client.host}_{self.client.port}'
                 if host_port_str not in job_opts['cisrestart']:
-                    job_opts['cisrestart'] = f"{job_opts['cisrestart']}_{host_port_str}"
+                    cis_guess = f"{job_opts['cisrestart']}_{host_port_str}"
+                    # job_opts['cisrestart'] = cis_guess
 
         for i, prev_job in enumerate(reversed(prev_results)):
             if 'orbfile' in prev_job:
@@ -544,10 +546,27 @@ class TCJob():
                     scf_guess = scf_guess[0:-7]
                 break
 
+        return scf_guess, cis_guess, cas_guess
+        
+            
+    def set_guess(self, prev_results: list[dict]):
+        job_opts = self.opts
+        scf_guess, cis_guess, cas_guess = self.get_guess_opts(prev_results)
         if os.path.isfile(str(cas_guess)):
             job_opts['casguess'] = cas_guess
         if os.path.isfile(str(scf_guess)):
             job_opts['guess'] = scf_guess
+
+    def copy_guess_files(self, prev_results: list[dict]):
+        job_opts = self.opts
+        scf_guess, cis_guess, cas_guess = self.get_guess_opts(prev_results)
+        guess_data = {}
+        if os.path.isfile(str(cas_guess)):
+            guess_data['casguess'] = cas_guess
+        if os.path.isfile(str(scf_guess)):
+            guess_data['guess'] = scf_guess
+        if os.path.isfile(str(cis_guess)):
+            guess_data['cisguess'] = cis_guess
 
 class TCJobBatch():
     '''
@@ -770,9 +789,6 @@ class TCRunner(QCRunner):
 
         # Print options summary
         self._print_options_summary()
-
-        # self._base_options = {}
-        # self._excited_options = {}
         
 
     def _prepare_server_info(self):
@@ -826,7 +842,20 @@ class TCRunner(QCRunner):
         excited_options = {}
         base_options = {}
         excited_type = None
-        cas_possible_opts = ['casscf', 'casci', 'closed', 'active', 'cassinglets', 'castarget', 'castargetmult', 'fon']
+
+        cas_possible_opts = [
+            "closed", "active", "casnumalpha", "casnumbeta",
+            "cassinglets", "casdoublets", "castriplets", "casquartets",
+            "casquintets", "cassextets", "casseptets",
+            "castargetmult", "castarget", "casweights"]
+        cas_possible_opts += [
+            "casscf", "casscfmicromaxiter", "casscfmacromaxiter",
+            "casscfmaxiter", "casscfmicroconvthre",
+            "casscfmacroconvthre", "casscfconvthre",
+            "dynamicweights", "cpsacasscfmaxiter",
+            "cpsacasscfconvthre", 'casci', 'fon']
+
+
 
         if orig_opts.get('cis', '') == 'yes':
             #   CI and TDDFT
@@ -889,6 +918,7 @@ class TCRunner(QCRunner):
                 if self._excited_type == 'cis':
                     job_opts.update(excited_options)
                     job_opts['cistarget'] = state
+                    job_opts['cisexcitonoverlap'] = 'yes'
 
             self.grad_job_options[name] = job_opts
 
@@ -903,6 +933,7 @@ class TCRunner(QCRunner):
             if self._excited_type == 'cis':
                 job_opts.update(excited_options)
                 job_opts['cistarget'] = state
+                job_opts['cisexcitonoverlap'] = 'yes'
             elif self._excited_type == 'cas':
                 job_opts.update(excited_options)
                 job_opts['castarget'] = state
@@ -954,7 +985,6 @@ class TCRunner(QCRunner):
         if _DEBUG_TRAJ:
             with open(_DEBUG_TRAJ, 'rb') as file:
                 self._debug_traj = pickle.load(file)
-
 
     def _print_options_summary(self):
         exclude_keys = ['atoms', 'cisrestart']
