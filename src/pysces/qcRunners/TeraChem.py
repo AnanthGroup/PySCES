@@ -27,6 +27,7 @@ from typing import Literal
 import itertools
 from collections import deque
 import qcelemental as qcel
+import base64
 
 
 _server_processes = {}
@@ -175,13 +176,18 @@ class TCClientExtra(TCPBClient):
     
     @property
     def prev_results(self):
-        '''overwrite the getter and setter for prev_results to add the results to the history'''
+        '''overwrite the getter for TCPBClient.prev_results to add the results to the history'''
         if len(self._results_history) == 0:
             return None
         return self._results_history[-1]
 
     @prev_results.setter
     def prev_results(self, value):
+        '''
+            Overwrite the setter for TCPBClient.prev_results to add the results to the history.
+            This is used as a trigger to run routines directly after a job has been sent back
+            from TeraChem.
+        '''
         if value is None:
             return
         
@@ -192,15 +198,15 @@ class TCClientExtra(TCPBClient):
             oldest_res = self._results_history[0]
             job_dir = os.path.join(self.server_root, oldest_res['job_dir'])
             
+
             if os.path.isdir(job_dir):
-                # print('Removing directiory: ', job_dir)
-                # print('Current job dir: ', self.prev_results['job_dir'])
                 shutil.rmtree(job_dir)
             else:
                 print('Warning: no job directory found at')
                 print(job_dir)
                 print('Check that "tcr_server_root" is properly set to remove old jobs')
-            
+        
+        self._finialize_run
         self._results_history.append(value)
 
     @property
@@ -245,6 +251,67 @@ class TCClientExtra(TCPBClient):
                 print(line)
         print('\n ... END OF FILE \n')
 
+            
+    def _finialize_run(self, results: dict, opts: dict):
+
+        #   try to refresh the file system metadata
+        #   sometimes solves the issue of the file not being found
+        os.listdir(self.server_root)
+
+        def _ensure_file_exists(file_loc):
+            #   if the file is still not found, raise an error
+            if not os.path.isfile(file_loc):
+                out_str = f'{file_loc} file not found in server root directory\n'
+                out_str += 'Current files in server root directory:\n'
+                out_str += f'    {self.server_root}\n'
+                for x in os.listdir(self.server_root):
+                    out_str += f'        {x}\n'
+                exit(out_str)
+
+
+        
+        if opts.get('cisexcitonoverlap', 'no') == 'yes' and opts.get('cis', 'no') == 'yes':
+            self.expect_exciton_overlap_dat = True
+
+            exciton_overlap_file = os.path.join(self.server_root, 'exciton_overlap.dat')
+            exciton_overlap_file_1 = os.path.join(self.server_root, 'exciton_overlap.dat.1')
+            exciton_file = os.path.join(self.server_root, 'exciton.dat')
+
+            #   make sure the files exist
+            _ensure_file_exists(exciton_overlap_file)
+    
+            #   read in previous data
+            with open(exciton_overlap_file, 'rb') as file:
+                exciton_overlap_data = file.read()
+
+            #   if exciton_overlap_file_1 also exists, then exciton.dat must have been created
+            if os.path.isfile(exciton_overlap_file_1):
+                _ensure_file_exists(exciton_file)
+                overlap_data = []
+                with open(exciton_file, 'r') as file:
+                    for line in file:
+                        sp = line.split()
+                        if sp[0] == 'Overlap:':
+                            data = [float(x) for x in sp[1:]]
+                            overlap_data.append(data)
+                overlap_data = np.array(overlap_data)
+                results['exciton_overlap'] = overlap_data
+                os.remove(exciton_file)
+            
+            #   now rename to be used by terachem for next frame
+            os.rename(exciton_overlap_file, exciton_overlap_file_1)
+
+            dir_fd = os.open(self.server_root, os.O_DIRECTORY)
+            os.fsync(dir_fd)
+            os.close(dir_fd)
+
+            # with open(exciton_overlap_file_1, 'rb') as file:
+            #     data = file.read()
+            #     print('DATA READ: ', len(data))
+        
+
+        os.listdir(self.server_root)
+            
 
 class TCServerProcess(subprocess.Popen):
     def __init__(self, port, gpus=[]):
@@ -409,6 +476,7 @@ def compute_job_sync(client: TCClientExtra, jobType="energy", geom=None, unitTyp
 
     # print("Submitting Job...")
     client.log_message("Submitting Job...")
+
     accepted = client.send_job_async(jobType, geom, unitType, **kwargs)
     while accepted is False:
         time.sleep(3.5)
@@ -436,6 +504,9 @@ def compute_job_sync(client: TCClientExtra, jobType="energy", geom=None, unitTyp
     results = client.recv_job_async()
     client.log_message(f"Job Complete with {len(results)} dictionary entries")
     time.sleep(0.1)
+
+    client._finialize_run(results, kwargs)
+
     return results
 class TCJob():
     __job_counter = 0
@@ -562,11 +633,19 @@ class TCJob():
         scf_guess, cis_guess, cas_guess = self.get_guess_opts(prev_results)
         guess_data = {}
         if os.path.isfile(str(cas_guess)):
-            guess_data['casguess'] = cas_guess
+            with open(cas_guess, 'rb') as file:
+                data = file.read()
+                guess_data['casguess'] = base64.b64encode(data).decode('utf-8')
         if os.path.isfile(str(scf_guess)):
-            guess_data['guess'] = scf_guess
+            with open(scf_guess, 'rb') as file:
+                data = file.read()
+                guess_data['scfguess'] = base64.b64encode(data).decode('utf-8')
         if os.path.isfile(str(cis_guess)):
-            guess_data['cisguess'] = cis_guess
+            with open(cis_guess, 'rb') as file:
+                data = file.read()
+                guess_data['cisguess'] = base64.b64encode(data).decode('utf-8')
+        
+    
 
 class TCJobBatch():
     '''
@@ -1669,17 +1748,23 @@ def _correct_signs(job: TCJob, ref_job: TCJob):
     
 
 def _run_batch_jobs(jobs_batch: TCJobBatch, prev_results=[]):
-
+    overlap_set = False
     for j in jobs_batch.jobs:
         j: TCJob
         job_opts =  j.opts
 
         client: TCClientExtra = j.client
+        
         j.start_time = time.time()
-
         j.set_guess(client.results_history)
         client.log_message(f"Running {j.name}")
         print(f"Running {j.name}")
+
+        # if client.expect_exciton_overlap_dat:
+        # # if not overlap_set and j.state > 0:
+        #     print('Expecting overlap data')
+        #     client.setup_overlap_data(j.name)
+        #     overlap_set = True
 
         max_tries = 5
         try_count = 0
