@@ -1537,6 +1537,7 @@ def scipy_rk4(elecE, grad, nac, yvar, dt, au_mas):
 def rk4(initq, initp, tStop, H, restart, amu_mat, U, AN_mat):
 
     #   Initialize variables
+    tc_runner    = None
     trans_dips   = None
     all_energies = None
     timings      = {}
@@ -1569,7 +1570,7 @@ def rk4(initq, initp, tStop, H, restart, amu_mat, U, AN_mat):
 
     #   Initialization
     if restart == 1:
-        q, p, nac_hist, tdm_hist, init_energy, initial_time, elecE, grad, nac = read_restart(file_loc=restart_file_in, ndof=ndof)
+        q, p, nac_hist, tdm_hist, init_energy, initial_time, elecE, grad, nac = read_restart(file_loc=restart_file_in, ndof=ndof, tc_runner=tc_runner)
         t = initial_time
         qC, pC = q[nel:], p[nel:]
         y = np.concatenate((q, p))
@@ -1659,13 +1660,13 @@ def rk4(initq, initp, tStop, H, restart, amu_mat, U, AN_mat):
         # Record nuclear geometry, logs, and restarts
         record_nuc_geo(restart, t, atoms, qC, logger)
         logger.write(t, total_E=new_energy, elec_E=elecE,  grads=grad, NACs=nac, timings=timings, elec_q=y[0:nel], elec_p=y[ndof:ndof+nel], nuc_p=y[-natom*3:], qc_runner_data=qc_runner_data, all_energies=all_energies)
-        write_restart(restart_file_out, [Y[-1][:ndof], Y[-1][ndof:]], sign_flipper.nac_hist, sign_flipper.tdm_hist, new_energy, t, nel, 'rk4', elecE, grad, nac, opts.com_ang)
+        write_restart(restart_file_out, [Y[-1][:ndof], Y[-1][ndof:]], sign_flipper.nac_hist, sign_flipper.tdm_hist, new_energy, t, nel, 'rk4', elecE, grad, nac, opts.com_ang, tc_runner)
 
         if t == tStop:
             with open(os.path.join(__location__, 'progress.out'), 'a') as f:
                 f.write('Propagated to the final time step.\n')
 
-    write_restart(restart_file_out, [Y[-1][:ndof], Y[-1][ndof:]], sign_flipper.nac_hist, sign_flipper.tdm_hist, energy[-1], t, nel, 'rk4', elecE, grad, nac, opts.com_ang)
+    write_restart(restart_file_out, [Y[-1][:ndof], Y[-1][ndof:]], sign_flipper.nac_hist, sign_flipper.tdm_hist, energy[-1], t, nel, 'rk4', elecE, grad, nac, opts.com_ang, tc_runner)
     if qc_runner == 'terachem':
         tc_runner.cleanup()
 

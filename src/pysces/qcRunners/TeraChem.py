@@ -71,10 +71,15 @@ class TCClientExtra(TCPBClient):
             self._log = open(log_file_loc, 'a')
             self.log_message(f'Client started on {host}:{port}')
         self.server_root = server_root
-
+        self._possible_files_to_remove: set[str] = {'exciton_overlap.dat', 'exciton_overlap.dat.1', 'exciton.dat'}
         self._last_known_curr_dir = None
-
         self._results_history = deque(maxlen=10)
+        self._exciton_overlap_data = None
+        self._exciton_data = None
+        self._scf_guess_file = None
+        self._cas_guess_file = None
+        self._cis_guess_file = None
+
 
         super().__init__(host, port, debug, trace)
         self._add_to_host_port_to_ID()
@@ -82,6 +87,10 @@ class TCClientExtra(TCPBClient):
     def cleanup(self):
         if self._log:
             self._log.close()
+        for file in self._possible_files_to_remove:
+            full_file = os.path.join(self.server_root, file)
+            if os.path.isfile(full_file):
+                os.remove(full_file)
 
     def __del__(self):
         if self._log:
@@ -132,7 +141,6 @@ class TCClientExtra(TCPBClient):
             start_TC_server(self.port, server_root=server_root, gpus=process.gpus)
         self.disconnect()
         self.startup()
-
 
     def disconnect(self):
         super().disconnect()
@@ -206,8 +214,9 @@ class TCClientExtra(TCPBClient):
                 print(job_dir)
                 print('Check that "tcr_server_root" is properly set to remove old jobs')
         
-        self._finialize_run
         self._results_history.append(value)
+
+
 
     @property
     def results_history(self):
@@ -221,6 +230,9 @@ class TCClientExtra(TCPBClient):
     def curr_job_dir(self, value):
         self.__dict__['curr_job_dir'] = value
         self._last_known_curr_dir = value
+
+    def server_file(self, file_name):
+        return os.path.join(self.server_root, file_name)
 
     def print_end_of_file(self, n_lines=30):
         lines  = []
@@ -251,8 +263,59 @@ class TCClientExtra(TCPBClient):
                 print(line)
         print('\n ... END OF FILE \n')
 
+    #   TODO: add a counter for jobs submitted.
+    #   If the number of jobs submitted is the first job, remove the old restart file
+    def compute_job_sync(self, jobType="energy", geom=None, unitType="bohr", **kwargs):
+        """Wrapper for send_job_async() and recv_job_async(), using check_job_complete() to poll the server.
+        Main funcitonality is coppied from TCProtobufClient.send_job_async() and
+        TCProtobufClient.check_job_complete(). This is mostly to change the time in which the server is pinged. 
+        
+        Args:
+            jobType:    Job type key, as defined in the pb.JobInput.RunType enum (defaults to 'energy')
+            geom:       Cartesian geometry of the new point
+            unitType:   Unit type key, as defined in the pb.Mol.UnitType enum (defaults to 'bohr')
+            **kwargs:   Additional TeraChem keywords, check _process_kwargs for behaviour
+
+        Returns:
+            dict: Results mirroring recv_job_async
+        """
+
+        # print("Submitting Job...")
+        self.log_message("Submitting Job...")
+
+        accepted = self.send_job_async(jobType, geom, unitType, **kwargs)
+        while accepted is False:
+            time.sleep(0.5)
+            accepted = self.send_job_async(jobType, geom, unitType, **kwargs)
+
+        self.log_message("Job Accepted")
+        self.log_message(f"    Job Type: {jobType}")
+        self.log_message(f"    Current Job Dir: {self.get_curr_job_dir()}")
+
+        completed = self.check_job_complete()
+        while completed is False:
+            time.sleep(0.5)
+            self._send_msg(pb.STATUS, None)
+            status = self._recv_msg(pb.STATUS)
+
+            if status.WhichOneof("job_status") == "completed":
+                completed = True
+            elif status.WhichOneof("job_status") == "working":
+                completed = False
+            else:
+                raise ServerError(
+                    "Invalid or no job status received, either no job submitted before check_job_complete() or major server issue",
+                    self,
+                )
+        results = self.recv_job_async()
+        self.log_message(f"Job Complete with {len(results)} dictionary entries")
+        time.sleep(0.1)
+
+        self._finalize_run(results, kwargs)
+
+        return results
             
-    def _finialize_run(self, results: dict, opts: dict):
+    def _finalize_run(self, results: dict, opts: dict):
 
         #   try to refresh the file system metadata
         #   sometimes solves the issue of the file not being found
@@ -277,12 +340,12 @@ class TCClientExtra(TCPBClient):
             exciton_overlap_file_1 = os.path.join(self.server_root, 'exciton_overlap.dat.1')
             exciton_file = os.path.join(self.server_root, 'exciton.dat')
 
-            #   make sure the files exist
+            #   make sure the files exist, exit if it does not
             _ensure_file_exists(exciton_overlap_file)
     
             #   read in previous data
             with open(exciton_overlap_file, 'rb') as file:
-                exciton_overlap_data = file.read()
+                self._exciton_overlap_data = file.read()
 
             #   if exciton_overlap_file_1 also exists, then exciton.dat must have been created
             if os.path.isfile(exciton_overlap_file_1):
@@ -295,12 +358,21 @@ class TCClientExtra(TCPBClient):
                             data = [float(x) for x in sp[1:]]
                             overlap_data.append(data)
                 overlap_data = np.array(overlap_data)
+                self._exciton_data = overlap_data
                 results['exciton_overlap'] = overlap_data
                 os.remove(exciton_file)
-            
-            #   now rename to be used by terachem for next frame
-            os.rename(exciton_overlap_file, exciton_overlap_file_1)
+            else:
+                #   exciton_overlap.dat exists but exciton_overlap.dat.1 does not
+                #   this occus the first time exciton_overlap.dat is read by TeraChem, so we
+                #   assume that it's the first frame that does so. We rename to .1 to keep
+                #   the wavefunctiosn consistent
+        
+                os.rename(exciton_overlap_file, exciton_overlap_file_1)
 
+            if opts.get('cisrestart', None):
+                self._possible_files_to_remove.add(opts.get('cisrestart', None))
+
+            #   attempt to make sure the file system is updated
             dir_fd = os.open(self.server_root, os.O_DIRECTORY)
             os.fsync(dir_fd)
             os.close(dir_fd)
@@ -457,57 +529,6 @@ def _start_TC_server(port: int):
     
     return ip
 
-#   TODO: move to TCPBClient and add a counter for jobs submitted.
-#   If the number of jobs submitted is the first job, remove the old restart file
-def compute_job_sync(client: TCClientExtra, jobType="energy", geom=None, unitType="bohr", **kwargs):
-    """Wrapper for send_job_async() and recv_job_async(), using check_job_complete() to poll the server.
-    Main funcitonality is coppied from TCProtobufClient.send_job_async() and
-    TCProtobufClient.check_job_complete(). This is mostly to change the time in which the server is pinged. 
-    
-    Args:
-        jobType:    Job type key, as defined in the pb.JobInput.RunType enum (defaults to 'energy')
-        geom:       Cartesian geometry of the new point
-        unitType:   Unit type key, as defined in the pb.Mol.UnitType enum (defaults to 'bohr')
-        **kwargs:   Additional TeraChem keywords, check _process_kwargs for behaviour
-
-    Returns:
-        dict: Results mirroring recv_job_async
-    """
-
-    # print("Submitting Job...")
-    client.log_message("Submitting Job...")
-
-    accepted = client.send_job_async(jobType, geom, unitType, **kwargs)
-    while accepted is False:
-        time.sleep(3.5)
-        accepted = client.send_job_async(jobType, geom, unitType, **kwargs)
-
-    client.log_message("Job Accepted")
-    client.log_message(f"    Job Type: {jobType}")
-    client.log_message(f"    Current Job Dir: {client.get_curr_job_dir()}")
-
-    completed = client.check_job_complete()
-    while completed is False:
-        time.sleep(1.5)
-        client._send_msg(pb.STATUS, None)
-        status = client._recv_msg(pb.STATUS)
-
-        if status.WhichOneof("job_status") == "completed":
-            completed = True
-        elif status.WhichOneof("job_status") == "working":
-            completed = False
-        else:
-            raise ServerError(
-                "Invalid or no job status received, either no job submitted before check_job_complete() or major server issue",
-                client,
-            )
-    results = client.recv_job_async()
-    client.log_message(f"Job Complete with {len(results)} dictionary entries")
-    time.sleep(0.1)
-
-    client._finialize_run(results, kwargs)
-
-    return results
 class TCJob():
     __job_counter = 0
     def __init__(self, geom, opts, job_type, excited_type, state, name='', client=None) -> None:
@@ -579,7 +600,7 @@ class TCJob():
     def results(self, value):
         self._results = value
 
-    def get_guess_opts(self, prev_results: list[dict]):
+    def get_guess_file_locs(self, prev_results: list[dict]):
         job_opts = self.opts
         server_root = self.client.server_root
         if len(prev_results) != 0:
@@ -592,7 +613,7 @@ class TCJob():
 
         cas_guess = None
         scf_guess = None
-        cis_guess = None
+        cis_guess = self.opts.get('cisrestart', None)
         if self.state > 0:
             if self.excited_type == 'cas':
                 for prev_job in reversed(prev_results):
@@ -601,12 +622,12 @@ class TCJob():
                         if prev_orb_file[-6:] == 'casscf':
                             cas_guess = os.path.join(server_root, prev_orb_file)
                             break
-            else:
-                #   we do not consider cis file because it is not stored in each job dorectory; we set it ourselves
-                host_port_str = f'{self.client.host}_{self.client.port}'
-                if host_port_str not in job_opts['cisrestart']:
-                    cis_guess = f"{job_opts['cisrestart']}_{host_port_str}"
-                    # job_opts['cisrestart'] = cis_guess
+            # else:
+            #     #   we do not consider cis file because it is not stored in each job dorectory; we set it ourselves
+            #     host_port_str = f'{self.client.host}_{self.client.port}'
+            #     if host_port_str not in job_opts['cisrestart']:
+            #         cis_guess = f"{job_opts['cisrestart']}_{host_port_str}"
+            #         # job_opts['cisrestart'] = cis_guess
 
         for i, prev_job in enumerate(reversed(prev_results)):
             if 'orbfile' in prev_job:
@@ -617,20 +638,26 @@ class TCJob():
                     scf_guess = scf_guess[0:-7]
                 break
 
+
         return scf_guess, cis_guess, cas_guess
         
             
-    def set_guess(self, prev_results: list[dict]):
-        job_opts = self.opts
-        scf_guess, cis_guess, cas_guess = self.get_guess_opts(prev_results)
-        if os.path.isfile(str(cas_guess)):
-            job_opts['casguess'] = cas_guess
-        if os.path.isfile(str(scf_guess)):
-            job_opts['guess'] = scf_guess
+    # def set_guess(self, prev_results: list[dict]):
+    #     scf_guess, cis_guess, cas_guess = self.get_guess_file_locs(prev_results)
+    #     if os.path.isfile(str(cas_guess)):
+    #         self.opts['casguess'] = cas_guess
+    #     if os.path.isfile(str(scf_guess)):
+    #         self.opts['guess'] = scf_guess
 
-    def copy_guess_files(self, prev_results: list[dict]):
-        job_opts = self.opts
-        scf_guess, cis_guess, cas_guess = self.get_guess_opts(prev_results)
+    def set_guess(self, scf_guess=None, cas_guess=None):
+        if cas_guess is not None:
+            self.opts['casguess'] = cas_guess
+        if scf_guess is not None:
+            self.opts['guess'] = scf_guess
+
+
+    def copy_guess_files(self, prev_results_hist: list[dict]):
+        scf_guess, cis_guess, cas_guess = self.get_guess_file_locs(prev_results_hist)
         guess_data = {}
         if os.path.isfile(str(cas_guess)):
             with open(cas_guess, 'rb') as file:
@@ -802,7 +829,8 @@ class TCRunner(QCRunner):
         super().__init__()
         
         # Atoms and max_wait
-        self._atoms = np.copy(atoms)
+        # self._atoms = np.copy(atoms)
+        self._atoms = tuple(atoms)
         self._max_wait = max_wait
 
         # Hosts, ports, and server roots
@@ -837,16 +865,17 @@ class TCRunner(QCRunner):
 
         # Server and client management
         self._server_root_list = []
-        self._client_list = []
+        self._client_list: list[TCClientExtra] = []
         self._client = None
         self._host = None
         self._port = None
         self._setup_servers_and_clients(tc_opts)  # Set up servers and clients
 
         # Guesses for SCF/CAS/CI calculations
-        self._cas_guess = None
-        self._scf_guess = None
-        self._ci_guess = None
+        # self._cas_guess = None
+        # self._scf_guess = None
+        # self._ci_guess = None
+        self._exciton_overlap_data = None
 
         # Timing and stall handling
         self._max_time_list = []
@@ -859,7 +888,7 @@ class TCRunner(QCRunner):
         self._frame_counter = 0
         self._prev_ref_job = None
         self._prev_job_batch: TCJobBatch = None
-        self.job_batch_history = deque(maxlen=4)
+        # self.job_batch_history = deque(maxlen=4)
 
         # Debug trajectory
         self._debug_traj = []
@@ -868,6 +897,9 @@ class TCRunner(QCRunner):
 
         # Print options summary
         self._print_options_summary()
+        self._cleanup_stale_files()
+        self._coordinate_exciton_overlap_files(tc_opts.fname_exciton_overlap_data)
+        # time.sleep(60)
         
 
     def _prepare_server_info(self):
@@ -944,7 +976,7 @@ class TCRunner(QCRunner):
                     excited_options[key] = val
                 else:
                     base_options[key] = val
-            self._ci_guess = 'cis_restart_' + str(os.getpid())
+            # self._ci_guess = 'cis_restart_' + str(os.getpid())
         elif orig_opts.get('casscf', '') == 'yes' or orig_opts.get('casci', '') == 'yes':
             excited_type = 'cas'
             #   CAS-CI and CAS-SCF
@@ -968,7 +1000,7 @@ class TCRunner(QCRunner):
                 excited_options['cassinglets'] = max_state + 1
 
         if max_state > 0:
-            base_options['cisrestart'] = 'cis_restart_' + str(os.getpid())
+            excited_options['cisrestart'] = 'cis_restart_' + str(os.getpid())
         base_options['purify'] = False
         base_options['atoms'] = self._atoms
 
@@ -1124,14 +1156,25 @@ class TCRunner(QCRunner):
         print('--------------------------------------')
         print()
 
+    def _cleanup_stale_files(self):
+        for client in self._client_list:
+            for file in ['exciton.dat', 'exciton_overlap.dat', 'exciton_overlap.dat.1']:
+                file_loc = os.path.join(client.server_root, file)
+                if os.path.isfile(file_loc):
+                    print('Removing stale file:', file_loc)
+
     def report(self):
         return self._prev_job_batch
 
     def cleanup(self):
-        self._disconnect_clients()
         if _SAVE_DEBUG_TRAJ:
             with open(_SAVE_DEBUG_TRAJ, 'wb') as file:
                 pickle.dump(self._debug_traj, file)
+        if _DEBUG_TRAJ:
+            return
+        for client in self._client_list:
+            client.disconnect()
+            client.cleanup()
 
     def __enter__(self):
         return self
@@ -1148,11 +1191,7 @@ class TCRunner(QCRunner):
     def _conenct_user_clients(self):
         pass
 
-    def _disconnect_clients(self):
-        if _DEBUG_TRAJ:
-            return
-        for client in self._client_list:
-            client.disconnect()
+  
 
     '''
     @staticmethod
@@ -1326,7 +1365,7 @@ class TCRunner(QCRunner):
 
             return self._client.recv_job_async()
         
-    def set_avg_max_times(self, times: dict):
+    def _set_avg_max_times(self, times: dict):
         max_time = np.max(list(times.values()))
         self._max_time_list.append(max_time)
         self._max_time = np.mean(self._max_time_list)*5
@@ -1372,6 +1411,7 @@ class TCRunner(QCRunner):
                     nac[i, j] = sign*nac[i, j]
                     nac[j, i] = -nac[i, j]
             self._initial_ref_nacs = None
+
                 
         return (all_energies, elecE, grad, nac, trans_dips, job_batch.timings)
 
@@ -1481,7 +1521,7 @@ class TCRunner(QCRunner):
         #   if only one client is being used, don't open up threads, easier to debug
         if n_clients == 1:
             jobs_batch.jobs[0].client = self._client_list[0]
-            _run_batch_jobs(jobs_batch, self._prev_results)
+            _run_batch_jobs(jobs_batch)
 
         #   submit jobs as separate threads, one per client
         else:
@@ -1489,14 +1529,15 @@ class TCRunner(QCRunner):
                 futures = []
                 for client in self._client_list:
                     jobs = jobs_batch.get_by_client(client)
-                    args = (jobs, self._prev_results)
+                    args = (jobs, )
                     future = executor.submit(_run_batch_jobs, *args)
                     futures.append(future)
                 for f in futures:
                     f.result()
 
         self._prev_results = jobs_batch.results_list
-        self.set_avg_max_times(jobs_batch.timings)
+        self._set_avg_max_times(jobs_batch.timings)
+        self._coordinate_exciton_overlap_files()
 
         if _SAVE_DEBUG_TRAJ:
             print("APPENDING DEBUG TRAJ ", jobs_batch)
@@ -1511,6 +1552,41 @@ class TCRunner(QCRunner):
                 pickle.dump(jobs_batch, file)
 
         return jobs_batch
+                    
+
+    def _coordinate_exciton_overlap_files(self, overlap_file_loc=None, overlap_data=None):
+        '''
+            Copy a single exciton overlap file to all server roots
+        '''
+
+        if self._excited_type != 'cis':
+            return
+
+        exciton_overlap_data = None
+        if overlap_data is not None:
+            exciton_overlap_data = overlap_data
+        elif overlap_file_loc is not None:
+            with open(overlap_file_loc, 'rb') as file:
+                exciton_overlap_data = file.read()
+        else:
+            for client in self._client_list:
+                overlap_file_loc = client.server_file('exciton_overlap.dat.1')
+                if not os.path.isfile(overlap_file_loc):
+                    continue
+                with open(overlap_file_loc, 'rb') as file:
+                    exciton_overlap_data = file.read()
+                break
+
+
+        #   copy file to all other server roots
+        if exciton_overlap_data is not None:
+            self._exciton_overlap_data = exciton_overlap_data
+            for client in self._client_list:
+                new_file_loc = client.server_file('exciton_overlap.dat.1')
+                with open(new_file_loc, 'wb') as file:
+                    file.write(self._exciton_overlap_data)
+
+
 
     def _run_numerical_derivatives(self, ref_job: TCJob, n_points=3, dx=0.01, overlap=False):
         '''
@@ -1747,7 +1823,7 @@ def _correct_signs(job: TCJob, ref_job: TCJob):
 
     
 
-def _run_batch_jobs(jobs_batch: TCJobBatch, prev_results=[]):
+def _run_batch_jobs(jobs_batch: TCJobBatch):
     overlap_set = False
     for j in jobs_batch.jobs:
         j: TCJob
@@ -1756,7 +1832,8 @@ def _run_batch_jobs(jobs_batch: TCJobBatch, prev_results=[]):
         client: TCClientExtra = j.client
         
         j.start_time = time.time()
-        j.set_guess(client.results_history)
+        # j.set_guess(client.results_history)
+        j.set_guess(client._scf_guess_file, client._cas_guess_file)
         client.log_message(f"Running {j.name}")
         print(f"Running {j.name}")
 
@@ -1771,7 +1848,8 @@ def _run_batch_jobs(jobs_batch: TCJobBatch, prev_results=[]):
         try_again = True
         while try_again:
             try:
-                results = compute_job_sync(client, j.job_type, j.geom, 'angstrom', **job_opts)
+                # results = compute_job_sync(client, j.job_type, j.geom, 'angstrom', **job_opts)
+                results = client.compute_job_sync(j.job_type, j.geom, 'angstrom', **job_opts)
                 try_again = False
             except Exception as e:
                 try_count += 1
@@ -1801,6 +1879,10 @@ def _run_batch_jobs(jobs_batch: TCJobBatch, prev_results=[]):
         TCRunner.append_output_file(results, client.server_root)
         results.update(job_opts)
         j.results = results.copy()
+        scf_guess, cis_guess, cas_guess  = j.get_guess_file_locs(client._results_history)
+        client._scf_guess_file = scf_guess
+        client._cis_guess_file = cis_guess
+        client._cas_guess_file = cas_guess
 
 
 def format_output_LSCIVR(job_data: list[dict]):

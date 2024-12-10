@@ -12,7 +12,7 @@ from .qcRunners.TeraChem import TCJob, TCJobBatch
 from .h5file import H5File, H5Group, H5Dataset
 # from .input_simulation import extra_loggers, logging_mode
 from . import input_simulation as opts
-from .serialization import serialize
+from .serialization import serialize, deserialize, TCRunner_Deserialize
 from .common import PhaseVars, ESVars
 
 ANG_2_BOHR = 1.8897259886
@@ -125,7 +125,7 @@ def run_restart_module():
 
     exit()
 
-def read_restart(file_loc: str='restart.out', ndof: int=0, integrator: str='RK4') -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, float, float]:
+def read_restart(file_loc: str='restart.out', ndof: int=0, integrator: str='RK4', tc_runner=None) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, float, float]:
     '''
         Reads in a restart file and extracts it's data
         Parameters
@@ -215,41 +215,47 @@ def read_restart(file_loc: str='restart.out', ndof: int=0, integrator: str='RK4'
             #  json data format
             with open(file_loc) as file:
                 data = json.load(file)
-            rst_integrator = data['integrator'].lower()
+            rst_integrator = data.pop('integrator').lower()
             if rst_integrator != integrator.lower():
                 raise ValueError(f'ERROR: Restart file integrator {rst_integrator} does not match request integrator "{integrator}"')
             if any([x not in data for x in ['nucl_q', 'nucl_p', 'elec_q', 'elec_p', 'energy', 'time']]):
                 raise ValueError(f'ERROR: Restart file requires at least the following keys: nucl_q, nucl_p, elec_q, elec_p, energy, time')
             
-            nucl_q = data['nucl_q']
-            nucl_p = data['nucl_p']
-            elec_q = data['elec_q']
-            elec_p = data['elec_p']
-            energy = data['energy']
-            time = data['time']
-            nac_hist = np.array(data.get('nac_hist', np.array([])))
-            tdm_hist = np.array(data.get('tdm_hist', np.array([])))
+            data: dict
+            nucl_q = data.pop('nucl_q')
+            nucl_p = data.pop('nucl_p')
+            elec_q = data.pop('elec_q')
+            elec_p = data.pop('elec_p')
+            energy = data.pop('energy')
+            time = data.pop('time')
+            nac_hist = np.array(data.pop('nac_hist', np.array([])))
+            tdm_hist = np.array(data.pop('tdm_hist', np.array([])))
 
             combo_q = np.array(elec_q + nucl_q)
             combo_p = np.array(elec_p + nucl_p)
 
             if 'com' in data: 
-                opts.com_ang = np.array(data['com'])
-                print('IN READING RESTART: ', opts.com_ang)
+                opts.com_ang = np.array(data.pop('com'))
    
-            elecE = np.array(data.get('elec_E', np.array([])))
-            grads = np.array(data.get('grads', np.array([])))
-            nac_mat = np.array(data.get('nac_mat', np.array([])))
+            elecE = np.array(data.pop('elec_E', np.array([])))
+            grads = np.array(data.pop('grads', np.array([])))
+            nac_mat = np.array(data.pop('nac_mat', np.array([])))
 
             if 'TCJobBatch__batch_counter' in data:
-                TC.TCJobBatch.set_ID_counter(data['TCJobBatch__batch_counter'])
+                TC.TCJobBatch.set_ID_counter(data.pop('TCJobBatch__batch_counter'))
 
             if 'TCJob__job_counter' in data:
-                TC.TCJob.set_ID_counter(data['TCJob__job_counter'])
+                TC.TCJob.set_ID_counter(data.pop('TCJob__job_counter'))
+
+            if 'TCRunner' in data:
+                TCRunner_Deserialize(data.pop('TCRunner'), tc_runner)
+
 
             # phase_vars = PhaseVars(elec_q, elec_p, nucl_q, nucl_p, time)
             # es_vars = ESVars(elecE, grads, nac_mat)
             # return phase_vars, es_vars, nac_hist, tdm_hist, energy, time
+                
+            
 
             return combo_q, combo_p, nac_hist, tdm_hist, energy, time, elecE, grads, nac_mat
 
@@ -363,7 +369,7 @@ def write_restart(file_loc: str,
                 data['TCJob__job_counter'] = TC.TCJob.get_ID_counter()
 
             if qc_runner:
-                data['qc_runner'] = serialize(qc_runner)
+                data[qc_runner.__class__.__name__] = serialize(qc_runner)
 
             with open(file_loc, 'w') as file:
                 json.dump(data, file, indent=2)

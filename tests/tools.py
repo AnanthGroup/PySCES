@@ -5,8 +5,8 @@ import unittest
 import os
 import shutil
 import inspect
-import time
-import psutil
+import json
+import pandas
 
 def parse_xyz_data(file_loc):
     n_atoms = None
@@ -35,7 +35,7 @@ def assert_dictionary(testcase: unittest.TestCase, dict_ref, dict_tst, atol=1e-6
             raise ValueError(f'key "{key}" not in test dictionary')
         msg = f'value for key "{key}" not equal between both dicts'
         if isinstance(value, dict):
-            assert_dictionary(dict_ref[key], dict_tst[key])
+            assert_dictionary(testcase, dict_ref[key], dict_tst[key], atol, rtol)
         elif isinstance(value, str) or isinstance(value, int):
             testcase.assertEqual(value, dict_tst[key], msg=msg)
         elif isinstance(value, float):
@@ -92,6 +92,37 @@ def reset_directory():
     #   directory of test_tools.py, could be called from anywhere
     this_dir = os.path.dirname(os.path.abspath(inspect.getfile(inspect.currentframe())))
     os.chdir(this_dir)
+
+def assert_logs_dir(tst_dir_name, ref_dir_name):
+    #   check simple panda readable data
+    for file in ['corr.txt', 'electric_pq.txt', 'energy.txt', 'grad.txt', 'nac.txt']:
+        data_ref = pandas.read_csv(f'{ref_dir_name}/{file}', sep='\s+', comment='#')
+        data_tst = pandas.read_csv(f'{tst_dir_name}/{file}', sep='\s+', comment='#')
+        for key in data_ref:
+            np.testing.assert_allclose(data_tst[key], data_ref[key], 
+                                        rtol=1e-5, verbose=True,
+                                        err_msg=f'file: {file}')
+    
+    #   check data in xyz formats
+    for file in ['nuc_geo.xyz', 'nuclear_P.txt']:
+        data_ref = parse_xyz_data(f'{ref_dir_name}/{file}')
+        data_tst = parse_xyz_data(f'{tst_dir_name}/{file}')
+        for frame, (frame_tst, frame_ref) in enumerate(zip(data_tst, data_ref)):
+            np.testing.assert_equal(frame_tst['atoms'], frame_ref['atoms'])
+            np.testing.assert_allclose(frame_tst['positions'], frame_ref['positions'],
+                                        atol=1e-16, verbose=True,
+                                        err_msg=f'file: {file}; frame {frame}')
+            
+def assert_reset_files(testcase: unittest.TestCase, tst_file, ref_file):
+    with open(ref_file) as file:
+        restart_ref: dict = json.load(file)
+        if 'TCRunner' in restart_ref:
+            restart_ref.pop('TCRunner')
+    with open(tst_file) as file:
+        restart_tst: dict = json.load(file)
+        if 'TCRunner' in restart_tst:
+            restart_tst.pop('TCRunner')
+    assert_dictionary(testcase, restart_ref, restart_tst)
 
 class Tester(unittest.TestCase):
     '''
