@@ -37,30 +37,42 @@ tcr_job_options = {
         'spinmult': 1,
         'closed_shell': True,
         'restricted': True,
-        'precision': 'mixed',
-        'convthre': 1E-6,
-        'sphericalbasis': 'yes',
 
         #   TD-DFT
         'cis': 'yes',
-        'cisnumstates': 2
+        'cisnumstates': 2,
+
+        #   thresholds
+        'precision': 'double',
+        'convthre': 1e-10,
+        'cisconvtol': 1e-10,
+        'maxiter': 100,
+        'cismaxiter': 100,
+        'threall': 1e-20,
+        'threcl': 1e-20,
+        'pqthre': 1e-20,
+        'threoe': 1e-20,
+        'thregr': 1e-20,
+        'threex': 1e-20,
 }
 tcr_state_options = {
     'max_state': 2
 }
 
-ref_nacs_in = np.loadtxt('logs_ref/nac.txt', skiprows=3, max_rows=18)
-ref_nacs = np.zeros((3, 3, 18))
-ref_nacs[0, 1] = ref_nacs_in[:, 0]
-ref_nacs[0, 2] = ref_nacs_in[:, 1]
-ref_nacs[1, 2] = ref_nacs_in[:, 2]
-ref_nacs += -ref_nacs.transpose(1, 0, 2)
-_tcr_initial_ref_nacs = ref_nacs
+# ref_nacs_in = np.loadtxt('logs_ref/nac.txt', skiprows=3, max_rows=18)
+# ref_nacs = np.zeros((3, 3, 18))
+# ref_nacs[0, 1] = ref_nacs_in[:, 0]
+# ref_nacs[0, 2] = ref_nacs_in[:, 1]
+# ref_nacs[1, 2] = ref_nacs_in[:, 2]
+# ref_nacs += -ref_nacs.transpose(1, 0, 2)
+# _tcr_initial_ref_nacs = ref_nacs
 
 # Terachem files
 fname_tc_xyz      = "freq/mol.xyz"
 fname_tc_geo_freq = "freq/Geometry.frequencies.dat"
 fname_tc_redmas   = "freq/Reduced.mass.dat"
 fname_tc_freq     = "freq/Frequencies.dat"
+
+# fname_exciton_overlap_data = 'logs_ref/exciton_overlap.dat.1'
 
 input_seed = 123456

@@ -1,0 +1,2 @@
+    Total_QC  gradient_0  gradient_1  gradient_2     nac_0_1     nac_0_2     nac_1_2   Wall_Time
+       8.328       0.726       0.687       0.687       0.687       0.689       0.687       4.165

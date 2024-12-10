@@ -1566,6 +1566,7 @@ Main driver of RK4 and electronic structure
 def rk4(initq, initp, tStop, H, restart, amu_mat, U, AN_mat):
 
     #   Initialize variables
+    tc_runner    = None
     trans_dips   = None
     all_energies = None
     timings      = {}
@@ -1599,7 +1600,7 @@ def rk4(initq, initp, tStop, H, restart, amu_mat, U, AN_mat):
 
     #   Initialization
     if restart == 1:
-        q, p, nac_hist, tdm_hist, init_energy, initial_time, elecE, grad, nac = read_restart(file_loc=restart_file_in, ndof=ndof)
+        q, p, nac_hist, tdm_hist, init_energy, initial_time, elecE, grad, nac = read_restart(file_loc=restart_file_in, ndof=ndof, tc_runner=tc_runner)
         t = initial_time
         qC, pC = q[nel:], p[nel:]
         y = np.concatenate((q, p))
@@ -1695,7 +1696,7 @@ def rk4(initq, initp, tStop, H, restart, amu_mat, U, AN_mat):
             with open(os.path.join(__location__, 'progress.out'), 'a') as f:
                 f.write('Propagated to the final time step.\n')
 
-    write_restart(restart_file_out, [Y[-1][:ndof], Y[-1][ndof:]], sign_flipper.nac_hist, sign_flipper.tdm_hist, energy[-1], t, nel, 'rk4', elecE, grad, nac, opts.com_ang)
+    write_restart(restart_file_out, [Y[-1][:ndof], Y[-1][ndof:]], sign_flipper.nac_hist, sign_flipper.tdm_hist, energy[-1], t, nel, 'rk4', elecE, grad, nac, opts.com_ang, tc_runner)
     if qc_runner == 'terachem':
         tc_runner.cleanup()
 

@@ -266,6 +266,9 @@ class SignFlipper():
                     if sign_tdm == sign_nac:
                         if sign_nac < 0:
                             flip_detected = True
+                            print('FLIP 1: ', i, j, nac_dot_product, sign_tdm)
+                            for k in range(0,nac.shape[2]):
+                                print(f'{nac[i,j,k]:12.6f} {nac_expol[i,j,k]:12.6f}')
                         nac[i,j,:] = sign_nac*nac[i,j,:]
                         nac[j,i,:] = sign_nac*nac[j,i,:]
                         
@@ -275,6 +278,7 @@ class SignFlipper():
                     sign = np.sign(nac_dot_product)
                     if sign < 0:
                         flip_detected = True
+                        # print('FLIP 1: ', sign)
 
                     nac[i,j,:] = sign*nac[i,j,:]
                     nac[j,i,:] = sign*nac[j,i,:]
