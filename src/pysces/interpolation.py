@@ -2,10 +2,9 @@ import numpy as np
 from collections import deque
 from scipy.integrate import simps
 from scipy.interpolate import interp1d
+import scipy.linalg as la
 from typing import Literal
-class GradEstimator():
-
-
+class _GradEstimator():
     def __init__(self, order: Literal[1, 2, 3], history_size=None, interval=1.0, name='UNKNOWN'):
 
         if order not in [1, 2, 3]:
@@ -21,24 +20,12 @@ class GradEstimator():
         self.interval = interval
         self.history_grads = deque(maxlen=history_size)
         self.history_t = deque(maxlen=history_size)
-        self.history_f = deque(maxlen=history_size)
-        # self.polynomial_coeffs = None
         self._interp_func = None
         self.name = name
         self._interp_kind = {1: 'linear', 2: 'quadratic', 3: 'cubic'}[order]
 
 
-    def update_history(self, new_t, new_grads, new_f):
-
-        #   before we update, let's get one more extrapolation to check how close we are
-        # if self.polynomial_coeffs is not None:
-        #     guess = np.polyval(self.polynomial_coeffs, new_t)
-        #     guess = guess.reshape(self.history_grads[0].shape)
-        #     error = np.abs(guess - new_grads)
-        #     max_error = np.max(error)
-        #     rms_error = np.sqrt(np.mean(error**2))
-        #     print(f'Before updating extrapolation history in {self.name} at time {new_t}: ')
-        #     print(f'    {max_error=:.5e}, {rms_error=:.5e}')
+    def update_history(self, new_t, new_grads):
 
         if self._interp_func is not None:
             guess = self._evaluate(new_t)
@@ -50,7 +37,6 @@ class GradEstimator():
 
         self.history_grads.append(np.array(new_grads))
         self.history_t.append(new_t)
-        self.history_f.append(new_f)
         print(f'Updating {self.name} history at time {new_t}')
         if len(self.history_grads) > self.order:
             self._interpolate()
@@ -63,16 +49,9 @@ class GradEstimator():
                                      fill_value='extrapolate')
         
     def _evaluate(self, time):
+        if not self._interp_func:
+            return None
         return self._interp_func(time)
-
-    # def _fit_polynomial(self):
-    #     # Flatten the matrices and stack them into a 2D array
-    #     stacked_history = np.vstack([np.ravel(matrix) for matrix in self.history_grads])
-    #     # Fit a polynomial to each column of the 2D array
-    #     self.polynomial_coeffs = np.polyfit(self.history_t, stacked_history, self.order)
-
-    # def _evaluate(self, time):
-    #     return np.polyval(self.polynomial_coeffs, time)
     
     def __call__(self, t) -> np.ndarray:
         pass
@@ -82,14 +61,14 @@ class GradEstimator():
     
     def check_run_deriv(self, new_time):
         if len(self.history_grads) <= self.order:
-            return True, 'History not long enough'
+            return True, 'History too short'
         elif new_time - self.history_t[-1] >= self.interval:
             return True, 'Interval reached'
         else:
             return False, 'OK'
     
     def guess_f(self, f0, times, velocities):
-        if not self._evaluate:
+        if not self._interp_func:
             raise ValueError("Not enough history to estimate yet")            
 
         grads = self._evaluate(times)
@@ -98,12 +77,142 @@ class GradEstimator():
         delta_f = simps(prod, times, axis=0)
         extrap_f = f0 + delta_f
 
-
-
         return extrap_f
 
-    
 
+class GradientInterpolation():
+    def __init__(self, grads, masses) -> None:
+        self._grads = grads.copy()
+        AMU_2_AU = 1.822888486*10**3      # atomic mass unit to a.u. of mass
+        self._masses = np.array(masses) * AMU_2_AU
+        self._grad_estimator = {g: _GradEstimator(order=2, interval=3.0, name=f'grad_{g}') for g in self._grads}
+
+    def update_history(self, grad_id, time, gradient):
+        self._grad_estimator[grad_id].update_history(time, gradient)
+    
+    def get_guess(self, time: float, gradient: int):
+        return self._grad_estimator[gradient]._evaluate(time)
+    
+    def get_guesses(self, time: float):
+        return tuple((g, self._grad_estimator[g]._evaluate(time)) for g in self._grads)
+
+    def get_gradient_states(self, current_energies, previous_energies, time_hist, nuc_p_hist):
+
+        print_str = ''
+        if len(time_hist) < 3:
+            grads_to_run = {g: (True, 'History too short') for g in self._grads}
+        else:
+            grads_to_run = {}
+            #   setup the velocities for the gradient estimator
+            curr_time = time_hist[-1]
+            prev_time = time_hist[-2]
+            vel_history = nuc_p_hist/(self._masses)
+            interp_vel = interp1d(time_hist, vel_history, axis=0, kind='quadratic') # TODO: change to the same order as the grad interpolator
+            time_pts = np.linspace(prev_time, curr_time, 100)
+            vel_pts = interp_vel(time_pts)
+
+            #   compute estimates for the gradients and if they are good enough            
+            for g, grad_est in self._grad_estimator.items():
+                required_run, reason = grad_est.check_run_deriv(curr_time)
+                if not required_run:
+                    #   current time is -1, previous time is -2 for the energy history
+                    guess_energy = grad_est.guess_f(previous_energies[g], time_pts, vel_pts)
+                    energy_diff = guess_energy - current_energies[g]
+                    print_str += (f'  {g}  {guess_energy:16.10f}  {current_energies[g]:16.10f}  {energy_diff:16.10f}    {energy_diff * 27.2114:11.8f}\n')
+                    if abs(energy_diff) > 0.0001:
+                        required_run = True
+                        reason = 'guess energy error'
+                grads_to_run[g] = (required_run, reason)
+
+
+        if print_str != '':
+            print('Inteprolation Gradient Time: ', curr_time)
+            print('  State      Estimate            Actual      Error (a.u.)     Error (eV)')
+            print(' -------------------------------------------------------------------------')
+            print(print_str[:-1])
+            print(' -------------------------------------------------------------------------')
+        print('')
+        print('Gradients to Run')
+        print('   Gradient    Run?    Reason')
+        print('   -------------------------------------------')
+        for g, (required_run, reason) in grads_to_run.items():
+            print(f'        {g}        {required_run}    {reason}')
+        print('   -------------------------------------------')
+
+        return grads_to_run
+
+
+
+class GradientInterpolation():
+    def __init__(self, nacs, masses) -> None:
+        self._NACs = tuple(tuple(x) for x in nacs)
+        AMU_2_AU = 1.822888486*10**3      # atomic mass unit to a.u. of mass
+        self._masses = np.array(masses) * AMU_2_AU
+        self._estimator = {}
+        for x in self._NACs:
+            self._estimator[x] = _GradEstimator(order=2, interval=3.0, name=f'nac_{x[0]}_{x[1]}')
+            self._estimator[tuple(reversed(x))] = self._estimator[x]
+
+    def update_history(self, nac_pair, time, gradient):
+        self._estimator[tuple(nac_pair)].update_history(time, gradient)
+    
+    def get_guess(self, time: float, gradient: int):
+        return self._estimator[gradient]._evaluate(time)
+    
+    def get_guesses(self, time: float):
+        return tuple((g, self._estimator[g]._evaluate(time)) for g in self._NACs)
+
+    def get_gradient_states(self, overlaps, time_hist, nuc_p_hist):
+
+        print_str = ''
+        if len(time_hist) < 3:
+            nacs_to_run = {g: (True, 'History too short') for g in self._NACs}
+        else:
+
+
+            nacs_to_run = {}
+            #   setup the velocities for the gradient estimator
+            curr_time = time_hist[-1]
+            prev_time = time_hist[-2]
+            vel_history = nuc_p_hist/(self._masses)
+            interp_vel = interp1d(time_hist, vel_history, axis=0, kind='quadratic') # TODO: change to the same order as the grad interpolator
+            time_pts = np.linspace(prev_time, curr_time, 100)
+            vel_pts = interp_vel(time_pts)
+            dt = curr_time - prev_time
+
+            U = overlaps @ np.linalg.inv(la.sqrtm(overlaps.T @ overlaps)) # unitary matrix
+            log_U = la.logm(U)
+            avg_T = log_U / dt
+
+            #   compute estimates for the gradients and if they are good enough            
+            for x, grad_est in self._estimator.items():
+                required_run, reason = grad_est.check_run_deriv(curr_time)
+                if not required_run:
+        
+                    guess_avg_T = grad_est.guess_f(0.0[x], time_pts, vel_pts)
+                    diff = guess_avg_T - avg_T[g]
+                    print_str += (f'  {g}  {guess_avg_T:16.10f}  {avg_T[x]:16.10f}  {diff:16.10f}    {diff * 27.2114:11.8f}\n')
+                    if abs(diff) > 0.0001:
+                        required_run = True
+                        reason = 'guess error'
+                nacs_to_run[g] = (required_run, reason)
+
+
+        if print_str != '':
+            print('Inteprolation Gradient Time: ', curr_time)
+            print('  State      Estimate            Actual      Error (a.u.)     Error (eV)')
+            print(' -------------------------------------------------------------------------')
+            print(print_str[:-1])
+            print(' -------------------------------------------------------------------------')
+        print('')
+        print('Gradients to Run')
+        print('     NAC       Run?    Reason')
+        print('   -------------------------------------------')
+        for (x1, x2), (required_run, reason) in nacs_to_run.items():
+            print(f'     {x1}, {x2}        {required_run}    {reason}')
+        print('   -------------------------------------------')
+
+        return nacs_to_run
 
 class SignFlipper():
     _debug = False

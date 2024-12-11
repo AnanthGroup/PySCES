@@ -4,7 +4,7 @@ from tcpb import terachem_server_pb2 as pb
 
 from pysces.input_simulation import logging_dir, TCRunnerOptions
 from pysces.common import PhaseVars, PhaseVarHistory, QCRunner, ESResults, ESResultsHistory
-from pysces.interpolation import GradEstimator
+from pysces.interpolation import GradientInterpolation
 
 from datetime import datetime
 import functools
@@ -943,9 +943,12 @@ class TCRunner(QCRunner):
         self._masses = np.array([[qcel.periodictable.to_mass(symbol)]*3 for symbol in atoms]).flatten()
         self._es_history = ESResultsHistory()
         self._phase_var_history = PhaseVarHistory()
-        self._grad_estimator = {g: GradEstimator(order=2, interval=3.0, name=f'grad_{g}') for g in self._grads}
+        # self._grad_estimator = {g: GradEstimator(order=2, interval=3.0, name=f'grad_{g}') for g in self._grads}
         self._grad_estimates = {g: None for g in self._grads}
         self._interpolation = tc_opts.interpolation
+
+        self._grad_interpolator = GradientInterpolation(self._grads, self._masses)
+
 
         # Print options summary
         self._print_options_summary()
@@ -1508,19 +1511,19 @@ class TCRunner(QCRunner):
             raise ValueError('No jobs to run')
 
 
-        self._interpolation_setup(job_batch, self._excited_type)
+        self._interpolation_setup(job_batch)
 
         job_batch = self._send_jobs_to_clients(job_batch)
         self._frame_counter += 1
         self._prev_jobs = job_batch.jobs
 
-        self._interpolation_finalize(job_batch, self._excited_type)
+        self._interpolation_finalize(job_batch)
 
                 
 
         return job_batch
     
-    def _interpolation_setup(self, job_batch: TCJobBatch, excited_type: Literal['cis', 'cas']):
+    def _interpolation_setup(self, job_batch: TCJobBatch):
         if not self._interpolation:
             return        
 
@@ -1532,78 +1535,39 @@ class TCRunner(QCRunner):
             eng_opts.pop(x, None)
         eng_results = self.compute_job_sync_with_restart('energy', ref_job.geom, 'angstrom', **eng_opts)
         all_energies = eng_results['energy']
-        self._es_history.append(ESResults(time=self._phase_var_history.time[-1], all_energies=all_energies))
+        curr_time = self._phase_var_history.time[-1]
+        self._es_history.append(ESResults(time=curr_time, all_energies=all_energies))
 
-        print_str = ''
-        if len(self._phase_var_history.time) < 3:
-            grads_to_run = {g: (True, 'Energy history too short') for g in self._grads}
-        else:
-            grads_to_run = {}
-            #   setup the velocities for the gradient estimator
-            curr_time = self._phase_var_history.time[-1]
-            prev_time = self._phase_var_history.time[-2]
-            time_hist = self._phase_var_history.time
-            vel_history = self._phase_var_history.nuc_p/(self._masses * AMU_2_AU)
-            interp_vel = interp1d(time_hist, vel_history, axis=0, kind='quadratic') # TODO: change to the same order as the grad interpolator
-            time_pts = np.linspace(prev_time, curr_time, 100)
-            vel_pts = interp_vel(time_pts)
+        grads_to_run = self._grad_interpolator.get_gradient_states(all_energies, self._es_history[-2].all_energies, self._es_history.time, self._phase_var_history.nuc_p)
 
-            #   compute estimates for the gradients and if they are good enough            
-            for g, grad_est in self._grad_estimator.items():
-                required_run, reason = grad_est.check_run_deriv(curr_time)
-                if not required_run:
-                    #   current time is -1, previous time is -2 for the energy history
-                    guess_energy = grad_est.guess_f(self._es_history.all_energies[-2][g], time_pts, vel_pts)
-                    energy_diff = guess_energy - eng_results['energy'][g]
-                    print_str += (f'  {g}  {guess_energy:16.10f}  {eng_results["energy"][g]:16.10f}  {energy_diff:16.10f}    {energy_diff * 27.2114:11.8f}\n')
-                    if abs(energy_diff) > 0.0001:
-                        required_run = True
-                        reason = 'guess energy error'
-                grads_to_run[g] = (required_run, reason)   
-
-        if print_str != '':
-            print('Inteprolation Gradient Time: ', curr_time)
-            print('  State      Estimate            Actual      Error (a.u.)     Error (eV)')
-            print(' -------------------------------------------------------------------------')
-            print(print_str[:-1])
-            print(' -------------------------------------------------------------------------')
-        print('')
-        print('Gradients to Run')
-        print('   Gradient    Run?    Reason')
-        print('   --------------------------------------------------')
-        for g, (required_run, reason) in grads_to_run.items():
-            print(f'        {g}        {required_run}    {reason}')
-        print('   --------------------------------------------------')
-
-        for g, grad_est in self._grad_estimator.items():
+        for g, estimate in self._grad_interpolator.get_guesses(curr_time):
             if not grads_to_run[g][0]:
                 job = job_batch.get_by_name(f'gradient_{g}').jobs[0]
                 job_batch.jobs.remove(job)
-                self._grad_estimates[g] = grad_est._evaluate(curr_time)
+                self._grad_estimates[g] = estimate
             else:
                 self._grad_estimates[g] = None
 
-    def _interpolation_finalize(self, job_batch: TCJobBatch, excited_type: Literal['cis', 'cas']):
+
+    def _interpolation_finalize(self, job_batch: TCJobBatch):
         if not self._interpolation:
             return 
         
         geom = job_batch.get_by_type('coupling').jobs[0].geom
-        for g, grad_est in self._grad_estimator.items():
+        curr_time = self._phase_var_history.time[-1]
+        for g, grad_est in self._grad_estimates.items():
             if self._grad_estimates[g] is None:
                 job = job_batch.get_by_name(f'gradient_{g}').jobs[0]
-                grad = job.results['gradient']
-                energy = job.results['energy']
-                if g > 0:
-                    energy = energy[g]
-                grad_est.update_history(self._phase_var_history.time[-1], grad, energy)
+                self._grad_interpolator.update_history(g, curr_time, job.results['gradient'])
             else:
-                est_job = TCJob(geom, {}, 'gradient_est', excited_type, -1, 'gradient_est')
+                est_job = TCJob(geom, {}, 'gradient_est', self._excited_type, -1, 'gradient_est')
                 job_batch.jobs.append(est_job)
                 est_job.results = {'run': 'gradient_est', 
                                    'energy': self._es_history.all_energies[-1], 
-                                   'gradient': self._grad_estimates[g], 
-                                   f'{excited_type}target': g,
-                                   }
+                                   'gradient': grad_est, 
+                                   f'{self._excited_type}target': g,
+                }
+
 
     def _send_jobs_to_clients(self, jobs_batch: TCJobBatch):
 
@@ -1707,8 +1671,7 @@ class TCRunner(QCRunner):
             with open(batch_file, 'wb') as file:
                 pickle.dump(jobs_batch, file)
 
-        return jobs_batch
-                    
+        return jobs_batch        
 
     def _coordinate_exciton_overlap_files(self, overlap_file_loc=None, overlap_data=None):
         '''
@@ -1741,8 +1704,6 @@ class TCRunner(QCRunner):
                 new_file_loc = client.server_file('exciton_overlap.dat.1')
                 with open(new_file_loc, 'wb') as file:
                     file.write(self._exciton_overlap_data)
-
-
 
     def _run_numerical_derivatives(self, ref_job: TCJob, n_points=3, dx=0.01, overlap=False):
         '''

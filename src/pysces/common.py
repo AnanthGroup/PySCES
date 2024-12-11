@@ -138,10 +138,10 @@ class ESResults:
 
         if all_energies is not None and self.elecE is None:
             self.elecE = all_energies
-
+    
 class ESResultsHistory(deque):
-    def __init__(self):
-        super().__init__()
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
         self._cache = {}
 
     def append(self, obj):
@@ -149,6 +149,12 @@ class ESResultsHistory(deque):
             raise TypeError("Only ESResults objects can be added to history.")
         super().append(obj)
         self._cache.clear()
+
+    def __getitem__(self, index):
+        try:
+            return super().__getitem__(index)
+        except IndexError:
+            return ESResults()
 
     def __getattribute__(self, __name: str):
         if __name in ['time', 'all_energies', 'elecE', 'grads', 'nacs', 'trans_dips', 'timings']:
