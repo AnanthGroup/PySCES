@@ -85,7 +85,7 @@ class GradientInterpolation():
         self._grads = grads.copy()
         AMU_2_AU = 1.822888486*10**3      # atomic mass unit to a.u. of mass
         self._masses = np.array(masses) * AMU_2_AU
-        self._grad_estimator = {g: _GradEstimator(order=2, interval=3.0, name=f'grad_{g}') for g in self._grads}
+        self._grad_estimator = {g: _GradEstimator(order=2, interval=8.0, name=f'grad_{g}') for g in self._grads}
 
     def update_history(self, grad_id, time, gradient):
         self._grad_estimator[grad_id].update_history(time, gradient)
@@ -143,15 +143,15 @@ class GradientInterpolation():
 
 
 
-class GradientInterpolation():
+class NACnterpolation():
     def __init__(self, nacs, masses) -> None:
         self._NACs = tuple(tuple(x) for x in nacs)
         AMU_2_AU = 1.822888486*10**3      # atomic mass unit to a.u. of mass
         self._masses = np.array(masses) * AMU_2_AU
         self._estimator = {}
         for x in self._NACs:
-            self._estimator[x] = _GradEstimator(order=2, interval=3.0, name=f'nac_{x[0]}_{x[1]}')
-            self._estimator[tuple(reversed(x))] = self._estimator[x]
+            self._estimator[x] = _GradEstimator(order=2, interval=8.0, name=f'nac_{x[0]}_{x[1]}')
+            # self._estimator[tuple(reversed(x))] = self._estimator[x]
 
     def update_history(self, nac_pair, time, gradient):
         self._estimator[tuple(nac_pair)].update_history(time, gradient)
@@ -162,11 +162,13 @@ class GradientInterpolation():
     def get_guesses(self, time: float):
         return tuple((g, self._estimator[g]._evaluate(time)) for g in self._NACs)
 
-    def get_gradient_states(self, overlaps, time_hist, nuc_p_hist):
-
+    def get_nac_states(self, overlaps, time_hist, nuc_p_hist):
+        overlaps = np.transpose(overlaps)
         print_str = ''
-        if len(time_hist) < 3:
-            nacs_to_run = {g: (True, 'History too short') for g in self._NACs}
+        if overlaps is None:
+            nacs_to_run = {x: (True, 'Overlaps not available') for x in self._NACs}
+        elif len(time_hist) < 3:
+            nacs_to_run = {x: (True, 'History too short') for x in self._NACs}
         else:
 
 
@@ -184,28 +186,32 @@ class GradientInterpolation():
             log_U = la.logm(U)
             avg_T = log_U / dt
 
+            guess_avg_T = np.zeros_like(U)
+
             #   compute estimates for the gradients and if they are good enough            
-            for x, grad_est in self._estimator.items():
-                required_run, reason = grad_est.check_run_deriv(curr_time)
+            for x in self._NACs:
+                estimator = self._estimator[x]
+                required_run, reason = estimator.check_run_deriv(curr_time)
                 if not required_run:
         
-                    guess_avg_T = grad_est.guess_f(0.0[x], time_pts, vel_pts)
-                    diff = guess_avg_T - avg_T[g]
-                    print_str += (f'  {g}  {guess_avg_T:16.10f}  {avg_T[x]:16.10f}  {diff:16.10f}    {diff * 27.2114:11.8f}\n')
+                    guess_avg_T[x] = estimator.guess_f(0.0, time_pts, vel_pts)/dt
+                    diff = guess_avg_T[x]  - avg_T[x]
+                    print_str += (f'  {x}  {guess_avg_T[x]:16.10f}  {avg_T[x]:16.10f}  {diff:16.10f}\n')
                     if abs(diff) > 0.0001:
                         required_run = True
                         reason = 'guess error'
-                nacs_to_run[g] = (required_run, reason)
-
+                nacs_to_run[x] = (required_run, reason)
+            guess_avg_T += guess_avg_T.T
+            
 
         if print_str != '':
-            print('Inteprolation Gradient Time: ', curr_time)
-            print('  State      Estimate            Actual      Error (a.u.)     Error (eV)')
-            print(' -------------------------------------------------------------------------')
+            print('Inteprolation NAC Time: ', curr_time)
+            print('  States      Estimate            Actual      Error (a.u.)')
+            print(' ------------------------------------------------------------')
             print(print_str[:-1])
-            print(' -------------------------------------------------------------------------')
+            print(' -------------------------------------------------------------')
         print('')
-        print('Gradients to Run')
+        print('NACs to Run')
         print('     NAC       Run?    Reason')
         print('   -------------------------------------------')
         for (x1, x2), (required_run, reason) in nacs_to_run.items():

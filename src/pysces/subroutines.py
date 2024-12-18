@@ -1541,6 +1541,10 @@ def scipy_rk4_interpolate(es: ESResults, phase_vars: PhaseVars, dt, au_mas):
         return(der)
     result = it.solve_ivp(get_deriv, (0,dt), phase_vars.get_vec(), method='RK45', max_step=dt, t_eval=[dt], rtol=1e-10, atol=1e-10)
     out_vars = PhaseVars.from_vec(phase_vars.time + dt, result.y.flatten())
+    
+    # com = np.sum(out_vars.nuc_q*au_mas)/np.sum(au_mas)
+    # out_vars.nuc_q -= com
+
     return out_vars
 
 
@@ -1749,7 +1753,7 @@ def rk4_with_inteprolation(initq, initp, tStop, H, restart, amu_mat, U, AN_mat):
         es = qc_runner.run_new_geom(phase_vars=phase_vars)
         init_energy = get_energy(au_mas, phase_vars.elec_nuc_q, phase_vars.elec_nuc_p, es.elecE)
         record_nuc_geo(restart, t, atoms, phase_vars.nuc_q, logger)
-        logger.write(es, phase_vars, init_energy, job_batch)
+        logger.write(es, phase_vars, init_energy, qc_runner.report())
 
   
 
@@ -1776,7 +1780,7 @@ def rk4_with_inteprolation(initq, initp, tStop, H, restart, amu_mat, U, AN_mat):
 
         # Record nuclear geometry, logs, and restarts
         record_nuc_geo(restart, t, atoms, phase_vars.nuc_q, logger)
-        logger.write(es, phase_vars, energy, job_batch)
+        logger.write(es, phase_vars, energy, qc_runner.report())
         write_restart(restart_file_out, [phase_vars.elec_nuc_q, phase_vars.elec_nuc_p], sign_flipper.nac_hist, sign_flipper.tdm_hist, energy, t, nel, 'rk4', es.elecE, es.grads, es.nacs, opts.com_ang)
 
     write_restart(restart_file_out, [phase_vars.elec_nuc_q, phase_vars.elec_nuc_p], sign_flipper.nac_hist, sign_flipper.tdm_hist, energy, t, nel, 'rk4', es.elecE, es.grads, es.nacs, opts.com_ang)

@@ -4,7 +4,7 @@ from tcpb import terachem_server_pb2 as pb
 
 from pysces.input_simulation import logging_dir, TCRunnerOptions
 from pysces.common import PhaseVars, PhaseVarHistory, QCRunner, ESResults, ESResultsHistory
-from pysces.interpolation import GradientInterpolation
+from pysces.interpolation import GradientInterpolation, NACnterpolation
 
 from datetime import datetime
 import functools
@@ -29,6 +29,7 @@ from collections import deque
 import qcelemental as qcel
 import base64
 from scipy.interpolate import interp1d
+import scipy.linalg as la
 
 
 _server_processes = {}
@@ -548,7 +549,7 @@ class TCJob():
         self.client: TCClientExtra = client
         self.batch: TCJobBatch = None
 
-        if job_type == 'gradient_est':
+        if job_type == 'gradient_est' or job_type == 'coupling_est':
             pass
         elif job_type not in ['energy', 'gradient', 'coupling']:
             raise ValueError('TCJob job_type must be either "energy", "gradient", or "coupling"')
@@ -945,10 +946,12 @@ class TCRunner(QCRunner):
         self._phase_var_history = PhaseVarHistory()
         # self._grad_estimator = {g: GradEstimator(order=2, interval=3.0, name=f'grad_{g}') for g in self._grads}
         self._grad_estimates = {g: None for g in self._grads}
+        self._nac_estimates = {n: None for n in self._NACs}
         self._interpolation = tc_opts.interpolation
 
         self._grad_interpolator = GradientInterpolation(self._grads, self._masses)
-
+        self._nac_interpolator = NACnterpolation(self._NACs, self._masses)
+        self._probe_job_results = None
 
         # Print options summary
         self._print_options_summary()
@@ -1217,6 +1220,7 @@ class TCRunner(QCRunner):
                 file_loc = os.path.join(client.server_root, file)
                 if os.path.isfile(file_loc):
                     print('Removing stale file:', file_loc)
+                    os.remove(file_loc)
 
     def report(self):
         return self._prev_job_batch
@@ -1533,12 +1537,16 @@ class TCRunner(QCRunner):
         eng_opts = ref_job.opts.copy()
         for x in ('nacstate1', 'nacstate2', 'couplings', 'gradients'):
             eng_opts.pop(x, None)
-        eng_results = self.compute_job_sync_with_restart('energy', ref_job.geom, 'angstrom', **eng_opts)
+        eng_results = self._client.compute_job_sync('energy', ref_job.geom, 'angstrom', **eng_opts)
+        # eng_results = self.compute_job_sync_with_restart('energy', ref_job.geom, 'angstrom', **eng_opts)
         all_energies = eng_results['energy']
+        exciton_overlap = eng_results.get('exciton_overlap', None)
         curr_time = self._phase_var_history.time[-1]
         self._es_history.append(ESResults(time=curr_time, all_energies=all_energies))
+        self._probe_job_results = eng_results
 
         grads_to_run = self._grad_interpolator.get_gradient_states(all_energies, self._es_history[-2].all_energies, self._es_history.time, self._phase_var_history.nuc_p)
+        nacs_to_run = self._nac_interpolator.get_nac_states(exciton_overlap, self._es_history.time, self._phase_var_history.nuc_p)
 
         for g, estimate in self._grad_interpolator.get_guesses(curr_time):
             if not grads_to_run[g][0]:
@@ -1547,6 +1555,14 @@ class TCRunner(QCRunner):
                 self._grad_estimates[g] = estimate
             else:
                 self._grad_estimates[g] = None
+
+        for x, estimate in self._nac_interpolator.get_guesses(curr_time):
+            if not nacs_to_run[x][0]:
+                job = job_batch.get_by_name(f'nac_{x[0]}_{x[1]}').jobs[0]
+                job_batch.jobs.remove(job)
+                self._nac_estimates[x] = estimate
+            else:
+                self._nac_estimates[x] = None
 
 
     def _interpolation_finalize(self, job_batch: TCJobBatch):
@@ -1560,13 +1576,61 @@ class TCRunner(QCRunner):
                 job = job_batch.get_by_name(f'gradient_{g}').jobs[0]
                 self._grad_interpolator.update_history(g, curr_time, job.results['gradient'])
             else:
-                est_job = TCJob(geom, {}, 'gradient_est', self._excited_type, -1, 'gradient_est')
+                est_job = TCJob(geom, {}, 'gradient_est', self._excited_type, -1, f'gradient_{g}')
                 job_batch.jobs.append(est_job)
-                est_job.results = {'run': 'gradient_est', 
-                                   'energy': self._es_history.all_energies[-1], 
-                                   'gradient': grad_est, 
+                results = self._probe_job_results.copy()
+                energies = self._probe_job_results['energy']
+                if g == 0:
+                    energies = energies[0:1]
+                results.update({'run': 'gradient_est', 
+                                   'energy': energies, 
+                                   'gradient': grad_est.reshape((-1, 3)),
                                    f'{self._excited_type}target': g,
-                }
+                })
+                est_job.results = results
+
+        #   DEBUG
+        T = np.zeros((3, 3))
+        U = np.zeros((3, 3))
+        overlaps = np.zeros((3, 3))
+
+        for x, nac_est in self._nac_estimates.items():
+            if self._nac_estimates[x] is None:
+                job = job_batch.get_by_name(f'nac_{x[0]}_{x[1]}').jobs[0]
+                self._nac_interpolator.update_history(x, curr_time, job.results['nacme'])
+            
+                #   DEBUG
+                x2 = tuple(reversed(x))
+                overlaps = np.array(job.results['exciton_overlap'])
+                U = overlaps @ la.inv(la.sqrtm(overlaps.T @ overlaps))
+                nac = np.array(job.results['nacme'])
+                if curr_time == 0:
+                    vel = self._phase_var_history.nuc_p[-1]/(self._masses*AMU_2_AU)
+                else:
+                    vel = self._phase_var_history.nuc_q[-1] - self._phase_var_history.nuc_q[-2]
+                T[x] = np.dot(nac.flatten(), vel)
+                T[x2] = -T[x]
+
+                mass_coord = self._masses * self._phase_var_history.nuc_q[-1]/np.sum(self._masses)
+                com = np.sum(mass_coord.reshape(-1, 3), axis=0)
+
+            else:
+                est_job = TCJob(geom, {}, 'coupling_est', self._excited_type, -1, 'coupling_est')
+                job_batch.jobs.append(est_job)
+                results = self._probe_job_results.copy()
+                results.update({'run': 'coupling_est', 
+                                   'energy': self._es_history.all_energies[-1], 
+                                   'cis_transition_dipoles': self._probe_job_results['cis_transition_dipoles'],
+                                   'nacme': nac_est.reshape((-1, 3)), 
+                                   'nacstate1': x[0],
+                                   'nacstate2': x[1],
+                })
+                est_job.results = results
+        
+        #   DEBUG
+        np.save(f'overlaps.{int(curr_time)}.npy', job.results['exciton_overlap'])
+        np.save(f'U.{int(curr_time)}.npy', U)
+        np.save(f'T.{int(curr_time)}.npy', T)
 
 
     def _send_jobs_to_clients(self, jobs_batch: TCJobBatch):
@@ -1638,6 +1702,10 @@ class TCRunner(QCRunner):
         if not jobs_batch.check_client():
             raise ValueError('Not all jobs have been assigned a client')
 
+        if len(jobs_batch.jobs) == 0:
+            self._coordinate_exciton_overlap_files()
+            return jobs_batch
+
         #   if only one client is being used, don't open up threads, easier to debug
         if n_clients == 1:
             jobs_batch.jobs[0].client = self._client_list[0]
@@ -1689,7 +1757,7 @@ class TCRunner(QCRunner):
                 exciton_overlap_data = file.read()
         else:
             for client in self._client_list:
-                overlap_file_loc = client.server_file('exciton_overlap.dat.1')
+                overlap_file_loc = client.server_file('exciton_overlap.dat')
                 if not os.path.isfile(overlap_file_loc):
                     continue
                 with open(overlap_file_loc, 'rb') as file:
@@ -1941,7 +2009,6 @@ def _correct_signs(job: TCJob, ref_job: TCJob):
     
 
 def _run_batch_jobs(jobs_batch: TCJobBatch):
-    overlap_set = False
     for j in jobs_batch.jobs:
         j: TCJob
         job_opts =  j.opts
@@ -1949,16 +2016,9 @@ def _run_batch_jobs(jobs_batch: TCJobBatch):
         client: TCClientExtra = j.client
         
         j.start_time = time.time()
-        # j.set_guess(client.results_history)
         j.set_guess(client._scf_guess_file, client._cas_guess_file)
         client.log_message(f"Running {j.name}")
         print(f"Running {j.name}")
-
-        # if client.expect_exciton_overlap_dat:
-        # # if not overlap_set and j.state > 0:
-        #     print('Expecting overlap data')
-        #     client.setup_overlap_data(j.name)
-        #     overlap_set = True
 
         max_tries = 5
         try_count = 0
@@ -2040,6 +2100,22 @@ def format_output_LSCIVR(job_data: list[dict]):
             state = job.get('cistarget', job.get('castarget', 0))
             grads[state] = np.array(job['gradient']).flatten()
             energies[state] = job['energy'][state]
+
+        elif job['run'] == 'coupling_est':
+            state_1 = job['nacstate1']
+            state_2 = job['nacstate2']
+            nacs[(state_1, state_2)] = np.array(job['nacme']).flatten()
+            nacs[(state_2, state_1)] = - nacs[state_1, state_2]
+            if 'cis_transition_dipoles' in job:
+                x = len(job['cis_transition_dipoles'])
+                N = int((1 + int(np.sqrt(1+8*x)))/2)
+                count = 0
+                for i in range(0, N):
+                    for j in range(i+1, N):
+                        if (i, j) == (state_1, state_2):
+                            trans_dips[(state_1, state_2)] = job['cis_transition_dipoles'][count]
+                            trans_dips[(state_2, state_1)] = job['cis_transition_dipoles'][count]
+                        count += 1
 
 
     #   make sure there are the correct number of gradients and NACs

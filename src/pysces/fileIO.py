@@ -566,7 +566,7 @@ class TCJobsLogger():
         #     raise ValueError('file must be a string or h5py.File object')
 
         self._data_fields = [
-            'energy', 'gradient', 'dipole_moment', 'dipole_vector', 'nacme', 'cis_', 'cas_'
+            'energy', 'gradient', 'dipole_moment', 'dipole_vector', 'nacme', 'cis_', 'cas_', 'exciton_overlap'
         ]
         self._units_from_field = {'energy': 'a.u.', 'dipole_moment': 'Debye'}
         self._job_datasets = {}
@@ -650,8 +650,8 @@ class TCJobsLogger():
         H5File.append_dataset(group['geom'], cleaned_batch.results_list[0]['geom'])
         for job in cleaned_batch.jobs:
             results = job.results.copy()
-            results.pop('geom')
-            results.pop('atoms')
+            results.pop('geom', None)
+            results.pop('atoms', None)
             for key in group[job.name]:
                 if key in ['other', 'timestep', 'tc.out']:
                     continue
