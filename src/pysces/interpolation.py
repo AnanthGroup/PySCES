@@ -27,19 +27,16 @@ class _GradEstimator():
 
     def update_history(self, new_t, new_grads):
 
-        if self._interp_func is not None:
-            guess = self._evaluate(new_t)
-            error = np.abs(guess - new_grads.ravel())
-            max_error = np.max(error)
-            rms_error = np.sqrt(np.mean(error**2))
-            print(f'Before updating extrapolation history in {self.name} at time {new_t}: ')
-            print(f'    {max_error=:.5e}, {rms_error=:.5e}')
-
         self.history_grads.append(np.array(new_grads))
         self.history_t.append(new_t)
-        print(f'Updating {self.name} history at time {new_t}')
+
         if len(self.history_grads) > self.order:
             self._interpolate()
+
+    def reset_history(self):
+        self.history_grads.clear()
+        self.history_t.clear()
+        self._interp_func = None
 
     def _interpolate(self):
         stacked_history = np.vstack([np.ravel(matrix) for matrix in self.history_grads])
@@ -57,8 +54,10 @@ class _GradEstimator():
         pass
 
     def check_if_ready(self):
-        return len(self.history_grads) > self.order
-    
+        is_ready = len(self.history_grads) > self.order
+        is_ready *= (self._interp_func is not None)
+        return is_ready
+
     def check_run_deriv(self, new_time):
         if len(self.history_grads) <= self.order:
             return True, 'History too short'
@@ -86,10 +85,32 @@ class GradientInterpolation():
         AMU_2_AU = 1.822888486*10**3      # atomic mass unit to a.u. of mass
         self._masses = np.array(masses) * AMU_2_AU
         self._grad_estimator = {g: _GradEstimator(order=2, interval=8.0, name=f'grad_{g}') for g in self._grads}
+        self._comparisons = {}
 
     def update_history(self, grad_id, time, gradient):
+
+        if self._grad_estimator[grad_id].check_if_ready():
+            guess = self._grad_estimator[grad_id]._evaluate(time)
+            self._comparisons[grad_id] = (guess, gradient, time)
+
         self._grad_estimator[grad_id].update_history(time, gradient)
     
+    def print_update_messages(self):
+        if len(self._comparisons) == 0:
+            return
+        print('Comparisons of Gradients at Interpolation Update')
+        out_str = ''
+        for g, (guess, gradient, time) in self._comparisons.items():
+            error = np.abs(guess - gradient.ravel())
+            max_error = np.max(error)
+            rmsd_error = np.sqrt(np.mean(error**2))
+            rrmsd_error = rmsd_error / np.sqrt(np.mean(gradient**2))
+            out_str += f'  Energy {g}  {time:8.1f}  {max_error:16.10f}  {rmsd_error:16.10f}  {rrmsd_error:6.4}\n'
+        print('  Gradient    Time (a.u.)   Max Error (Ha/bohr)  RMSD (Ha/bohr)     RRMSD (%)')
+        print(' -------------------------------------------------------------------')
+        print(out_str[:-1])
+        print(' -------------------------------------------------------------------')
+
     def get_guess(self, time: float, gradient: int):
         return self._grad_estimator[gradient]._evaluate(time)
     
@@ -97,51 +118,47 @@ class GradientInterpolation():
         return tuple((g, self._grad_estimator[g]._evaluate(time)) for g in self._grads)
 
     def get_gradient_states(self, current_energies, previous_energies, time_hist, nuc_p_hist):
+        guess_energy = {g: None for g in self._grads}
+        grads_to_run = {}
+        curr_time = time_hist[-1]
 
-        print_str = ''
-        if len(time_hist) < 3:
-            grads_to_run = {g: (True, 'History too short') for g in self._grads}
-        else:
-            grads_to_run = {}
-            #   setup the velocities for the gradient estimator
-            curr_time = time_hist[-1]
-            prev_time = time_hist[-2]
-            vel_history = nuc_p_hist/(self._masses)
-            interp_vel = interp1d(time_hist, vel_history, axis=0, kind='quadratic') # TODO: change to the same order as the grad interpolator
-            time_pts = np.linspace(prev_time, curr_time, 100)
-            vel_pts = interp_vel(time_pts)
+        for g, grad_est in self._grad_estimator.items():
+            if not grad_est.check_if_ready():
+                grads_to_run[g] = (True, 'History too short')
+            else:
+                grads_to_run[g] = grad_est.check_run_deriv(curr_time)
+ 
+                #   setup the velocities for the gradient estimator
+                #   current time is -1, previous time is -2 for the energy history
+                prev_time = time_hist[-2]
+                vel_history = nuc_p_hist/(self._masses)
+                interp_vel = interp1d(time_hist, vel_history, axis=0, kind='quadratic') # TODO: change to the same order as the grad interpolator
+                time_pts = np.linspace(prev_time, curr_time, 100)
+                vel_pts = interp_vel(time_pts)
+                guess_energy[g] = grad_est.guess_f(previous_energies[g], time_pts, vel_pts)
+                energy_diff = guess_energy[g] - current_energies[g]
 
-            #   compute estimates for the gradients and if they are good enough            
-            for g, grad_est in self._grad_estimator.items():
-                required_run, reason = grad_est.check_run_deriv(curr_time)
-                if not required_run:
-                    #   current time is -1, previous time is -2 for the energy history
-                    guess_energy = grad_est.guess_f(previous_energies[g], time_pts, vel_pts)
-                    energy_diff = guess_energy - current_energies[g]
-                    print_str += (f'  {g}  {guess_energy:16.10f}  {current_energies[g]:16.10f}  {energy_diff:16.10f}    {energy_diff * 27.2114:11.8f}\n')
-                    if abs(energy_diff) > 0.0001:
-                        required_run = True
-                        reason = 'guess energy error'
-                grads_to_run[g] = (required_run, reason)
+                if abs(energy_diff) > 0.0001:
+                    grads_to_run[g] = (True, 'guess energy error')
 
-
-        if print_str != '':
-            print('Inteprolation Gradient Time: ', curr_time)
-            print('  State      Estimate            Actual      Error (a.u.)     Error (eV)')
-            print(' -------------------------------------------------------------------------')
-            print(print_str[:-1])
-            print(' -------------------------------------------------------------------------')
-        print('')
-        print('Gradients to Run')
-        print('   Gradient    Run?    Reason')
-        print('   -------------------------------------------')
-        for g, (required_run, reason) in grads_to_run.items():
-            print(f'        {g}        {required_run}    {reason}')
-        print('   -------------------------------------------')
+        print('\nInteprolation Gradient Time: ', curr_time)
+        print('          State   Estimate (a.u.)     Actual (a.u.)  Error (a.u.)      Estimate?')
+        print('---------------------------------------------------------------------------------------------')
+        for g in self._grads:
+            reason = grads_to_run[g][1]
+            guess_str, error_str = f'{"---":^16s}', f'{"---":^16s}'
+            if guess_energy[g] is not None:
+                guess_str = f'{guess_energy[g]:16.10f}'
+                error_str = f'{guess_energy[g] - current_energies[g]:16.10f}'
+            print(f'  Energy    {g:2d}   {guess_str:>16s}  {current_energies[g]:16.10f}  {error_str:>16s}  {reason}')
+        print('---------------------------------------------------------------------------------------------')
 
         return grads_to_run
 
-
+def _norm_dot_prod(x, y):
+    a = np.array(x).flatten()
+    b = np.array(y).flatten()
+    return np.dot(a, b) / (np.linalg.norm(a) * np.linalg.norm(b))
 
 class NACnterpolation():
     def __init__(self, nacs, masses) -> None:
@@ -149,12 +166,42 @@ class NACnterpolation():
         AMU_2_AU = 1.822888486*10**3      # atomic mass unit to a.u. of mass
         self._masses = np.array(masses) * AMU_2_AU
         self._estimator = {}
+        self._comparisons = {}
         for x in self._NACs:
             self._estimator[x] = _GradEstimator(order=2, interval=8.0, name=f'nac_{x[0]}_{x[1]}')
             # self._estimator[tuple(reversed(x))] = self._estimator[x]
 
+
     def update_history(self, nac_pair, time, gradient):
+        estimator: _GradEstimator = self._estimator[nac_pair]
+        if estimator.check_if_ready():
+            guess = estimator._evaluate(time)
+            self._comparisons[nac_pair] = (guess, gradient, time)
+
+            dp = _norm_dot_prod(gradient, guess)
+            if dp < 0.80:
+                print(f'NAC dot product with current extrapolation is too large: {dp:.4f}')
+                estimator.reset_history()
+
         self._estimator[tuple(nac_pair)].update_history(time, gradient)
+
+
+    def print_update_messages(self):
+        if len(self._comparisons) == 0:
+            return
+        print('Comparisons of NACs at Interpolation Update')
+        out_str = ''
+        for (x1, x2), (guess, gradient, time) in self._comparisons.items():
+            error = np.abs(guess - gradient.ravel())
+            max_error = np.max(error)
+            rmsd_error = np.sqrt(np.mean(error**2))
+            rrmsd_error = rmsd_error / np.sqrt(np.mean(gradient**2))
+            out_str += f'  {x1}, {x2}  {time:8.1f}  {max_error:16.10f}  {rmsd_error:16.10f}  {rrmsd_error:6.4}\n'
+        print('  States    Time (a.u.)   Max Error (1/bohr)  RMSD (1/bohr)     RRMSD (%)')
+        print(' -------------------------------------------------------------------')
+        print(out_str[:-1])
+        print(' -------------------------------------------------------------------')
+
     
     def get_guess(self, time: float, gradient: int):
         return self._estimator[gradient]._evaluate(time)
@@ -162,9 +209,15 @@ class NACnterpolation():
     def get_guesses(self, time: float):
         return tuple((g, self._estimator[g]._evaluate(time)) for g in self._NACs)
 
-    def get_nac_states(self, overlaps, time_hist, nuc_p_hist):
+    def get_nac_states_OLD(self, overlaps, time_hist, nuc_p_hist):
         overlaps = np.transpose(overlaps)
         print_str = ''
+
+        for x in self._NACs:
+            estimator: _GradEstimator = self._estimator[x]
+            if not estimator.check_if_ready():
+                nacs_to_run[x] = (True, 'History too short')
+
         if overlaps is None:
             nacs_to_run = {x: (True, 'Overlaps not available') for x in self._NACs}
         elif len(time_hist) < 3:
@@ -190,16 +243,25 @@ class NACnterpolation():
 
             #   compute estimates for the gradients and if they are good enough            
             for x in self._NACs:
-                estimator = self._estimator[x]
+                estimator: _GradEstimator = self._estimator[x]
                 required_run, reason = estimator.check_run_deriv(curr_time)
                 if not required_run:
-        
+                    #   check difference with time derivative coupling
                     guess_avg_T[x] = estimator.guess_f(0.0, time_pts, vel_pts)/dt
                     diff = guess_avg_T[x]  - avg_T[x]
                     print_str += (f'  {x}  {guess_avg_T[x]:16.10f}  {avg_T[x]:16.10f}  {diff:16.10f}\n')
                     if abs(diff) > 0.0001:
                         required_run = True
-                        reason = 'guess error'
+                        reason = 'TDC guess error'
+
+                    #   check angle between histories
+                    dp12 = _norm_dot_prod(estimator.history_grads[-1], estimator.history_grads[-2])
+                    dp13 = _norm_dot_prod(estimator.history_grads[-1], estimator.history_grads[-3])
+                    if dp12 < 0.80 or dp13 < 0.80:
+                        required_run = True
+                        reason = f'History dot-product: {np.max([dp12, dp13]):.4f}'
+                        estimator.reset_history()
+
                 nacs_to_run[x] = (required_run, reason)
             guess_avg_T += guess_avg_T.T
             
@@ -217,6 +279,64 @@ class NACnterpolation():
         for (x1, x2), (required_run, reason) in nacs_to_run.items():
             print(f'     {x1}, {x2}        {required_run}    {reason}')
         print('   -------------------------------------------')
+
+        return nacs_to_run
+
+
+    def get_nac_states(self, overlaps, time_hist, nuc_p_hist):
+        overlaps = np.transpose(overlaps)
+        nacs_to_run = {}
+        guess_avg_T = {x: None for x in self._NACs}
+        curr_time = time_hist[-1]
+
+        if overlaps.ndim == 0:
+            dim = np.max(self._NACs).astype(int) + 1
+            current_avg_T = np.zeros((dim, dim))
+        else:
+            dt = curr_time - time_hist[-2]
+            U = overlaps @ np.linalg.inv(la.sqrtm(overlaps.T @ overlaps)) # unitary matrix
+            log_U = la.logm(U)
+            current_avg_T = log_U / dt
+
+        for x in self._NACs:
+            estimator: _GradEstimator = self._estimator[x]
+            if not estimator.check_if_ready():
+                nacs_to_run[x] = (True, 'History too short')
+
+            else:
+                nacs_to_run[x] = estimator.check_run_deriv(time_hist[-1])
+            
+                #   setup the velocities for the gradient estimator
+                prev_time = time_hist[-2]
+                vel_history = nuc_p_hist/(self._masses)
+                interp_vel = interp1d(time_hist, vel_history, axis=0, kind='quadratic') # TODO: change to the same order as the grad interpolator
+                time_pts = np.linspace(prev_time, curr_time, 100)
+                vel_pts = interp_vel(time_pts)
+
+                guess_avg_T[x] = estimator.guess_f(0.0, time_pts, vel_pts)/dt
+                diff = guess_avg_T[x]  - current_avg_T[x]
+                if abs(diff) > 0.0001:
+                    nacs_to_run[x] = (True, 'TDC guess error')
+
+                #   check angle between histories
+                dp12 = _norm_dot_prod(estimator.history_grads[-1], estimator.history_grads[-2])
+                dp13 = _norm_dot_prod(estimator.history_grads[-1], estimator.history_grads[-3])
+                if dp12 < 0.80 or dp13 < 0.80:
+                    nacs_to_run[x] = (True, f'History dot-product: {np.max([dp12, dp13]):.4f}')
+                    estimator.reset_history()
+
+        print('\nInteprolation NAC Time: ', curr_time)
+        print('          State   Estimate (a.u.)     Actual (a.u.)  Error (a.u.)      Estimate?')
+        print('---------------------------------------------------------------------------------------------')
+        for x in self._NACs:
+            reason = nacs_to_run[x][1]
+            guess_str, error_str = f'{"---":^16s}', f'{"---":^16s}'
+            if guess_avg_T[x] is not None:
+                guess_str = f'{guess_avg_T[x]:16.10f}'
+                error_str = f'{guess_avg_T[x] - current_avg_T[x]:16.10f}'
+            state_str = str(x[0])+'-'+str(x[1])
+            print(f' TDC      {state_str:^5s}  {guess_str:>16s}  {current_avg_T[x]:16.10f}  {error_str:>16s}  {reason}')
+        print('---------------------------------------------------------------------------------------------')
 
         return nacs_to_run
 

@@ -1569,7 +1569,8 @@ class TCRunner(QCRunner):
         if not self._interpolation:
             return 
         
-        geom = job_batch.get_by_type('coupling').jobs[0].geom
+        # geom = job_batch.get_by_type('coupling').jobs[0].geom
+        geom = self._probe_job_results['geom']
         curr_time = self._phase_var_history.time[-1]
         for g, grad_est in self._grad_estimates.items():
             if self._grad_estimates[g] is None:
@@ -1588,6 +1589,7 @@ class TCRunner(QCRunner):
                                    f'{self._excited_type}target': g,
                 })
                 est_job.results = results
+        self._grad_interpolator.print_update_messages()
 
         #   DEBUG
         T = np.zeros((3, 3))
@@ -1615,7 +1617,7 @@ class TCRunner(QCRunner):
                 com = np.sum(mass_coord.reshape(-1, 3), axis=0)
 
             else:
-                est_job = TCJob(geom, {}, 'coupling_est', self._excited_type, -1, 'coupling_est')
+                est_job = TCJob(geom, {}, 'coupling_est', self._excited_type, -1, f'nac_{x[0]}_{x[1]}')
                 job_batch.jobs.append(est_job)
                 results = self._probe_job_results.copy()
                 results.update({'run': 'coupling_est', 
@@ -1628,9 +1630,9 @@ class TCRunner(QCRunner):
                 est_job.results = results
         
         #   DEBUG
-        np.save(f'overlaps.{int(curr_time)}.npy', job.results['exciton_overlap'])
-        np.save(f'U.{int(curr_time)}.npy', U)
-        np.save(f'T.{int(curr_time)}.npy', T)
+        # np.save(f'overlaps.{int(curr_time)}.npy', job.results['exciton_overlap'])
+        # np.save(f'U.{int(curr_time)}.npy', U)
+        # np.save(f'T.{int(curr_time)}.npy', T)
 
 
     def _send_jobs_to_clients(self, jobs_batch: TCJobBatch):
