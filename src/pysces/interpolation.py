@@ -78,7 +78,6 @@ class _GradEstimator():
 
         return extrap_f
 
-
 class GradientInterpolation():
     def __init__(self, grads, masses) -> None:
         self._grads = grads.copy()
@@ -98,18 +97,21 @@ class GradientInterpolation():
     def print_update_messages(self):
         if len(self._comparisons) == 0:
             return
-        print('Comparisons of Gradients at Interpolation Update')
+        print('\nComparisons of Gradients at interpolation update')
         out_str = ''
-        for g, (guess, gradient, time) in self._comparisons.items():
+        for g in list(self._comparisons):
+            guess, gradient, time = self._comparisons.pop(g)
             error = np.abs(guess - gradient.ravel())
             max_error = np.max(error)
             rmsd_error = np.sqrt(np.mean(error**2))
             rrmsd_error = rmsd_error / np.sqrt(np.mean(gradient**2))
-            out_str += f'  Energy {g}  {time:8.1f}  {max_error:16.10f}  {rmsd_error:16.10f}  {rrmsd_error:6.4}\n'
-        print('  Gradient    Time (a.u.)   Max Error (Ha/bohr)  RMSD (Ha/bohr)     RRMSD (%)')
+            out_str += f' Energy   {g:2d}  {time:8.1f}  {max_error:16.10f}  {rmsd_error:16.10f}  {rrmsd_error:6.4f}\n'
+            self._comparisons
+        print('  Gradient    Time (a.u.)     Max Error            RMSD      RRMSD (%)')
         print(' -------------------------------------------------------------------')
         print(out_str[:-1])
-        print(' -------------------------------------------------------------------')
+        # print(' -------------------------------------------------------------------')
+
 
     def get_guess(self, time: float, gradient: int):
         return self._grad_estimator[gradient]._evaluate(time)
@@ -151,7 +153,7 @@ class GradientInterpolation():
                 guess_str = f'{guess_energy[g]:16.10f}'
                 error_str = f'{guess_energy[g] - current_energies[g]:16.10f}'
             print(f'  Energy    {g:2d}   {guess_str:>16s}  {current_energies[g]:16.10f}  {error_str:>16s}  {reason}')
-        print('---------------------------------------------------------------------------------------------')
+        # print('---------------------------------------------------------------------------------------------')
 
         return grads_to_run
 
@@ -189,18 +191,20 @@ class NACnterpolation():
     def print_update_messages(self):
         if len(self._comparisons) == 0:
             return
-        print('Comparisons of NACs at Interpolation Update')
+        print('\nComparisons of NACs at interpolation update')
         out_str = ''
-        for (x1, x2), (guess, gradient, time) in self._comparisons.items():
+        # for (x1, x2), (guess, gradient, time) in self._comparisons.items():
+        for x1, x2 in list(self._comparisons):
+            guess, gradient, time = self._comparisons.pop((x1, x2))
             error = np.abs(guess - gradient.ravel())
             max_error = np.max(error)
             rmsd_error = np.sqrt(np.mean(error**2))
             rrmsd_error = rmsd_error / np.sqrt(np.mean(gradient**2))
-            out_str += f'  {x1}, {x2}  {time:8.1f}  {max_error:16.10f}  {rmsd_error:16.10f}  {rrmsd_error:6.4}\n'
-        print('  States    Time (a.u.)   Max Error (1/bohr)  RMSD (1/bohr)     RRMSD (%)')
+            out_str += f' TDC   {x1} - {x2}  {time:8.1f}  {max_error:16.10f}  {rmsd_error:16.10f}  {rrmsd_error:6.4f}\n'
+        print('  Gradient    Time (a.u.)     Max Error            RMSD      RRMSD (%)')
         print(' -------------------------------------------------------------------')
         print(out_str[:-1])
-        print(' -------------------------------------------------------------------')
+        # print(' -------------------------------------------------------------------')
 
     
     def get_guess(self, time: float, gradient: int):
@@ -334,9 +338,9 @@ class NACnterpolation():
             if guess_avg_T[x] is not None:
                 guess_str = f'{guess_avg_T[x]:16.10f}'
                 error_str = f'{guess_avg_T[x] - current_avg_T[x]:16.10f}'
-            state_str = str(x[0])+'-'+str(x[1])
-            print(f' TDC      {state_str:^5s}  {guess_str:>16s}  {current_avg_T[x]:16.10f}  {error_str:>16s}  {reason}')
-        print('---------------------------------------------------------------------------------------------')
+            state_str = str(x[0])+' - '+str(x[1])
+            print(f' TDC    {state_str:^5s}  {guess_str:>16s}  {current_avg_T[x]:16.10f}  {error_str:>16s}  {reason}')
+        # print('---------------------------------------------------------------------------------------------')
 
         return nacs_to_run
 

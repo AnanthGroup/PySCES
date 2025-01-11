@@ -1628,6 +1628,7 @@ class TCRunner(QCRunner):
                                    'nacstate2': x[1],
                 })
                 est_job.results = results
+        self._nac_interpolator.print_update_messages()
         
         #   DEBUG
         # np.save(f'overlaps.{int(curr_time)}.npy', job.results['exciton_overlap'])

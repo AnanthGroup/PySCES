@@ -1765,13 +1765,13 @@ def rk4_with_inteprolation(initq, initp, tStop, H, restart, amu_mat, U, AN_mat):
 
     ### Runge-Kutta routine ###
     while t < tStop:
-        print(f"##### Performing MD Step Time: {t:8.2f} a.u. ##### ")
-
+        print(f"\nTaking MD step \n")
         H  = min(H, tStop-t)
         phase_vars = scipy_rk4_interpolate(es, phase_vars, H, au_mas)
         phase_vars_hist.append(phase_vars)
         t += H
 
+        print(f"##### Performing Electronic Structure Calculation at Time: {t:8.2f} a.u. ##### ")
         es = qc_runner.run_new_geom(phase_vars=phase_vars)
         es.nacs = sign_flipper.correct_nac_sign(es.nacs, es.trans_dips)
         energy = get_energy(au_mas, phase_vars.elec_nuc_q, phase_vars.elec_nuc_p, es.elecE)
