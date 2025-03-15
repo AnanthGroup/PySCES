@@ -1,3 +1,5 @@
+from __future__ import annotations 
+
 from tcpb import TCProtobufClient as TCPBClient
 from tcpb.exceptions import ServerError
 from tcpb import terachem_server_pb2 as pb
@@ -28,6 +30,7 @@ import itertools
 from collections import deque
 import qcelemental as qcel
 import base64
+from pprint import pprint
 
 
 _server_processes = {}
@@ -79,6 +82,7 @@ class TCClientExtra(TCPBClient):
         self._scf_guess_file = None
         self._cas_guess_file = None
         self._cis_guess_file = None
+        self.prev_job = None
 
 
         super().__init__(host, port, debug, trace)
@@ -213,10 +217,81 @@ class TCClientExtra(TCPBClient):
                 print('Warning: no job directory found at')
                 print(job_dir)
                 print('Check that "tcr_server_root" is properly set to remove old jobs')
-        
+
         self._results_history.append(value)
 
+    def copy_guess_files(self, prev_results_hist: list[dict]):
+        '''
+            Not used yet. This is to copy the guess files from the previous job t
+        '''
+        scf_guess, cis_guess, cas_guess = self.get_guess_file_locs(prev_results_hist)
+        guess_data = {}
+        if os.path.isfile(str(cas_guess)):
+            with open(cas_guess, 'rb') as file:
+                data = file.read()
+                guess_data['casguess'] = base64.b64encode(data).decode('utf-8')
+        if os.path.isfile(str(scf_guess)):
+            with open(scf_guess, 'rb') as file:
+                data = file.read()
+                guess_data['scfguess'] = base64.b64encode(data).decode('utf-8')
+        if os.path.isfile(str(cis_guess)):
+            with open(cis_guess, 'rb') as file:
+                data = file.read()
+                guess_data['cisguess'] = base64.b64encode(data).decode('utf-8')
 
+    def set_guess_files_from_job(self, prev_job: TCJob):
+        '''
+            Set the guess files for the next job based on the history of results
+        '''
+        res_history = self._results_history
+
+        server_root = self.server_root
+        if len(res_history) != 0:
+            prev_job_res = res_history[-1]
+            job_dir = os.path.join(server_root, prev_job_res['job_dir'])
+            if not os.path.isdir(job_dir):
+                print("Warning: no job directory found at")
+                print(job_dir)
+                print("Check that 'tcr_server_root' is properly set in order to use previous job guess orbitals")
+
+        cas_guess = None
+        scf_guess = None
+        cis_guess = prev_job.opts.get('cisrestart', None)
+        if prev_job.state > 0:
+            if prev_job.excited_type == 'cas':
+                for prev_job_res in reversed(res_history):
+                    if prev_job_res.get('castarget', 0) >= 1:
+                        prev_orb_file = prev_job_res['orbfile']
+                        if prev_orb_file[-6:] == 'casscf':
+                            cas_guess = os.path.join(server_root, prev_orb_file)
+                            break
+
+
+        for i, prev_job_res in enumerate(reversed(res_history)):
+            if 'orbfile' in prev_job_res:
+                scf_guess = os.path.join(server_root, prev_job_res['orbfile'])
+                #   This is to fix a bug in terachem that still sets the c0.casscf file as the
+                #   previous job's orbital file
+                if scf_guess[-6:] == 'casscf':
+                    scf_guess = scf_guess[0:-7]
+                break
+
+        self._cis_guess_file = cis_guess
+        self._scf_guess_file = scf_guess
+        self._cas_guess_file = cas_guess
+
+        return scf_guess, cis_guess, cas_guess
+
+    def assign_guess_files(self, new_job: TCJob):
+        '''
+            Assign the guess files to the new job
+        '''
+        if self._cas_guess_file is not None:
+            new_job.opts['casguess'] = self._cas_guess_file 
+        if self._scf_guess_file is not None:
+            new_job.opts['guess'] = self._scf_guess_file
+        if self._cis_guess_file is not None:
+            new_job.opts['cisrestart'] = self._cis_guess_file 
 
     @property
     def results_history(self):
@@ -262,6 +337,27 @@ class TCClientExtra(TCPBClient):
             else:
                 print(line)
         print('\n ... END OF FILE \n')
+
+    def compute_job(self, job: TCJob):
+        
+        #   assign the guess files to the current job
+        self.assign_guess_files(job)
+
+        #   send the job to the terachem server
+        job.start_time = time.time()
+        results = self.compute_job_sync(job.job_type, job.geom, 'angstrom', **job.opts)
+        job.end_time = time.time()
+
+        #   set the results of the job
+        results['run'] = job.job_type
+        results.update(job.opts)
+        job.results = results.copy()
+        self.prev_job = job
+
+        #   set the guess files for the next job
+        self.set_guess_files_from_job(job)
+
+        return results
 
     #   TODO: add a counter for jobs submitted.
     #   If the number of jobs submitted is the first job, remove the old restart file
@@ -376,11 +472,6 @@ class TCClientExtra(TCPBClient):
             dir_fd = os.open(self.server_root, os.O_DIRECTORY)
             os.fsync(dir_fd)
             os.close(dir_fd)
-
-            # with open(exciton_overlap_file_1, 'rb') as file:
-            #     data = file.read()
-            #     print('DATA READ: ', len(data))
-        
 
         os.listdir(self.server_root)
             
@@ -598,81 +689,7 @@ class TCJob():
     
     @results.setter
     def results(self, value):
-        self._results = value
-
-    def get_guess_file_locs(self, prev_results: list[dict]):
-        job_opts = self.opts
-        server_root = self.client.server_root
-        if len(prev_results) != 0:
-            prev_job = prev_results[-1]
-            job_dir = os.path.join(server_root, prev_job['job_dir'])
-            if not os.path.isdir(job_dir):
-                print("Warning: no job directory found at")
-                print(job_dir)
-                print("Check that 'tcr_server_root' is properly set in order to use previous job guess orbitals")
-
-        cas_guess = None
-        scf_guess = None
-        cis_guess = self.opts.get('cisrestart', None)
-        if self.state > 0:
-            if self.excited_type == 'cas':
-                for prev_job in reversed(prev_results):
-                    if prev_job.get('castarget', 0) >= 1:
-                        prev_orb_file = prev_job['orbfile']
-                        if prev_orb_file[-6:] == 'casscf':
-                            cas_guess = os.path.join(server_root, prev_orb_file)
-                            break
-            # else:
-            #     #   we do not consider cis file because it is not stored in each job dorectory; we set it ourselves
-            #     host_port_str = f'{self.client.host}_{self.client.port}'
-            #     if host_port_str not in job_opts['cisrestart']:
-            #         cis_guess = f"{job_opts['cisrestart']}_{host_port_str}"
-            #         # job_opts['cisrestart'] = cis_guess
-
-        for i, prev_job in enumerate(reversed(prev_results)):
-            if 'orbfile' in prev_job:
-                scf_guess = os.path.join(server_root, prev_job['orbfile'])
-                #   This is to fix a bug in terachem that still sets the c0.casscf file as the
-                #   previous job's orbital file
-                if scf_guess[-6:] == 'casscf':
-                    scf_guess = scf_guess[0:-7]
-                break
-
-
-        return scf_guess, cis_guess, cas_guess
-        
-            
-    # def set_guess(self, prev_results: list[dict]):
-    #     scf_guess, cis_guess, cas_guess = self.get_guess_file_locs(prev_results)
-    #     if os.path.isfile(str(cas_guess)):
-    #         self.opts['casguess'] = cas_guess
-    #     if os.path.isfile(str(scf_guess)):
-    #         self.opts['guess'] = scf_guess
-
-    def set_guess(self, scf_guess=None, cas_guess=None):
-        if cas_guess is not None:
-            self.opts['casguess'] = cas_guess
-        if scf_guess is not None:
-            self.opts['guess'] = scf_guess
-
-
-    def copy_guess_files(self, prev_results_hist: list[dict]):
-        scf_guess, cis_guess, cas_guess = self.get_guess_file_locs(prev_results_hist)
-        guess_data = {}
-        if os.path.isfile(str(cas_guess)):
-            with open(cas_guess, 'rb') as file:
-                data = file.read()
-                guess_data['casguess'] = base64.b64encode(data).decode('utf-8')
-        if os.path.isfile(str(scf_guess)):
-            with open(scf_guess, 'rb') as file:
-                data = file.read()
-                guess_data['scfguess'] = base64.b64encode(data).decode('utf-8')
-        if os.path.isfile(str(cis_guess)):
-            with open(cis_guess, 'rb') as file:
-                data = file.read()
-                guess_data['cisguess'] = base64.b64encode(data).decode('utf-8')
-        
-    
+        self._results = value  
 
 class TCJobBatch():
     '''
@@ -1824,32 +1841,20 @@ def _correct_signs(job: TCJob, ref_job: TCJob):
     
 
 def _run_batch_jobs(jobs_batch: TCJobBatch):
-    overlap_set = False
     for j in jobs_batch.jobs:
         j: TCJob
-        job_opts =  j.opts
 
         client: TCClientExtra = j.client
-        
-        j.start_time = time.time()
-        # j.set_guess(client.results_history)
-        j.set_guess(client._scf_guess_file, client._cas_guess_file)
         client.log_message(f"Running {j.name}")
         print(f"Running {j.name}")
-
-        # if client.expect_exciton_overlap_dat:
-        # # if not overlap_set and j.state > 0:
-        #     print('Expecting overlap data')
-        #     client.setup_overlap_data(j.name)
-        #     overlap_set = True
 
         max_tries = 5
         try_count = 0
         try_again = True
         while try_again:
             try:
-                # results = compute_job_sync(client, j.job_type, j.geom, 'angstrom', **job_opts)
-                results = client.compute_job_sync(j.job_type, j.geom, 'angstrom', **job_opts)
+                # results = client.compute_job_sync(j.job_type, j.geom, 'angstrom', **job_opts)
+                results = client.compute_job(j)
                 try_again = False
             except Exception as e:
                 try_count += 1
@@ -1870,19 +1875,9 @@ def _run_batch_jobs(jobs_batch: TCJobBatch):
                     print("    Trying to run job once more")
                     client.log_message(f"Server error recieved; trying to run job once more")
                     time.sleep(10)
-                    
                     client.restart()
-                    # client = TCRunner.restart_client(client)
 
-        j.end_time = time.time()
-        results['run'] = j.job_type
         TCRunner.append_output_file(results, client.server_root)
-        results.update(job_opts)
-        j.results = results.copy()
-        scf_guess, cis_guess, cas_guess  = j.get_guess_file_locs(client._results_history)
-        client._scf_guess_file = scf_guess
-        client._cis_guess_file = cis_guess
-        client._cas_guess_file = cas_guess
 
 
 def format_output_LSCIVR(job_data: list[dict]):
