@@ -474,6 +474,8 @@ class TCClientExtra(TCPBClient):
             os.close(dir_fd)
 
         os.listdir(self.server_root)
+
+    
             
 
 class TCServerProcess(subprocess.Popen):
@@ -1207,52 +1209,7 @@ class TCRunner(QCRunner):
 
     def _conenct_user_clients(self):
         pass
-
-  
-
-    '''
-    @staticmethod
-    def get_new_client(host: str, port: int, max_wait=10.0, time_btw_check=1.0, server_root=''):
-        
-        #   start a new TeraChem server if gpus are supplied
-        # if len(gpus) != 0:
-        #     host = start_TC_server(port, gpus, server_root)
-        
-        print('Setting up new client')
-        client = TCClientExtra(host=host, port=port, server_root=server_root)
-        total_wait = 0.0
-        avail = False
-        while not avail:
-            try:
-                client.connect()
-                client.is_available()
-                avail = True
-            except:
-                print(f'TeraChem server {host}:{port} not available: \n\
-                        trying again in {time_btw_check} seconds')
-                time.sleep(time_btw_check)
-                total_wait += time_btw_check
-                if total_wait >= max_wait:
-                    raise TimeoutError('Maximum time allotted for checking for TeraChem server')
-        print('Terachem server is available and connected')
-        return client
-    
-    @staticmethod
-    def restart_client(client: TCClientExtra, max_wait=10.0, time_btw_check=1.0):
-        host = client.host
-        port = client.port
-        server_root = client.server_root
-        if (host, port) in _server_processes:
-            process: TCServerProcess = _server_processes[(host, port)]
-            
-            process.kill()
-            time.sleep(8.0)
-            start_TC_server(port, server_root=server_root, gpus=process.gpus)
-        client.disconnect()
-        del client
-        return TCRunner.get_new_client(host, port, max_wait=max_wait, time_btw_check=time_btw_check, server_root=server_root)
-
-    '''        
+      
 
     @staticmethod
     def append_results_file(results: dict):

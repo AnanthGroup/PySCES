@@ -17,10 +17,18 @@ restart_file_in = 'restart_start.json'
 QC_RUNNER = 'terachem'
 
 #   TeraChem runner options
-tcr_host = ['localhost']
-tcr_host = ['10.1.1.165']
-tcr_port = [1234]
-tcr_server_root = ['/scratch/cmyers7/single_servers/']
+try:
+     import json
+     with open('../host_ports.json') as file:
+        data = json.load(file)
+        print("DATA: ", data)
+        tcr_host = data['hosts']
+        tcr_port = data['ports']
+        tcr_server_root = data['server_roots']
+except:
+    tcr_host = ['localhost']
+    tcr_port = [1234]
+    tcr_server_root = ['/scratch/cmyers7/single_servers/']
 tcr_job_options = {
         'method': 'hf',
         'basis': 'sto-3g',
