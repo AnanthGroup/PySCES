@@ -259,14 +259,33 @@ class H5File(h5py.File):
             else:
                 np.save(file_name, data[:])
 
-    def to_json(self, file_loc, data_path: str = None, frame=None):
+    def to_json(self, file_loc, data_paths: str = None, frame=None):
         print('Saving to json:')
-        if data_path is None:
-            data = self
-        else:
-            data = self[data_path]
+        
+        if data_paths is None:
+            out_data = self.to_dict(self, print_message=True, frame=frame)
+        elif isinstance(data_paths, str):
+            if data_paths not in self:
+                raise ValueError(f"Path {data_paths} not found in the file")
+            out_data = self.to_dict(self[data_paths], print_message=True, frame=frame)
+        elif isinstance(data_paths, list):
 
-        out_data = self.to_dict(data, print_message=True, frame=frame)
+            #   make sure all paths are in the file
+            for p in data_paths:
+                if p not in self:
+                    raise ValueError(f"Path {p} not found in the file")
+
+            if len(data_paths) == 1:
+                data = self[data_paths[0]]
+                out_data = self.to_dict(data, print_message=True, frame=frame)
+            else:
+                print('Warining: extraction of more than one path requires dumping the data to '
+                'a new fiel before writing json data. This may take a while.')
+
+                self.write_new_file('_tmp.h5', data_paths, frame)
+                data = H5File('_tmp.h5', 'r')
+                out_data = self.to_dict(data, print_message=True, frame=frame)                
+
         if file_loc.endswith('.gz'):
             print('    Writing data to a compressed .json file')
             with gzip.open(file_loc, 'wt') as file:
@@ -343,11 +362,11 @@ class H5File(h5py.File):
     #     new_file.close()
             
     @staticmethod
-    def copy_with_frame(source, dest_file, frame=None):
+    def copy_to_file_with_frame(source, dest_file, frame=None):
         
         if isinstance(source, (h5py.File, h5py.Group)):
             for key in source:
-                H5File.copy_with_frame(source[key], dest_file, frame)
+                H5File.copy_to_file_with_frame(source[key], dest_file, frame)
         elif isinstance(source, h5py.Dataset):
             if frame is None:
                 print('   Copying dataset:', source.name)
@@ -364,6 +383,7 @@ class H5File(h5py.File):
                         dest_file[source.name].attrs[k] = v
                 else:
                     print(f"Dataset: {source.name} is too small for frame {frame}")
+
 
     @staticmethod
     def find_paths_with_wildcard(h5file, pattern):
@@ -397,7 +417,7 @@ class H5File(h5py.File):
             for path in all_paths:
                 if path in self:
                     obj = self[path] 
-                    H5File.copy_with_frame(obj, new_file, frame=frame)
+                    H5File.copy_to_file_with_frame(obj, new_file, frame=frame)
 
 def run_h5_module():
     parser = argparse.ArgumentParser()
