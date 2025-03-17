@@ -57,6 +57,7 @@ class TCRunnerOptions:
     #   this is a reference for the first frame
     _initial_ref_nacs = None
 
+    #   terachem interpolations
     interpolation = False
 
 
@@ -125,9 +126,6 @@ tcr_client_assignments = []
 tcr_log_jobs = True
 #   pysces should start it's own TeraChem servers
 tcr_server_gpus = []
-
-#   TeraChem inteprolation of gradients and NACs
-tcr_interpolation = False
 
 # Terachem files
 fname_tc_xyz      = "tmp/tc_hf/hf.spherical.freq/Geometry.xyz"
@@ -198,8 +196,7 @@ def input_local_settings():
             exec(local_lines, globals())
 
         except Exception as e:
-            print("Error loading local settings: ", e)
-            return
+            raise ValueError("Error loading local settings: ", e)
 
 
     _check_settings(locals)
@@ -234,7 +231,6 @@ def _check_settings(local: dict):
         opts.p0 = [0.0]*nel
     if 'QC_RUNNER' in globals():
         opts.qc_runner = globals()['QC_RUNNER']
-        print('IN QC_RUNNER')
 
     #   set input format to the same type of QC runner
     if opts.mol_input_format == '':

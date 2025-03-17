@@ -34,6 +34,7 @@ from pprint import pprint
 from scipy.interpolate import interp1d
 import scipy.linalg as la
 
+from pprint import pprint
 
 _server_processes = {}
 
@@ -134,7 +135,7 @@ class TCClientExtra(TCPBClient):
                 avail = True
             except:
                 print(f'TeraChem server {self.host}:{self.port} not available: \n\
-                        trying again in {time_btw_check} seconds')
+                        trying again in {time_btw_check} seconds', flush=True)
                 time.sleep(time_btw_check)
                 total_wait += time_btw_check
                 if total_wait >= max_wait:
@@ -700,6 +701,20 @@ class TCJob():
         self._results = value  
         self.batch._update_completion()
         # self.batch._completed_jobs[self.jobID] = value
+
+class _CustomJobList(list):
+    ''' POSSIBLE REMOVE THIS CLASS '''
+    def __init__(self, parent_batch, *args):
+        super().__init__(*args)
+        self.parent_batch = parent_batch
+
+    def append(self, job: TCJob, allow_duplicates=True):
+        if not allow_duplicates:
+            if job.jobID in [j.jobID for j in self]:
+                raise ValueError(f'JobID {job.jobID} already in batch')
+        super().append(job)
+        # Link the job to the batch
+        job.batch = self.parent_batch
 
 class TCJobBatch():
     '''
@@ -1320,6 +1335,7 @@ class TCRunner(QCRunner):
             results['tc.out'] = lines
         else:
             print("Warning: Output file not found at ", output_file)
+            
         return results
     
     @staticmethod
@@ -2031,7 +2047,7 @@ def _run_batch_jobs(jobs_batch: TCJobBatch):
         while try_again:
             try:
                 # results = client.compute_job_sync(j.job_type, j.geom, 'angstrom', **job_opts)
-                results = client.compute_job(j)
+                client.compute_job(j)
                 try_again = False
             except Exception as e:
                 try_count += 1
@@ -2054,7 +2070,7 @@ def _run_batch_jobs(jobs_batch: TCJobBatch):
                     time.sleep(10)
                     client.restart()
 
-        TCRunner.append_output_file(results, client.server_root)
+        TCRunner.append_output_file(j.results, client.server_root)
 
 
 def format_output_LSCIVR(job_data: list[dict]):
