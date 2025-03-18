@@ -36,10 +36,9 @@ from pprint import pprint
 _server_processes = {}
 
 #   debug flags
-_DEBUG = bool(int(os.environ.get('DEBUG', False)))
-_DEBUG_TRAJ = os.environ.get('DEBUG_TRAJ', False)
-_SAVE_BATCH = os.environ.get('SAVE_BATCH', False)
-_SAVE_DEBUG_TRAJ = os.environ.get('SAVE_DEBUG_TRAJ', False)
+_DEBUG = bool(int(os.environ.get('DEBUG', False))) # used with numerical derivatives
+_DEBUG_LOAD_TRAJ = os.environ.get('DEBUG_LOAD_TRAJ', False)
+_DEBUG_SAVE_TRAJ = os.environ.get('DEBUG_SAVE_TRAJ', False)
 
 
 def synchronized(function):
@@ -740,7 +739,7 @@ class TCJobBatch():
         #   sort by ID
         id_list = [j.jobID for j in jobs]
         order = np.argsort(id_list)
-        self.jobs = [jobs[i] for i in order]
+        self.jobs: list[TCJob] = [jobs[i] for i in order]
 
         TCJobBatch.__batch_counter += 1
         self.__batchID = TCJobBatch.__batch_counter
@@ -1125,7 +1124,7 @@ class TCRunner(QCRunner):
         self._server_root_list = self._server_roots
 
         for h, p, s in zip(self._hosts, self._ports, self._server_roots):
-            if _DEBUG_TRAJ:
+            if _DEBUG_LOAD_TRAJ:
                 # self._client_list.append(None)
                 self._client_list = []
                 print('DEBUG_TRAJ set, TeraChem clients will not be opened')
@@ -1137,8 +1136,8 @@ class TCRunner(QCRunner):
 
     def _load_debug_trajectory(self):
         """Load debug trajectory if _DEBUG_TRAJ is set."""
-        if _DEBUG_TRAJ:
-            with open(_DEBUG_TRAJ, 'rb') as file:
+        if _DEBUG_LOAD_TRAJ:
+            with open(_DEBUG_LOAD_TRAJ, 'rb') as file:
                 self._debug_traj = pickle.load(file)
 
     def _print_options_summary(self):
@@ -1204,10 +1203,10 @@ class TCRunner(QCRunner):
         return self._prev_job_batch
 
     def cleanup(self):
-        if _SAVE_DEBUG_TRAJ:
-            with open(_SAVE_DEBUG_TRAJ, 'wb') as file:
+        if _DEBUG_SAVE_TRAJ:
+            with open(_DEBUG_SAVE_TRAJ, 'wb') as file:
                 pickle.dump(self._debug_traj, file)
-        if _DEBUG_TRAJ:
+        if _DEBUG_LOAD_TRAJ:
             return
         for client in self._client_list:
             client.disconnect()
@@ -1386,9 +1385,9 @@ class TCRunner(QCRunner):
             job_batch = self.run_new_geom(geom)
 
 
-        if _SAVE_DEBUG_TRAJ:
-            print("SAVING DEBUG TRAJ FILE: ", _SAVE_DEBUG_TRAJ)
-            with open(_SAVE_DEBUG_TRAJ, 'wb') as file:
+        if _DEBUG_SAVE_TRAJ:
+            print("SAVING DEBUG TRAJ FILE: ", _DEBUG_SAVE_TRAJ)
+            with open(_DEBUG_SAVE_TRAJ, 'wb') as file:
                 pickle.dump(self._debug_traj, file)
 
         all_energies, elecE, grad, nac, trans_dips = format_output_LSCIVR(job_batch.results_list)
@@ -1440,25 +1439,8 @@ class TCRunner(QCRunner):
 
         return job_batch
 
-
-    def _send_jobs_to_clients(self, jobs_batch: TCJobBatch):
-
-        # REMOVE ME
-        if _SAVE_BATCH:
-            batch_file = os.path.join(_SAVE_BATCH, f'_jobs_{jobs_batch.batchID}.pkl')
-            if os.path.isfile(batch_file):
-                print('DEBUG OVERWRITING JOBS WITH FILE ', f'{batch_file}')
-                with open(batch_file, 'rb') as file:
-                    completed_batch = pickle.load(file)
-                for i in range(len(jobs_batch.jobs)):
-                    jobs_batch.jobs[i] = completed_batch.jobs[i]
-                return completed_batch
-            else:
-                print('COULD NOT FIND FILE ', f'{batch_file}')
-
-
-        #   debug mode
-        if self._debug_traj and not _SAVE_DEBUG_TRAJ:
+    def _load_debug_batch(self, jobs_batch: TCJobBatch):
+        if self._debug_traj and not _DEBUG_SAVE_TRAJ:
             completed_batch = self._debug_traj.pop(0)
 
             for i in range(len(jobs_batch.jobs)):
@@ -1471,7 +1453,22 @@ class TCRunner(QCRunner):
                 raise ValueError(f'DEBUG MODE: Number of jobs requested ({n_req}) does not match the next batch of jobs in the trajectory ({n_comp})')
             time.sleep(0.025)
             return completed_batch
-        
+        else:
+            return None
+
+    def _save_debug_batch(self, jobs_batch: TCJobBatch):
+        if _DEBUG_SAVE_TRAJ:
+            print("APPENDING DEBUG TRAJ ", jobs_batch)
+            jobs_batch._remove_clients()
+            self._debug_traj.append(jobs_batch)
+    
+    def _send_jobs_to_clients(self, jobs_batch: TCJobBatch):
+
+        #   debug mode
+        debug_batch =  self._load_debug_batch(jobs_batch)
+        if debug_batch is not None: 
+            return debug_batch
+ 
 
         n_clients = len(self._client_list)
         if len(self._tc_client_assignments) > 0:
@@ -1530,18 +1527,7 @@ class TCRunner(QCRunner):
         self._prev_results = jobs_batch.results_list
         self._set_avg_max_times(jobs_batch.timings)
         self._coordinate_exciton_overlap_files()
-
-        if _SAVE_DEBUG_TRAJ:
-            print("APPENDING DEBUG TRAJ ", jobs_batch)
-            jobs_batch._remove_clients()
-            self._debug_traj.append(jobs_batch)
-
-        if _SAVE_BATCH:
-            print(f"SAVING BATCH FILE: {batch_file}")
-            for job in jobs_batch.jobs:
-                job.client = None
-            with open(batch_file, 'wb') as file:
-                pickle.dump(jobs_batch, file)
+        self._save_debug_batch(jobs_batch)
 
         return jobs_batch
                     

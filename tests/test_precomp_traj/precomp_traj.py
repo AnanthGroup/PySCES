@@ -15,10 +15,10 @@ class Test_Precompute(unittest.TestCase):
     def setUp(self) -> None:
         pysces.qcRunners.TeraChem.TCJob.__job_counter = 0
         pysces.qcRunners.TeraChem.TCJobBatch.__batch_counter = 0
-        self._DEBUG_TRAJ = pysces.qcRunners.TeraChem._DEBUG_TRAJ
+        self._DEBUG_TRAJ = pysces.qcRunners.TeraChem._DEBUG_LOAD_TRAJ
 
     def tearDown(self) -> None:
-        pysces.qcRunners.TeraChem._DEBUG_TRAJ = self._DEBUG_TRAJ
+        pysces.qcRunners.TeraChem._DEBUG_LOAD_TRAJ = self._DEBUG_TRAJ
 
     def test_jobs(self):
         reset_directory()
@@ -26,7 +26,7 @@ class Test_Precompute(unittest.TestCase):
 
         # orig_debug_val = pysces.qcRunners.TeraChem._DEBUG_TRAJ
         pysces.reset_settings()
-        pysces.qcRunners.TeraChem._DEBUG_TRAJ = 'debug_traj.pkl'
+        pysces.qcRunners.TeraChem._DEBUG_LOAD_TRAJ = 'debug_traj.pkl'
         pysces.run_simulation()
         # pysces.qcRunners.TeraChem._DEBUG_TRAJ = orig_debug_val
 
