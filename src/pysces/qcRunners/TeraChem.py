@@ -33,6 +33,7 @@ import base64
 from pprint import pprint
 from scipy.interpolate import interp1d
 import scipy.linalg as la
+from pprint import pprint
 
 from pprint import pprint
 
@@ -67,9 +68,9 @@ class TCClientExtra(TCPBClient):
 
         Args:
             host (str): The host IP address. Defaults to "127.0.0.1".
-            port (int): The port number. Defaults to 11111.
-            debug (bool): Whether to enable debug mode. Defaults to False.
-            trace (bool): Whether to enable trace mode. Defaults to False.
+            port (int): Port number (must be above 1023). Defaults to 11111.
+            debug (bool): If True, assumes connections work (used for testing with no server). Defaults to False.
+            trace (bool): If True, packets are saved to .bin files (which can then be used for testing). Defaults to False.
             log (bool): Whether to enable logging. Defaults to True.
         """
         
@@ -344,7 +345,7 @@ class TCClientExtra(TCPBClient):
                 print(line)
         print('\n ... END OF FILE \n')
 
-    def compute_job(self, job: TCJob):
+    def compute_job(self, job: TCJob, append_tc_out=False):
         
         #   assign the guess files to the current job
         self.assign_guess_files(job)
@@ -357,6 +358,8 @@ class TCClientExtra(TCPBClient):
         #   set the results of the job
         results['run'] = job.job_type
         results.update(job.opts)
+        if append_tc_out:
+            self._append_output_file(results)
         job.results = results.copy()
         self.prev_job = job
 
@@ -480,7 +483,38 @@ class TCClientExtra(TCPBClient):
             os.close(dir_fd)
 
         os.listdir(self.server_root)
+
+    def _append_output_file(self, results: dict):
+        output_file = os.path.join(self.server_root, results['job_dir'], 'tc.out')
+        if os.path.isfile(output_file):
+            with open(output_file, 'r') as file:
+                lines = file.readlines()
+            #   remove line breaks
+            for n in range(len(lines)):
+                lines[n] = lines[n][0:-1]
+            results['tc.out'] = lines
+        else:
+            print("Warning: Output file not found at ", output_file)
+
+    def clean_up_state_files(self):
+        for file in ['exciton.dat', 'exciton_overlap.dat', 'exciton_overlap.dat.1']:
+            file_loc = os.path.join(self.server_root, file)
+            if os.path.isfile(file_loc):
+                print('Removing stale file:', file_loc)
+
+    def is_file(self, file_name):
+        return os.path.isfile(os.path.join(self.server_root, file_name))
+
+    def get_file(self, file_name, mode='rb'):
+        file_loc = os.path.join(self.server_root, file_name)
+        with open(file_loc, mode) as file:
+            data = file.read()
+        return data
             
+    def set_file(self, file_name, data, mode='wb'):
+        file_loc = os.path.join(self.server_root, file_name)
+        with open(file_loc, mode) as file:
+            file.write(data)
 
 class TCServerProcess(subprocess.Popen):
     def __init__(self, port, gpus=[]):
@@ -976,7 +1010,6 @@ class TCRunner(QCRunner):
 
         # Print options summary
         self._print_options_summary()
-        self._cleanup_stale_files()
         self._coordinate_exciton_overlap_files(tc_opts.fname_exciton_overlap_data)
         
         
@@ -1165,6 +1198,7 @@ class TCRunner(QCRunner):
             client = TCClientExtra(host=h, port=p, server_root=s)
             client.startup(max_wait=self._max_wait)
             self._client_list.append(client)
+            client.clean_up_state_files()
 
         self._client = self._client_list[0]
         self._host = self._hosts[0]
@@ -1235,14 +1269,6 @@ class TCRunner(QCRunner):
         print('--------------------------------------')
         print()
 
-    def _cleanup_stale_files(self):
-        for client in self._client_list:
-            for file in ['exciton.dat', 'exciton_overlap.dat', 'exciton_overlap.dat.1']:
-                file_loc = os.path.join(client.server_root, file)
-                if os.path.isfile(file_loc):
-                    print('Removing stale file:', file_loc)
-                    os.remove(file_loc)
-
     def report(self):
         return self._prev_job_batch
 
@@ -1270,52 +1296,7 @@ class TCRunner(QCRunner):
 
     def _conenct_user_clients(self):
         pass
-
-  
-
-    '''
-    @staticmethod
-    def get_new_client(host: str, port: int, max_wait=10.0, time_btw_check=1.0, server_root=''):
-        
-        #   start a new TeraChem server if gpus are supplied
-        # if len(gpus) != 0:
-        #     host = start_TC_server(port, gpus, server_root)
-        
-        print('Setting up new client')
-        client = TCClientExtra(host=host, port=port, server_root=server_root)
-        total_wait = 0.0
-        avail = False
-        while not avail:
-            try:
-                client.connect()
-                client.is_available()
-                avail = True
-            except:
-                print(f'TeraChem server {host}:{port} not available: \n\
-                        trying again in {time_btw_check} seconds')
-                time.sleep(time_btw_check)
-                total_wait += time_btw_check
-                if total_wait >= max_wait:
-                    raise TimeoutError('Maximum time allotted for checking for TeraChem server')
-        print('Terachem server is available and connected')
-        return client
-    
-    @staticmethod
-    def restart_client(client: TCClientExtra, max_wait=10.0, time_btw_check=1.0):
-        host = client.host
-        port = client.port
-        server_root = client.server_root
-        if (host, port) in _server_processes:
-            process: TCServerProcess = _server_processes[(host, port)]
-            
-            process.kill()
-            time.sleep(8.0)
-            start_TC_server(port, server_root=server_root, gpus=process.gpus)
-        client.disconnect()
-        del client
-        return TCRunner.get_new_client(host, port, max_wait=max_wait, time_btw_check=time_btw_check, server_root=server_root)
-
-    '''        
+      
 
     @staticmethod
     def append_results_file(results: dict):
@@ -1781,13 +1762,17 @@ class TCRunner(QCRunner):
             with open(overlap_file_loc, 'rb') as file:
                 exciton_overlap_data = file.read()
         else:
-            for client in self._client_list:
-                overlap_file_loc = client.server_file('exciton_overlap.dat')
-                if not os.path.isfile(overlap_file_loc):
-                    continue
-                with open(overlap_file_loc, 'rb') as file:
-                    exciton_overlap_data = file.read()
-                break
+            for client in self._client_list:                
+                if client.is_file('exciton_overlap.dat.1'):
+                    exciton_overlap_data = client.get_file('exciton_overlap.dat.1', 'rb')
+                    break
+
+                # overlap_file_loc = client.server_file('exciton_overlap.dat.1')
+                # if not os.path.isfile(overlap_file_loc):
+                #     continue
+                # with open(overlap_file_loc, 'rb') as file:
+                #     exciton_overlap_data = file.read()
+                # break
 
 
         #   copy file to all other server roots
@@ -1797,6 +1782,8 @@ class TCRunner(QCRunner):
                 new_file_loc = client.server_file('exciton_overlap.dat.1')
                 with open(new_file_loc, 'wb') as file:
                     file.write(self._exciton_overlap_data)
+
+
 
     def _run_numerical_derivatives(self, ref_job: TCJob, n_points=3, dx=0.01, overlap=False):
         '''
@@ -2046,8 +2033,7 @@ def _run_batch_jobs(jobs_batch: TCJobBatch):
         try_again = True
         while try_again:
             try:
-                # results = client.compute_job_sync(j.job_type, j.geom, 'angstrom', **job_opts)
-                client.compute_job(j)
+                client.compute_job(j, append_tc_out=True)
                 try_again = False
             except Exception as e:
                 try_count += 1
@@ -2069,9 +2055,6 @@ def _run_batch_jobs(jobs_batch: TCJobBatch):
                     client.log_message(f"Server error recieved; trying to run job once more")
                     time.sleep(10)
                     client.restart()
-
-        TCRunner.append_output_file(j.results, client.server_root)
-
 
 def format_output_LSCIVR(job_data: list[dict]):
     atoms = job_data[0]['atoms']
