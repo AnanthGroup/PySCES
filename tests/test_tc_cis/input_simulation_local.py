@@ -40,6 +40,7 @@ tcr_job_options = {
         #   TD-DFT
         'cis': 'yes',
         'cisnumstates': 2,
+        ''
 
         #   thresholds
         'precision': 'double',
