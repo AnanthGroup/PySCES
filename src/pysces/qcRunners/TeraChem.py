@@ -916,9 +916,6 @@ class TCRunner(QCRunner):
         # Server and client management
         self._server_root_list = []
         self._client_list: list[TCClientExtra] = []
-        self._client = None
-        self._host = None
-        self._port = None
         self._setup_servers_and_clients(tc_opts)  # Set up servers and clients
 
         # Guesses for SCF/CAS/CI calculations
@@ -1129,17 +1126,14 @@ class TCRunner(QCRunner):
 
         for h, p, s in zip(self._hosts, self._ports, self._server_roots):
             if _DEBUG_TRAJ:
-                self._client_list.append(None)
+                # self._client_list.append(None)
+                self._client_list = []
                 print('DEBUG_TRAJ set, TeraChem clients will not be opened')
                 break
             client = TCClientExtra(host=h, port=p, server_root=s)
             client.startup(max_wait=self._max_wait)
             self._client_list.append(client)
             client.clean_up_state_files()
-
-        self._client = self._client_list[0]
-        self._host = self._hosts[0]
-        self._port = self._ports[0]
 
     def _load_debug_trajectory(self):
         """Load debug trajectory if _DEBUG_TRAJ is set."""
@@ -1326,34 +1320,35 @@ class TCRunner(QCRunner):
             dict: Results mirroring recv_job_async
         """
 
+        client = self._client_list[0]
         max_time = self._max_time
         if max_time is None and self._restart_on_stall:
-            return self._client.compute_job_sync(jobType, geom, unitType, **kwargs)
+            return client.compute_job_sync(jobType, geom, unitType, **kwargs)
         else:
             total_time = 0.0
-            accepted = self._client.send_job_async(jobType, geom, unitType, **kwargs)
+            accepted = client.send_job_async(jobType, geom, unitType, **kwargs)
             while accepted is False:
                 start_time = time.time()
                 time.sleep(0.25)
-                accepted = self._client.send_job_async(jobType, geom, unitType, **kwargs)
+                accepted = client.send_job_async(jobType, geom, unitType, **kwargs)
                 end_time = time.time()
                 total_time += (end_time - start_time)
                 if total_time > max_time and max_time >= 0.0:
                     print("FAILING: ", total_time, max_time)
                     raise TCServerStallError('TeraChem server might have stalled')
 
-            completed = self._client.check_job_complete()
+            completed = client.check_job_complete()
             while completed is False:
                 start_time = time.time()
                 time.sleep(0.25)
-                completed = self._client.check_job_complete()
+                completed = client.check_job_complete()
                 
                 # if self._n_calls == 2:
                 #     max_time = 12
                 #     print("STALLING: ", total_time, max_time)
                 #     completed = False
                 # else:
-                #     completed = self._client.check_job_complete()
+                #     completed = client.check_job_complete()
 
                 end_time = time.time()
                 total_time += (end_time - start_time)
@@ -1361,7 +1356,7 @@ class TCRunner(QCRunner):
                     print("FAILING: ", total_time, max_time)
                     raise TCServerStallError('TeraChem server might have stalled')
 
-            return self._client.recv_job_async()
+            return client.recv_job_async()
         
     def _set_avg_max_times(self, times: dict):
         max_time = np.max(list(times.values()))
@@ -1381,13 +1376,12 @@ class TCRunner(QCRunner):
         try:
             job_batch = self._run_TC_new_geom_kernel(geom)
         except TCServerStallError as error:
-            host, port = self._host, self._port
             print('TC Server stalled: attempting to restart server')
-            stop_TC_server(host, port)
+            stop_TC_server(self._hosts[0], self._ports[0])
             time.sleep(2.0)
-            start_TC_server(port)
+            start_TC_server(self._ports[0])
 
-            self._client.restart(max_wait=20)
+            self._client_list[0].restart(max_wait=20)
             print('Started new TC Server: re-running current step')
             job_batch = self.run_new_geom(geom)
 
