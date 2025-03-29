@@ -24,7 +24,7 @@ class Test_TC_CIS(unittest.TestCase):
         #   Load the reference nacs and use their values as sign references
         #   This will be later fixed with overlaps
         ref_nacs = np.loadtxt('logs_ref/nac.txt', skiprows=3, max_rows=18)
-        pysces.SignFlipper._debug = True
+        pysces.SignFlipper._debug = False
         pysces.SignFlipper._ref_nacs = ref_nacs
 
     def test_jobs(self):

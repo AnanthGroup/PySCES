@@ -337,10 +337,14 @@ class TCClientExtra(TCPBClient):
                 print(line)
         print('\n ... END OF FILE \n')
 
-    def compute_job(self, job: TCJob, append_tc_out=False):
+    def compute_job(self, job: TCJob, append_tc_out=False, use_guess_files=True, start_fresh=False):
         
+        if start_fresh:
+            self.clean_up_stale_files()
+
         #   assign the guess files to the current job
-        self.assign_guess_files(job)
+        if use_guess_files:
+            self.assign_guess_files(job)
 
         #   send the job to the terachem server
         job.start_time = time.time()
@@ -382,8 +386,8 @@ class TCClientExtra(TCPBClient):
 
         accepted = self.send_job_async(jobType, geom, unitType, **kwargs)
         while accepted is False:
-            time.sleep(0.5)
             accepted = self.send_job_async(jobType, geom, unitType, **kwargs)
+            time.sleep(0.1)
 
         self.log_message("Job Accepted")
         self.log_message(f"    Job Type: {jobType}")
@@ -391,7 +395,7 @@ class TCClientExtra(TCPBClient):
 
         completed = self.check_job_complete()
         while completed is False:
-            time.sleep(0.5)
+            time.sleep(0.1)
             self._send_msg(pb.STATUS, None)
             status = self._recv_msg(pb.STATUS)
 
@@ -488,11 +492,19 @@ class TCClientExtra(TCPBClient):
         else:
             print("Warning: Output file not found at ", output_file)
 
-    def clean_up_state_files(self):
+    def clean_up_stale_files(self):
         for file in ['exciton.dat', 'exciton_overlap.dat', 'exciton_overlap.dat.1']:
             file_loc = os.path.join(self.server_root, file)
             if os.path.isfile(file_loc):
                 print('Removing stale file:', file_loc)
+        for file in os.listdir(self.server_root):
+            if 'XYZia_CPCIS_' in os.path.basename(file):
+                print('Removing stale file:', file)
+                os.remove(os.path.join(self.server_root, file))
+            if 'XYZia_CPHF_' in os.path.basename(file):
+                print('Removing stale file:', file)
+                os.remove(os.path.join(self.server_root, file))
+
 
     def is_file(self, file_name):
         return os.path.isfile(os.path.join(self.server_root, file_name))
@@ -945,6 +957,13 @@ class TCRunner(QCRunner):
         self._print_options_summary()
         self._coordinate_exciton_overlap_files(tc_opts.fname_exciton_overlap_data)
         # time.sleep(60)
+
+        #   interpolation options
+        self._interpolate_grads = False
+        self._interpolate_NACs = False
+
+        #   use condensed jobs
+        self._combine_jobs = False
         
 
     def _prepare_server_info(self):
@@ -1132,7 +1151,7 @@ class TCRunner(QCRunner):
             client = TCClientExtra(host=h, port=p, server_root=s)
             client.startup(max_wait=self._max_wait)
             self._client_list.append(client)
-            client.clean_up_state_files()
+            client.clean_up_stale_files()
 
     def _load_debug_trajectory(self):
         """Load debug trajectory if _DEBUG_TRAJ is set."""
@@ -1362,16 +1381,8 @@ class TCRunner(QCRunner):
         self._max_time_list.append(max_time)
         self._max_time = np.mean(self._max_time_list)*5
 
-    def run_new_geom(self, phase_vars: PhaseVars=None, geom=None):
-
-        if phase_vars is not None:
-            geom = phase_vars.nuc_q*qcel.constants.bohr2angstroms
-        elif geom is not None:
-            #   legacy support for geom, assumed to be in angstroms
-            pass
-        else:
-            raise ValueError('Either phase_vars or geom must be provided')
-
+    def _run_with_restart(self, geom):
+        ''' Legacy: This is here to handle server stalls. It's very likely this will not be needed again'''
         try:
             job_batch = self._run_TC_new_geom_kernel(geom)
         except TCServerStallError as error:
@@ -1384,17 +1395,37 @@ class TCRunner(QCRunner):
             print('Started new TC Server: re-running current step')
             job_batch = self.run_new_geom(geom)
 
+    def run_new_geom(self, phase_vars: PhaseVars=None, geom=None):
 
-        if _DEBUG_SAVE_TRAJ:
-            print("SAVING DEBUG TRAJ FILE: ", _DEBUG_SAVE_TRAJ)
-            with open(_DEBUG_SAVE_TRAJ, 'wb') as file:
-                pickle.dump(self._debug_traj, file)
+        if phase_vars is not None:
+            geom = phase_vars.nuc_q*qcel.constants.bohr2angstroms
+        elif geom is not None:
+            #   legacy support for geom, assumed to be in angstroms
+            pass
+        else:
+            raise ValueError('Either phase_vars or geom must be provided')
+
+
+        #   step 1
+        job_batch = self.create_jobs(geom, False, self._grads, self._NACs)
+        job_batch = self._send_jobs_to_clients(job_batch)
+
+        #   step 2
+        if self._interpolate_grads or self._interpolate_NACs:
+            new_grads, new_nacs = self._check_new_grads_nacs_to_run(job_batch)
+            job_batch_2 = self.create_jobs(geom, False, new_nacs, new_grads)
+            job_batch_2 = self._send_jobs_to_clients(job_batch_2)
+
+            #   step 3: combine both batches
+            job_batch.jobs += job_batch_2.jobs
 
         all_energies, elecE, grad, nac, trans_dips = format_output_LSCIVR(job_batch.results_list)
-        self._prev_job_batch = job_batch
-        
-        #   DEBUG: correct signs of NACs for the first frame
-        if self._initial_ref_nacs is not None:
+        self._finalize_frame(job_batch, nac)
+        return (all_energies, elecE, grad, nac, trans_dips, job_batch.timings)
+
+
+    def _finalize_frame(self, job_batch: TCJobBatch, nac=None):
+        if (nac is not None) and (self._initial_ref_nacs is not None):
             print('SETTING INITIAL NACS FROM SETTINGS')
             for i in range(nac.shape[0]):
                 for j in range(1, nac.shape[1]):
@@ -1403,11 +1434,25 @@ class TCRunner(QCRunner):
                     nac[j, i] = -nac[i, j]
             self._initial_ref_nacs = None
 
-                
-        return (all_energies, elecE, grad, nac, trans_dips, job_batch.timings)
+        self._prev_job_batch = job_batch
+        self._frame_counter += 1
+        self._prev_jobs = job_batch.jobs
 
-    def _run_TC_new_geom_kernel(self, geom):
-        
+    def _check_initial_grads_nacs_to_run(self):
+        if not self._interpolate_grads and not self._interpolate_NACs:
+            return self._grads, self._NACs
+        else:
+            raise NotImplementedError('Interpolation of gradients and NACs is not yet implemented')
+
+    def _check_new_grads_nacs_to_run(self, job_batch: TCJobBatch):
+        if not self._interpolate_grads and not self._interpolate_NACs:
+            return (), ()
+        else:
+            raise NotImplementedError('Interpolation of gradients and NACs is not yet implemented')
+
+    def create_jobs(self, geom, energy_only = False, grads = [], nacs = []):
+        job_batch = TCJobBatch()
+
         #   frame specific job options
         frame_opts = {}
         if self._initial_frame_options is not None:
@@ -1415,29 +1460,90 @@ class TCRunner(QCRunner):
                 frame_opts.update(self._initial_frame_options)
 
         #   run energy only if gradients and NACs are not requested
-        if len(self._grads) == 0 and len(self._NACs) == 0:
-            job_opts = self._base_options.copy()
-            results = self.compute_job_sync_with_restart('energy', geom, 'angstrom', **job_opts)
-            results['run'] = 'energy'
-            results.update(job_opts)
-            return TCJobBatch([results])
+        if energy_only:
+            job_batch.append(TCJob(geom, self._base_options | frame_opts, 'energy', self._excited_type, 0))
 
-        #   create gradient jobs
-        job_batch = TCJobBatch()
         for name, opts in self.grad_job_options.items():
             state = opts.get(f'{self._excited_type}target', 0)
+            if state not in grads:
+                continue
             job_batch.append(TCJob(geom, opts | frame_opts, 'gradient', self._excited_type, state, name))
 
         #   create NAC jobs
         for name, opts in self.nac_job_options.items():
-            state = max(opts['nacstate1'], opts['nacstate2'])
-            job_batch.append(TCJob(geom, opts | frame_opts, 'coupling', self._excited_type, state, name))
-
-        job_batch = self._send_jobs_to_clients(job_batch)
-        self._frame_counter += 1
-        self._prev_jobs = job_batch.jobs
+            state = (opts['nacstate1'], opts['nacstate2'])
+            if state not in nacs:
+                continue
+            job_batch.append(TCJob(geom, opts | frame_opts, 'coupling', self._excited_type, max(state), name))
 
         return job_batch
+
+
+    def combine_jobs(self, job_batch: TCJobBatch, keep_tr_off_diags=False):
+        #   make sure there are CIS jobs
+        for job in job_batch.jobs:
+            if job.excited_type != 'cis':
+                print('Warining: Only CIS jobs can be combined')
+                return job_batch
+            
+        gs_gradient = False
+        ex_gradients = []
+        gs_ex_nacs = []
+        ex_ex_nacs = []
+        gs_dipole_deriv = False
+        ex_dipole_derivs = []
+        tr_dipole_derivs = []
+
+        found_cis_dipole_deriv = False
+        found_cis_tr_dipole_deriv = False
+        cis_states = []
+
+        for job in job_batch.jobs:
+            #   group by GS and EX gradients
+            if job.job_type == 'gradient':
+                if job.state == 0:
+                    gs_gradient = True
+                else:
+                    ex_gradients.append(job.state)
+                    cis_states.append(job.state)
+
+            #   group by GS-EX and EX-EX nacs
+            elif job.job_type == 'coupling':
+                state_1 = min(job.opts['nacstate1'], job.opts['nacstate2'])
+                state_2 = max(job.opts['nacstate1'], job.opts['nacstate2'])
+                if state_1 == 0:
+                    gs_ex_nacs.append((state_1, state_2))
+                else:
+                    ex_ex_nacs.append((state_1, state_2))
+
+            #   dipole derivatives
+            if 'dipolederivative' in job.opts:
+                gs_dipole_deriv = True
+            elif 'cisdipolederiv' in job.opts:
+                found_cis_dipole_deriv = True
+            elif 'cistransdipolederiv' in job.opts:
+                found_cis_tr_dipole_deriv = True
+
+        cis_states = sorted(set(cis_states))
+        if found_cis_dipole_deriv:
+            for state in cis_states:
+                ex_dipole_derivs.append(state)
+        if found_cis_tr_dipole_deriv:
+            for state in cis_states:
+                tr_dipole_derivs.append((0, state))
+            if keep_tr_off_diags:
+                for i in cis_states:
+                    for j in cis_states[i+1:]:
+                        tr_dipole_derivs.append((i, j))
+    
+    def get_batches_from_components(self, gs_gradient=False, ex_gradients=[], gs_ex_nacs=[], ex_ex_nacs=[], gs_dipole_deriv=False, ex_dipole_derivs=[], tr_dipole_derivs=[]):
+        pass
+        
+    def _write_debug_batch(self):
+        if _DEBUG_SAVE_TRAJ:
+            print("SAVING DEBUG TRAJ FILE: ", _DEBUG_SAVE_TRAJ)
+            with open(_DEBUG_SAVE_TRAJ, 'wb') as file:
+                pickle.dump(self._debug_traj, file)
 
     def _load_debug_batch(self, jobs_batch: TCJobBatch):
         if self._debug_traj and not _DEBUG_SAVE_TRAJ:
@@ -1528,6 +1634,7 @@ class TCRunner(QCRunner):
         self._set_avg_max_times(jobs_batch.timings)
         self._coordinate_exciton_overlap_files()
         self._save_debug_batch(jobs_batch)
+        self._write_debug_batch()
 
         return jobs_batch
                     
