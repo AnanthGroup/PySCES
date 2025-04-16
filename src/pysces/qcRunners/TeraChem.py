@@ -7,6 +7,7 @@ from tcpb import terachem_server_pb2 as pb
 from pysces.input_simulation import logging_dir, TCRunnerOptions
 from pysces.common import PhaseVars, QCRunner
 from pysces.h5file import H5File, H5Dataset, H5Group, h5py
+from pysces.qcRunners.LoadBalancing import balance_tasks_optimum, TaskTimes, ESDerivTasks
 
 from datetime import datetime
 import functools
@@ -23,8 +24,6 @@ import psutil
 import concurrent.futures
 import copy
 import pickle
-import json
-from copy import deepcopy
 from typing import Literal
 import itertools
 from collections import deque
@@ -964,7 +963,13 @@ class TCRunner(QCRunner):
 
         #   use condensed jobs
         self._combine_jobs = False
+
+        #   load balancing
+        self._task_benchmarks = self._get_default_task_benchmarks()
         
+    def _get_default_task_benchmarks(self):
+        task_times = TaskTimes(GS_grad=0.23, EX_grad=2.22, GS_EX_NAC=2.01, EX_EX_NAC=3.22, GS_dipole=6.93, EX_dipole=46.07, GS_EX_dipole=39.32)
+        return [task_times for _ in range(len(self._client_list))]
 
     def _prepare_server_info(self):
         """Ensure server roots are valid paths and check server configuration."""
@@ -1451,6 +1456,21 @@ class TCRunner(QCRunner):
             raise NotImplementedError('Interpolation of gradients and NACs is not yet implemented')
 
     def create_jobs(self, geom, energy_only = False, grads = [], nacs = []):
+        if self._combine_jobs:
+            return self._create_jobs_bulk(geom, energy_only, grads, nacs)
+        else:
+            return self._create_jobs_singles(geom, energy_only, grads, nacs)
+
+    def _create_jobs_bulk(self, geom, energy_only = False, grads: list[int]=[], nacs: list[int, int]=[], dipoles: list[int]=[], tr_dipoles: list[int, int]=[]):
+        
+        es_tasks = ESDerivTasks(grads, nacs, dipoles, tr_dipoles)
+        assignments = balance_tasks_optimum(self._task_benchmarks, es_tasks, len(self._client_list))
+        
+
+        raise NotImplementedError('create_jobs_bulk() not supported yet')
+        
+
+    def _create_jobs_singles(self, geom, energy_only = False, grads = [], nacs = []):
         job_batch = TCJobBatch()
 
         #   frame specific job options
@@ -1567,6 +1587,40 @@ class TCRunner(QCRunner):
             print("APPENDING DEBUG TRAJ ", jobs_batch)
             jobs_batch._remove_clients()
             self._debug_traj.append(jobs_batch)
+
+    def _assign_jobs_by_request(self, jobs_batch: TCJobBatch):
+        all_job_names = [j.name for j in jobs_batch.jobs]
+        clients_IDs_for_other = []
+
+        #   assign clients specified in the client_assignments
+        for i, names in enumerate(self._tc_client_assignments):
+            names_list = names.copy()
+            if 'other' in names_list:
+                clients_IDs_for_other.append(i)
+                names_list.remove('other')
+
+            sub_jobs = jobs_batch.get_by_name(names_list)
+            sub_jobs.set_client(self._client_list[i])
+            for name in names_list:
+                if name in all_job_names:
+                    all_job_names.remove(name)
+
+        #   everything else gets assigned to the 'other' clients
+        if len(clients_IDs_for_other) > 0:
+            n_other_clients = len(clients_IDs_for_other)
+            for i, name in enumerate(all_job_names):
+                sub_batch = jobs_batch.get_by_name(name)
+                client_id = clients_IDs_for_other[i % n_other_clients]
+                client = self._client_list[client_id]
+                sub_batch.set_client(client)
+
+    def assign_clients_load_balancing(self, jobs_batch: TCJobBatch):
+        pass
+
+    def _assign_clients_equally(self, jobs_batch: TCJobBatch):
+        n_clients = len(self._client_list)
+        for j in jobs_batch.jobs:
+            j.client = self._client_list[j.jobID % n_clients]
     
     def _send_jobs_to_clients(self, jobs_batch: TCJobBatch):
 
@@ -1575,46 +1629,17 @@ class TCRunner(QCRunner):
         if debug_batch is not None: 
             return debug_batch
  
-
-        n_clients = len(self._client_list)
         if len(self._tc_client_assignments) > 0:
-            all_job_names = [j.name for j in jobs_batch.jobs]
-            clients_IDs_for_other = []
-
-            #   assign clients specified in the client_assignments
-            
-            for i, names in enumerate(self._tc_client_assignments):
-                names_list = names.copy()
-                if 'other' in names_list:
-                    clients_IDs_for_other.append(i)
-                    names_list.remove('other')
-
-                sub_jobs = jobs_batch.get_by_name(names_list)
-                sub_jobs.set_client(self._client_list[i])
-                for name in names_list:
-                    if name in all_job_names:
-                        all_job_names.remove(name)
-
-            #   everything else gets assigned to the 'other' clients
-            if len(clients_IDs_for_other) > 0:
-                n_other_clients = len(clients_IDs_for_other)
-                for i, name in enumerate(all_job_names):
-                    sub_batch = jobs_batch.get_by_name(name)
-                    client_id = clients_IDs_for_other[i % n_other_clients]
-                    client = self._client_list[client_id]
-                    sub_batch.set_client(client)
-
+            self._assign_jobs_by_request(jobs_batch)
         else:
-            #   equally distribute jobs among clients
-            for j in jobs_batch.jobs:
-                j.client = self._client_list[j.jobID % n_clients]
+            self._assign_clients_equally(jobs_batch)
 
 
         if not jobs_batch.check_client():
             raise ValueError('Not all jobs have been assigned a client')
 
         #   if only one client is being used, don't open up threads, easier to debug
-        if n_clients == 1:
+        if len(self._client_list) == 1:
             jobs_batch.jobs[0].client = self._client_list[0]
             _run_batch_jobs(jobs_batch)
 
