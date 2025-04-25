@@ -483,52 +483,58 @@ def update_geo_gamess(atom_symbols, amu_mat, qCart):
     return()
 
 
-########################################################
-### Write GAMESS CASSCF NACME calculation input file ###
-########################################################
+################################
+### Write GAMESS input file  ###
+################################
 def write_gms_input(input_name, opt, atoms, AN_mat, cart_ang):
+    """
+    Write GAMESS input file
+    """
     input_file = input_name + '.inp'
     if os.path.exists(os.path.join(__location__, input_file)) == True:
         os.system('mv ' + input_file + ' ' + input_name + '_old.inp')
         f = open(os.path.join(__location__, input_file), 'w')
     else:
         f = open(os.path.join(__location__, input_file), 'w')
-    
-    f.write(' $system mwords=%d memddi=%d' %(opt['mwords'],opt['memddi']) +' parall='+opt['parall']+' $end \n')
-    f.write(' $contrl exetyp='+opt['exetyp']+' runtyp='+opt['runtyp']+' scftyp='+opt['scftyp']+' dfttyp='+opt['dfttyp']+' \n')
-    f.write('         units='+opt['units']+' mult=%d mplevl=%d ispher=%d maxit=%d' %(opt['mult'],opt['mplevl'],opt['ispher'],opt['maxit']) +' \n')
-    f.write('         inttyp='+opt['inttyp']+' nosym=%d nprint=%d' %(opt['nosym'],opt['nprint']) +' $end \n')
-    f.write(' $basis  gbasis='+opt['gbasis']+' ngauss=%d ndfunc=%d' %(opt['ngauss'],opt['ndfunc']) +' diffsp='+opt['diffsp']+' $end \n')
-    f.write(' $scf    conv='+opt['conv']+' dirscf='+opt['dirscf']+' soscf='+opt['soscf']+' \n')
-    f.write('         diis='+opt['diis']+' ethrsh=%d' %opt['ethrsh'] +' $end \n')
-    f.write(' $mcscf  cistep='+opt['cistep']+' diabat='+opt['diabat']+' soscf='+opt['soscf']+' fullnr='+opt['fullnr']+' fors='+opt['fors']+'\n')
-    f.write('         finci='+opt['finci']+' acurcy='+opt['acurcy']+' maxit=%d' %opt['maxit'] +' $end \n')
-    f.write(' $det    ncore=%d nstate=%d' %(opt['ncore'],opt['nstate']) +' pures='+opt['pures']+' nact=%d nels=%d' %(opt['nact'],opt['nels']) +' \n')
-    f.write('         iroot=%d' %opt['iroot'] +' wstate(1)='+opt['wstate']+' itermx=%d' %opt['itermx'] +' $end \n')
-    f.write(' $cpmchf gcro='+opt['gcro']+' micit=%d kicit=%d' %(opt['micit'],opt['kicit']) +' prcchg='+opt['prcchg']+' prctol=%.1f' %opt['prctol'] +' \n')
-    f.write('         napick='+opt['napick']+' nacst(1)='+opt['nacst']+' $end \n')
-    if opt.get('guess', '') != '':
-        f.write(' $guess  guess='+opt['guess']+' norb=%d' %opt['norb'] +' $end \n')
+
+    cards = list(opt.keys())
+    for card in cards:
+        if card != 'data':
+            if opt[card] != '':
+                variables = list(opt[card].keys())
+                line = ''
+                nvar = 0
+                for var in variables:
+                    nvar += 1
+                    line += '{:s}={:s} '.format(var, opt[card][var])
+                    if nvar == 4:
+                        f.write(' ${:s} '.format(card) + line + ' $end\n')
+                        nvar = 0
+                        line = ''
+                    elif var == variables[-1]:
+                        f.write(' ${:s} '.format(card) + line + ' $end\n')
+
     f.write(' $data \n')
-    f.write('comment comment comment \n')
-    f.write(opt['sym']+' \n')
+    f.write("Always blame ab initio calculations, not the dynamcis code I wrote ;) \n")
+    f.write(opt['data']['sym']+' \n')
     for i in range(natom):
         f.write('{:<3s}{:<6.1f}{:>12.5f}{:>12.5f}{:>12.5f}\n'.format(atoms[i], AN_mat[3*i,3*i], cart_ang[3*i+0], cart_ang[3*i+1], cart_ang[3*i+2]))
     f.write(' $end \n')
-    
+
     # Read and write guess orbitals 
-    g = open(os.path.join(__location__, 'vec_gamess'), 'r')
-    copy = False
-    for line in g:
-        if line.strip() == '$VEC':
-            copy = True
-        if copy:
-            f.write(line)
-        if line.strip() == '$END':
-            copy = False
-    g.close()
+    if opt.get('guess', '') != '':
+        g = open(os.path.join(__location__, 'vec_gamess'), 'r')
+        copy = False
+        for line in g:
+            if line.strip() == '$VEC':
+                copy = True
+            if copy:
+                f.write(line)
+            if line.strip() == '$END':
+                copy = False
+        g.close()
     f.close()
-    
+
     return input_file
 
 
