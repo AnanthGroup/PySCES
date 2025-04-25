@@ -20,7 +20,7 @@ import random
 import pandas
 import time
 from input_simulation import * 
-from input_gamess import nacme_option as opt 
+from input_gamess import option as opt 
 from fileIO import SimulationLogger, write_restart, read_restart
 # __location__ = os.path.realpath(os.path.join(os.getcwd(), os.path.dirname(__file__)))
 __location__ = ''
