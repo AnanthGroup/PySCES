@@ -165,14 +165,17 @@ def main():
                 print('an unphysical radius of sampling. Use "sc" option instead.\n')
                 exit()
             coord = sample_wignerLSC(normal_geo, frq)
+            compute_CF = compute_CF_wigner
         elif sampling == 'sc':
             coord = sample_scLSC(normal_geo, frq)
+            compute_CF = compute_CF_sc
         elif sampling == 'spin':
             if nel != 3:
                 print('WARNING: Spin mapping population estimator with nel being other than 3\n')
                 print('is not implemented. Use "wigner" or "sc" option instead.\n')
                 exit()
             coord = sample_spinLSC(normal_geo, frq)
+            compute_CF = compute_CF_spin
         
         initq = coord[0,:] # A.U.
         initp = coord[1,:] # A.U.
