@@ -2011,16 +2011,14 @@ def compute_anisotropy_correlation(D0, Dt):
     D0 : Transition dipole moment at initial time
     Dt : Transition dipole moment at time t
     '''
-    ### Compute the estimator of electronic state population ###
-    aniso_file = 'anisotropy.out'
-
-    with open(os.path.join(__location__, aniso_file), 'a') as f:
-        # Compute the angle between the initial and the present dipole moment
-        cosine = np.dot(D0, Dt)/(np.linalg.norm(D0) * np.linalg.norm(Dt))
-        # The common term for all electronic state projection operators
-        anisotropy = (3.0 * cosine**2 - 1) / 5
-        f.write('{:<12.6f} \n'.format(anisotropy))
-    return()
+    if Dt is not None:
+        with open(os.path.join(__location__, 'anisotropy.out'), 'a') as f:
+            # Compute the angle between the initial and the present dipole moment
+            cosine = np.dot(D0, Dt)/(np.linalg.norm(D0) * np.linalg.norm(Dt))
+            # The common term for all electronic state projection operators
+            anisotropy = (3.0 * cosine**2 - 1) / 5
+            f.write('{:<12.6f} \n'.format(anisotropy))
+        return()
     
 '''
 Check which sign for the nac is expected and correct artificial sign flips
