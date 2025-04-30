@@ -1802,6 +1802,7 @@ def rk4(initq, initp, tStop, H, restart, amu_mat, U, com_ang, AN_mat):
 
     return(np.array(X), coord, initial_time)
 
+
 def compute_CF_single(q, p):
    ### Compute the estimator of electronic state population ###
    pop = np.zeros(nel)
@@ -1812,6 +1813,7 @@ def compute_CF_single(q, p):
         pop[i] = common_TCF * final_state_TCF
 
    return pop
+
 
 def compute_CF_wigner(X, Y):
    '''
@@ -1845,6 +1847,68 @@ def compute_CF_wigner(X, Y):
                if t != 0:
                    f.write(total_format.format(X[t], sum(pop[:,t]), *pop[:,t]))
    return()
+
+
+def compute_CF_sc(X, Y):
+    '''
+    Function to compute electronic population correlation function after
+    trajectory propagation for Semiclassical (SC) population estimator.
+    X = time array
+    Y = coordinate array
+    '''
+    ### Compute the estimator of electronic state population ###
+    pop = np.zeros((nel, len(X)))
+    total_format = '{:>12.4f}'
+    for i in range(nel+1):
+        total_format += '{:>16.10f}'
+    total_format += '\n'
+    corr_file = 'corr.out'
+
+    with open(os.path.join(__location__, corr_file), 'a') as f:
+        for t in range(len(X)):
+            for i in range(nel):
+                pop[i,t] += 0.5 * (Y[0,i,t]**2 + Y[1,i,t]**2 - 1)
+
+            if restart == 0:
+                f.write(total_format.format(X[t], sum(pop[:,t]), *pop[:,t]))
+            elif restart == 1:
+                if t != 0:
+                    f.write(total_format.format(X[t], sum(pop[:,t]), *pop[:,t]))
+    return()
+
+
+def compute_CF_spin(X, Y):
+    '''
+    Function to compute electronic population correlation function after
+    trajectory propagation for Spin-Mapping (SM) population estimator.
+    ### Only the case with 3 electronic states is implemented ###
+    X = time array
+    Y = coordinate array
+    '''
+    ### Compute the estimator of electronic state population ###
+    pop = np.zeros((nel, len(X)))
+    total_format = '{:>12.4f}'
+    for i in range(nel+1):
+        total_format += '{:>16.10f}'
+    total_format += '\n'
+    corr_file = 'corr.out'
+
+    with open(os.path.join(__location__, corr_file), 'a') as f:
+        for t in range(len(X)):
+            R0 = Y[0,0,t]**2 + Y[1,0,t]**2
+            R1 = Y[0,1,t]**2 + Y[1,1,t]**2
+            R2 = Y[0,2,t]**2 + Y[1,2,t]**2
+            pop[0, t] += (1/3) + (2*R0 - R1 - R2) / 6
+            pop[1, t] += (1/3) - (R0 - 2*R1 + R2) / 6
+            pop[2, t] += (1/3) - (R0 + R1 - 2*R2) / 6
+
+            if restart == 0:
+                f.write(total_format.format(X[t], sum(pop[:,t]), *pop[:,t]))
+            elif restart == 1:
+                if t != 0:
+                    f.write(total_format.format(X[t], sum(pop[:,t]), *pop[:,t]))
+    return()
+
 
 def compute_anisotropy_correlation(D0, Dt):
     '''
