@@ -597,56 +597,113 @@ def run_gms_cas(input_name, opt, atoms, AN_mat, qCart, submit_script_loc=None):
     return()
 
 
-###############################################
-### Read GAMESS NACME calculation .out file ###
-###############################################
 def read_gms_out(input_name):
+    """
+    Read GAMESS output file for the electronic state energies, 
+    the energy gradients, NACME, and the transition dipole moment
+    """
     flag_grad = np.ones(nel)
-    flag_nac = 1
-    grad_exist = np.zeros(nel)
+    flag_dip  = 1
+    flag_nac  = 1
     nac = np.zeros((nel, nel, nnuc))
+    grad_exist = np.zeros(nel)
     energy = np.zeros(nel)
     gradient = np.zeros((nel, nnuc))
     out_file = input_name + '.out'
-    
+    out = {} # dict of outputs
+
+    nrow = 3*natom / 5
+    if nrow % 1 > 0:
+        nrow = int(np.ceil(nrow))
+    else:
+        nrow = int(nrow)
     with open(os.path.join(__location__, out_file), 'r') as f:
         for line in f:
-            for i, elab_idx in enumerate(elab):
-                if 'STATE-SPECIFIC GRADIENT OF STATE   ' + str(elab_idx) in line:
-                    flag_grad[i] = 0
-                    x = f.readline().split()
-                    energy[i] = float(x[1])
-                        
-                    [f.readline() for k in range(2)]
-                        
-                    for j in range(natom):
-                        x = f.readline().split()
-                        for k in range(3):
-                            gradient[i,3*j+k] = float(x[2+k])
-                            
-            if 'NONADIABATIC COUPLING MATRIX ELEMENT' in line:
+            if len(elab) == 1:
                 flag_nac = 0
-                x = f.readline()
-                for i in range(nel-1):
-                    j = i + 1
-                    while j < nel:
-                        if 'STATE  ' + str(elab[j]) in x:
-                            if 'STATE  ' + str(elab[i]) in x:
-                                f.readline()
-                                for k in range(natom):
-                                    x = f.readline().split()
-                                    for l in range(3):
-                                        nac[j,i,3*k+l] = float(x[2+l])
-                        nac[i,j,:] = -nac[j,i,:]
-                        j += 1
-    
-    if any([el == 1 for el in flag_grad]):
+                if 'TRANSITION DIPOLE' in line:
+                    flag_dip = 0
+                    f.readline()
+                    for i in range(elab[0]):
+                        f.readline()
+                    x = f.readline().split()[4:7]
+
+                    out['dip'] = [float(k) for k in x]
+                    out['flag_dip'] = flag_dip
+
+                if '$VIB' in line:
+                    flag_grad[0] = 0
+                    x = f.readline().split()
+                    energy[0] = float(x[-1])
+                    out['elecE'] = energy
+
+                    for irow in range(nrow):
+                        if irow == nrow-1:
+                            nval = (3*natom) % 5
+                        else:
+                            nval = 5
+                        x = f.readline()[1:]
+                        x = [x[i:i+16] for i in range(0, len(x), 16)]
+                        for k in range(nval):
+                            gradient[0, 5*irow+k] = float(x[k])
+
+                    out['gradient'] = gradient
+                    out['flag_grad'] = flag_grad
+                out['flag_nac'] = 0
+                out['nac'] = nac
+
+            elif len(elab) > 1:
+                for i, elab_idx in enumerate(elab):
+                    if 'STATE-SPECIFIC GRADIENT OF STATE   ' + str(elab_idx) in line:
+                        flag_grad[i] = 0
+                        x = f.readline().split()
+                        energy[i] = float(x[1])
+
+                        [f.readline() for k in range(2)]
+
+                        for j in range(natom):
+                            x = f.readline().split()
+                            for k in range(3):
+                                gradient[i,3*j+k] = float(x[2+k])
+
+                out['elecE'] = energy
+                out['gradient'] = gradient
+                out['flag_grad'] = flag_grad
+                out['dip'] = np.zeros(nel)
+                out['flag_dip'] = 0
+
+                if 'NONADIABATIC COUPLING MATRIX ELEMENT' in line:
+                    flag_nac = 0
+                    x = f.readline()
+                    for i in range(nel-1):
+                        j = i + 1
+                        while j < nel:
+                            if 'STATE  ' + str(elab[j]) in x:
+                                if 'STATE  ' + str(elab[i]) in x:
+                                    f.readline()
+                                    for k in range(natom):
+                                        x = f.readline().split()
+                                        for l in range(3):
+                                            nac[j,i,3*k+l] = float(x[2+l])
+                            nac[i,j,:] = -nac[j,i,:]
+                            j += 1
+
+                    out['nac'] = nac
+                    out['flag_nac'] = flag_nac
+
+    if any([el == 1 for el in out['flag_grad']]):
         with open(os.path.join(__location__, 'progress.out'), 'a') as f:
-            f.write('Error: State-specific gradients not found in .out. \n')
+            f.write('Error: Gradient of energy not found in .out \n')
+    if out['flag_dip'] == 1:
+        with open(os.path.join(__location__, 'progress.out'), 'a') as f:
+            f.write('Error: Transition dipole not found in .out \n')
     if flag_nac == 1:
         with open(os.path.join(__location__, 'progress.out'), 'a') as f:
             f.write('Error: Non-adiabatic couplings not found in .out. \n')
-    return(energy, gradient, nac, flag_grad, flag_nac)
+    if nel == 1:
+        with open(os.path.join(__location__, 'transition_dipole.out'), 'a') as f:
+            f.write('{:<12.6f}{:<12.6f}{:<12.6f}\n'.format(*out['dip']))
+    return(out)
 
 
 ###############################################
