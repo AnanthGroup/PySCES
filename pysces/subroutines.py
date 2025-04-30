@@ -1562,16 +1562,17 @@ def scipy_rk4(elecE, grad, nac, yvar, dt, au_mas):
     result = it.solve_ivp(get_deriv, (0,dt), yvar, method='RK45', max_step=dt, t_eval=[dt], rtol=1e-10, atol=1e-10)
     return(result.y.flatten())
 
-'''
-Main driver of RK4 and electronic structure 
-'''
+
 def rk4(initq, initp, tStop, H, restart, amu_mat, U, com_ang, AN_mat):
+    """
+    Main driver of RK4 and electronic structure 
+    """
     logger = SimulationLogger(nel, dir=logging_dir, save_jobs=tcr_log_jobs)
 
     if QC_RUNNER == 'terachem':
         from qcRunners.TeraChem import TCRunner, format_output_LSCIVR
         logger.state_labels = [f'S{x}' for x in tcr_state_options['grads']]
-    
+
     trans_dips = None
     job_results = {}
     qc_timings = {}
@@ -1585,13 +1586,12 @@ def rk4(initq, initp, tStop, H, restart, amu_mat, U, com_ang, AN_mat):
             total_format += '{:>12.5f}' # "elec1" "elec2" ...
     total_format += '\n'
 
-    #   very first step does not need a GAMESS guess
-    opt['guess'] = ''
-
     # History length for nonadiabatic coupling vector and transition dipole moments
     hist_length = 2 #this is the only implemented length
 
+    #########################################
     ### Initial-time property calculation ###
+    #########################################
     with open(os.path.join(__location__, 'progress.out'), 'a') as f:
         f.write("Initial property evaluation started.\n")
     if restart == 0:
@@ -1617,11 +1617,22 @@ def rk4(initq, initp, tStop, H, restart, amu_mat, U, com_ang, AN_mat):
         if QC_RUNNER == 'gamess':
             # Update geo_gamess with qC
             update_geo_gamess(atoms, AN_mat, qC)
-        
-            # Call GAMESS to compute E, dE/dR, and NAC
+
+            # Call GAMESS to compute E, dE/dR, transition dipole, and NAC
             run_gms_cas(input_name, opt, atoms, AN_mat, qC, sub_script)
-            elecE, grad, nac, flag_grad, flag_nac = read_gms_out(input_name)
-            if any([el == 1  for el in flag_grad]) or flag_nac == 1:
+            ESvar = read_gms_out(input_name)
+            elecE     = ESvar['elecE']
+            grad      = ESvar['gradient']
+            flag_grad = ESvar['flag_grad']
+            nac       = ESvar['nac']
+            flag_nac  = ESvar['flag_nac']
+            dip       = ESvar['dip']
+            flag_dip  = ESvar['flag_dip']
+
+            # Transition dipole moment at t=0
+            d0 = dip
+
+            if any([el == 1  for el in flag_grad]) or flag_nac == 1 or flag_dip == 1:
                 proceed = False
             flag_orb = read_gms_dat(input_name)
             if flag_orb == 1:
@@ -1642,15 +1653,18 @@ def rk4(initq, initp, tStop, H, restart, amu_mat, U, com_ang, AN_mat):
         # with open(os.path.join(__location__, 'energy.out'), 'a') as g:
         #     g.write(total_format.format(t, init_energy, *elecE))
 
-        # Create nac history for sign-flip extrapolation
-        for it in range(0,hist_length):
-            nac_hist[:,:,:,it] = nac
-            if trans_dips is not None:
-                tdm_hist[:,:,:,it] = trans_dips
-   
-    elif restart == 1:
-        opt['guess'] = 'moread'
+        # Anisotropy
+        compute_anisotropy_correlation(d0, dip)
 
+        # Create nac history for sign-flip extrapolation
+        if nac is not None:
+            for it in range(0, hist_length):
+                nac_hist[:,:,:,it] = nac
+                if trans_dips is not None:
+                    tdm_hist[:,:,:,it] = trans_dips
+
+    elif restart == 1:
+        # With GAMESS, initial NAC and transition dipole are not read in 
         q, p, nac_hist, tdm_hist, init_energy, initial_time = read_restart(file_loc=restart_file_in, ndof=ndof)
         t = initial_time
 
@@ -1675,8 +1689,8 @@ def rk4(initq, initp, tStop, H, restart, amu_mat, U, com_ang, AN_mat):
         #        flat_nac_hist = [float(num) for num in ff.readline().strip().split()]  
         #        nac_hist = np.array(flat_nac_hist).reshape(nac_hist_shape)  
         #        print("nac_hist",nac_hist)
-                
-    
+
+
         qC, pC = q[nel:], p[nel:]
         y = np.concatenate((q, p))
 
@@ -1688,8 +1702,16 @@ def rk4(initq, initp, tStop, H, restart, amu_mat, U, com_ang, AN_mat):
         if QC_RUNNER == 'gamess':
             # Call GAMESS to compute E, dE/dR, and NAC
             run_gms_cas(input_name, opt, atoms, AN_mat, qC, sub_script)
-            elecE, grad, nac, flag_grad, flag_nac = read_gms_out(input_name)
-            if any([el == 1  for el in flag_grad]) or flag_nac == 1:
+            ESvar = read_gms_out(input_name)
+            elecE     = ESvar['elecE']
+            grad      = ESvar['gradient']
+            flag_grad = ESvar['flag_grad']
+            nac       = ESvar['nac']
+            flag_nac  = ESvar['flag_nac']
+            dip       = ESvar['dip']
+            flag_dip  = ESvar['flag_dip']
+
+            if any([el == 1  for el in flag_grad]) or flag_nac == 1 or flag_dip == 1:
                 proceed = False
             flag_orb = read_gms_dat(input_name)
             if flag_orb == 1:
@@ -1702,40 +1724,44 @@ def rk4(initq, initp, tStop, H, restart, amu_mat, U, com_ang, AN_mat):
             # import json
             # json.dump(tc_runner.cleanup_multiple_jobs(job_results), open('tmp.json', 'w'), indent=4)
             elecE, grad, nac, trans_dips  = format_output_LSCIVR(job_results)
-        
+
         # If nac_hist and tdm_hist array does not exist yet, create it as zeros array
         if nac_hist.size == 0:
-            nac_hist = np.zeros((nel,nel,nnuc,hist_length))
-            # fill array with current nac
-            for it in range(0,hist_length):
-                nac_hist[:,:,:,it] = nac
+            if nac is not None:
+                nac_hist = np.zeros((nel,nel,nnuc,hist_length))
+                # fill array with current nac
+                for it in range(0,hist_length):
+                    nac_hist[:,:,:,it] = nac
         if tdm_hist.size == 0:
             tdm_hist = np.zeros((nel,nel,3,hist_length))
             # fill array with current tdm (if available)
             if trans_dips is not None:
                 for it in range(0,hist_length):
                     tdm_hist[:,:,:,it] = trans_dips
-        
-        nac, nac_hist, tdm_hist = correct_nac_sign(nac,nac_hist,trans_dips,tdm_hist)
+
+        if nac is not None:
+            nac, nac_hist, tdm_hist = correct_nac_sign(nac,nac_hist,trans_dips,tdm_hist)
 
     # pops = compute_CF_single(q[0:nel], p[0:nel])
     logger.atoms = atoms
     qc_timings['Wall_Time'] = 0.0
     logger.write(t, init_energy, elecE,  grad, nac, qc_timings, elec_p=p[0:nel], elec_q=q[0:nel], nuc_p=p[nel:], jobs_data=job_results)
 
-    opt['guess'] = 'moread'
     X,Y = [],[]
     X.append(t)
     Y.append(y)
     flag_energy = 0
     flag_grad   = 0
     flag_nac    = 0
+    flag_dip    = 0
     flag_orb    = 0
     energy      = [init_energy]
     with open(os.path.join(__location__, 'progress.out'), 'a') as f:
         f.write("Initilization done. Move on to propagation routine.\n")
 
+    ###########################
     ### Runge-Kutta routine ###
+    ###########################
     while t < tStop:
         start_time = time.time()
         if not proceed:
@@ -1746,13 +1772,13 @@ def rk4(initq, initp, tStop, H, restart, amu_mat, U, com_ang, AN_mat):
                 f.write('\n')
                 f.write('Starting 4th-order Runge-Kutta routine.\n')
             #y  = integrate_rk4(elecE,grad,nac,t,y,t+H,amu_mat) 
-            y  = scipy_rk4(elecE,grad,nac,y,H,au_mas)
+            y  = scipy_rk4(elecE, grad, nac, y, H, au_mas)
             t += H
             X.append(t)
             Y.append(y)
-            
+
             print(f"##### Performing MD Step Time: {t:8.2f} a.u. ##### ")
-    
+
             # ES calculation at new y
             with open(os.path.join(__location__, 'progress.out'), 'a') as f:
                 f.write('\n')
@@ -1763,8 +1789,16 @@ def rk4(initq, initp, tStop, H, restart, amu_mat, U, com_ang, AN_mat):
             if QC_RUNNER == 'gamess':
                 update_geo_gamess(atoms, AN_mat, qC)
                 run_gms_cas(input_name, opt, atoms, AN_mat, qC, sub_script)
-                elecE, grad, nac, flag_grad, flag_nac = read_gms_out(input_name)
-                if any([el == 1 for el in flag_grad]) or flag_nac == 1:
+                ESvar = read_gms_out(input_name)
+                elecE     = ESvar['elecE']
+                grad      = ESvar['gradient']
+                flag_grad = ESvar['flag_grad']
+                nac       = ESvar['nac']
+                flag_nac  = ESvar['flag_nac']
+                dip       = ESvar['dip']
+                flag_dip  = ESvar['flag_dip']
+
+                if any([el == 1 for el in flag_grad]) or flag_nac == 1 or flag_dip == 1:
                     proceed = False
                 flag_orb = read_gms_dat(input_name)
                 if flag_orb == 1:
@@ -1797,6 +1831,9 @@ def rk4(initq, initp, tStop, H, restart, amu_mat, U, com_ang, AN_mat):
             # Record the electronic state energies
             # with open(os.path.join(__location__, 'energy.out'), 'a') as g:
             #     g.write(total_format.format(t, new_energy, *elecE))
+
+            # Anisotropy
+            compute_anisotropy_correlation(d0, dip)
 
             #   New logging information
             # pops = compute_CF_single(y[0:nel], y[ndof:ndof+nel])
