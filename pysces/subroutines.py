@@ -1813,14 +1813,13 @@ def compute_CF_single(q, p):
 
    return pop
 
-
-'''
-Function to compute electronic population correlation function after
-trajectory propagation.
-X = time array
-Y = coordinate array
-'''
-def compute_CF(X, Y):
+def compute_CF_wigner(X, Y):
+   '''
+   Function to compute electronic population correlation function after
+   trajectory propagation for Wigner population estimator.
+   X = time array
+   Y = coordinate array
+   '''
    ### Compute the estimator of electronic state population ###
    pop = np.zeros((nel, len(X)))
    total_format = '{:>12.4f}'
@@ -1834,18 +1833,17 @@ def compute_CF(X, Y):
            # The common term for all electronic state projection operators
            common_TCF = 2**(nel+1) * np.exp(-np.dot(Y[0,:nel,t], Y[0,:nel,t])\
                                          -np.dot(Y[1,:nel,t], Y[1,:nel,t]))
-           
+
            # The specific term for each final electronic state projection operator
            for i in range(nel):
                final_state_TCF = Y[0,i,t]**2 + Y[1,i,t]**2 - 0.5
                pop[i,t] += common_TCF * final_state_TCF
-   
-           if restart == 0:                
-              f.write(total_format.format(X[t], sum(pop[:,t]), *pop[:,t]))
-           elif restart == 1:
-              if t != 0:
-                 f.write(total_format.format(X[t], sum(pop[:,t]), *pop[:,t]))
 
+           if restart == 0:
+               f.write(total_format.format(X[t], sum(pop[:,t]), *pop[:,t]))
+           elif restart == 1:
+               if t != 0:
+                   f.write(total_format.format(X[t], sum(pop[:,t]), *pop[:,t]))
    return()
 
 def compute_anisotropy_correlation(D0, Dt):
