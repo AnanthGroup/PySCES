@@ -148,10 +148,14 @@ def main():
     ###################################
     ### Propagation of a trajectory ###
     ###################################
-    if opts.QC_RUNNER.casefold() == 'gamess' and nel > 1 and gms['contrl']['runtyp'].casefold() != 'nacme':
-        print('SETUP ERROR: A nonadiabatic run (nel > 1) using GAMESS is requested without calling NACME.')
-        print('Check the GAMESS input and make sure to call NACME via runtyp=nacme.')
-        exit()
+    if opts.QC_RUNNER.casefold() == 'gamess':
+        if opts.nel > 1 and gms['contrl']['runtyp'].casefold() != 'nacme':
+            print('SETUP ERROR: A nonadiabatic run (nel > 1) using GAMESS is requested without calling NACME.')
+            print('Check the GAMESS input and make sure to call NACME via runtyp=nacme.')
+            exit()
+        if opts.nel == 1 and len(opts.elab) > 1:
+            print("WARNING: 'elab' in input_simulation specifies more than one electronic state while nel = 1.")
+            print('Only the first entry is considered in this simulation.')
         
     ndof = 3*natom + nel
     initq, initp = np.zeros(ndof-6), np.zeros(ndof-6)
