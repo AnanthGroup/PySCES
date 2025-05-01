@@ -13,7 +13,7 @@ Main code to run LSC-IVR dynamics
 import os
 import numpy as np
 import pandas
-from input_gamess import * 
+from input_gamess import option as gms 
 from subroutines import *
 from fileIO import print_ascii_art
 # __location__ = os.path.realpath(os.path.join(os.getcwd(), os.path.dirname(__file__)))
@@ -148,6 +148,11 @@ def main():
     ###################################
     ### Propagation of a trajectory ###
     ###################################
+    if opts.QC_RUNNER.casefold() == 'gamess' and nel > 1 and gms['contrl']['runtyp'].casefold() != 'nacme':
+        print('SETUP ERROR: A nonadiabatic run (nel > 1) using GAMESS is requested without calling NACME.')
+        print('Check the GAMESS input and make sure to call NACME via runtyp=nacme.')
+        exit()
+        
     ndof = 3*natom + nel
     initq, initp = np.zeros(ndof-6), np.zeros(ndof-6)
 
