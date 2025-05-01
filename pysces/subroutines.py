@@ -563,28 +563,28 @@ def write_subm_script(input_name):
     return()
     
 
-#####################################
-### Call GAMESS NACME calculation ###
-#####################################
 def run_gms_cas(input_name, opt, atoms, AN_mat, qCart, submit_script_loc=None):
+    """
+    Submit GAMESS job
+    """
     # Convert Bohr into Angstrom
     qCart_ang = qCart/ang2bohr
-    
+
     # Write an input file
     input_file = write_gms_input(input_name, opt, atoms, AN_mat, qCart_ang)
-    
+
     if submit_script_loc is None:
         # Write a submission script
         write_subm_script(input_name)
-        
+
         # change # ppn per node in 'rungms-pool' script
         with open(os.path.join(__location__, 'rungms-pool'), 'r') as g:
             all_lines = g.readlines()
             all_lines[509] = "      @ NSMPCPU = %d \n" %(ncpu)
-                
+
         # Change the mode of submission script
         sp.run(['chmod', '777', 'run_%s' %input_name])
-        
+
         # Submit the bash submission script to execute GAMESS
         sp.call('./run_%s' %input_name)
     else:
@@ -592,7 +592,7 @@ def run_gms_cas(input_name, opt, atoms, AN_mat, qCart, submit_script_loc=None):
         output_file = 'cas.out'
         script_loc = os.path.abspath(submit_script_loc)
         sp.call(f'{script_loc} {input_file} {output_file}'.split())
-    print("Done running GAMESS CAS-SCF Calculations")
+    print("Done running GAMESS.")
 
     return()
 
