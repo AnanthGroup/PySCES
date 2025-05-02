@@ -30,7 +30,7 @@ timestep, nstep = 1.0, 16700
 # Maximum propagation time (a.u.), BSH step to be tried (a.u.), error tolerance (ratio) (Only relevant for BSH)
 tmax_bsh, Hbsh, tol = 10, 3.0, 0.01 
 # Maximum propagation time (a.u.), one Runge-Kutta step (a.u.) (Only relevant for RK4)
-tmax_rk4, Hrk4 = 20, 5.0 
+tmax_rk4, Hrk4 = 60, 5.0 
 
 # Scaling factor of normal mode frequencies
 frq_scale = 1.0
@@ -42,10 +42,10 @@ ncpu, nnode = 1, 1
 partition = 'astra'
 
 # Indices of electronic states for which NACME to be read from GAMESS output file
-elab = [1, 2, 3]
+elab = [1]
 
 # Index of initially occupied electronic state
-init_state = 2
+init_state = 1
 
 # Restart request: 0 = no restart, 1 = restart
 restart = 0
