@@ -153,9 +153,13 @@ def main():
             print('SETUP ERROR: A nonadiabatic run (nel > 1) using GAMESS is requested without calling NACME.')
             print('Check the GAMESS input and make sure to call NACME via runtyp=nacme.')
             exit()
-        if opts.nel == 1 and len(opts.elab) > 1:
-            print("WARNING: 'elab' in input_simulation specifies more than one electronic state while nel = 1.")
-            print('Only the first entry is considered in this simulation.')
+        if len(opts.elab) > opts.nel:
+            print("WARNING: 'elab' in input_simulation specifies more electronic states than nel.")
+            print('Only the first nel entries are considered in this simulation.')
+        if len(opts.elab) < opts.nel:
+            print("SETUP ERROR: 'elab' in input_simulation must have as many electronic state labels as nel")
+            print("but not enough electronic states are specified in 'elab'.")
+            exit()
         
     ndof = 3*natom + nel
     initq, initp = np.zeros(ndof-6), np.zeros(ndof-6)
