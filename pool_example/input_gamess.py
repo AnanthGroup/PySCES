@@ -12,7 +12,7 @@ Library of GAMESS input variables
 
 option = {
     # $system card
-    'system': {'mwords': '400', 'memddi': '10', 'parall': '.t.'},
+    'system': {'mwords': '400', 'memddi': '100', 'parall': '.t.'},
     # $contrl card
     'contrl': {'exetyp': 'run', 'runtyp': 'gradient', 'scftyp': 'rhf', 
                'dfttyp': 'b3lyp', 'units': 'angs', 'mult': '1', 'mplevl': '0', 
@@ -24,11 +24,11 @@ option = {
     'scf': {'npunch': '2', 'conv': '1.0d-06', 'dirscf': '.t.',
             'soscf': '.f.', 'diis': '.t.', 'ethrsh': '10'},
     # $tddft card
-    'tddft': {'nstate': '2', 'iroot': '1', 'mult': '1'},
+    'tddft': {'nstate': '1', 'iroot': '1', 'mult': '1'},
     # $elmom card
     'elmom': {'iemom': '1', 'iemint': '1'},
     # $guess card
-    'guess': {'guess': 'moread', 'norb': '34'},
+    'guess': {'guess': 'moread', 'norb': '169'},
     # $data card
     'data': {'sym': 'c1'},
     }
