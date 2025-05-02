@@ -2,7 +2,7 @@
 
 #SBATCH -J test
 #SBATCH -t 720:00:00
-#SBATCH -n 1
+#SBATCH -n 12
 #SBATCH -N 1 
 #SBATCH -p astra
 #SBATCH -o %x.o%j
@@ -24,8 +24,6 @@ MYTMP=/tmp/${SLURM_JOB_ID}
 /usr/bin/mkdir -p $MYTMP
 
 #mpiexec -pernode scp -v ${SLURM_SUBMIT_DIR}/restart.out  $MYTMP/. 
-mpiexec -pernode scp -v ${SLURM_SUBMIT_DIR}/PySCES-main/pysces/main.py  $MYTMP/. 
-mpiexec -pernode scp -v ${SLURM_SUBMIT_DIR}/PySCES-main/pysces/subroutines.py  $MYTMP/. 
 mpiexec -pernode scp -v ${SLURM_SUBMIT_DIR}/input_gamess.py  $MYTMP/. 
 mpiexec -pernode scp -v ${SLURM_SUBMIT_DIR}/input_simulation.py  $MYTMP/. 
 mpiexec -pernode scp -v ${SLURM_SUBMIT_DIR}/geo_gamess  $MYTMP/. 
@@ -34,7 +32,9 @@ mpiexec -pernode scp -v ${SLURM_SUBMIT_DIR}/hess_gamess  $MYTMP/.
 mpiexec -pernode scp -v ${SLURM_SUBMIT_DIR}/mass_gamess  $MYTMP/. 
 mpiexec -pernode scp -v ${SLURM_SUBMIT_DIR}/rungms-pool  $MYTMP/. 
 mpiexec -pernode scp -v ${SLURM_SUBMIT_DIR}/runG_common_pool  $MYTMP/. 
-mpiexec -pernode scp -v ${SLURM_SUBMIT_DIR}/PySCES-main/pysces/fileIO.py  $MYTMP/.
+mpiexec -pernode scp -v ~/PySCES-main/pysces/main.py  $MYTMP/. 
+mpiexec -pernode scp -v ~/PySCES-main/pysces/subroutines.py  $MYTMP/. 
+mpiexec -pernode scp -v ~/PySCES-main/pysces/fileIO.py  $MYTMP/.
 
 cd $MYTMP
 
