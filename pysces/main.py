@@ -160,6 +160,10 @@ def main():
             print("SETUP ERROR: 'elab' in input_simulation must have as many electronic state labels as nel")
             print("but not enough electronic states are specified in 'elab'.")
             exit()
+        if opts.init_state not in opts.elab[:nel]:
+            print("SETUP ERROR: The provided label of the initial electronic state is not included in 'elab',")
+            print("or in the first nel entries of elab.")
+            exit()
         
     ndof = 3*natom + nel
     initq, initp = np.zeros(ndof-6), np.zeros(ndof-6)
