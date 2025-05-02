@@ -507,7 +507,7 @@ if ($TARGET == sockets) then
 #            1st host in the list is sure to be a new SMP enclosure
       set MYNODE=`sed -n -e "1 p" HostFile`
       @ IPROC = 2
-      @ NSMPCPU = 1  # Change this to the number of CPUs per node
+      @ NSMPCPU = 12  # Change this to the number of CPUs per node
       @ NNODES = 1
       set spacer1=":cpus="
       set spacer2=":netext="
