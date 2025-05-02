@@ -619,7 +619,7 @@ def read_gms_out(input_name):
         nrow = int(nrow)
     with open(os.path.join(__location__, out_file), 'r') as f:
         for line in f:
-            if len(elab) == 1:
+            if nel == 1:
                 flag_nac = 0
                 if 'TRANSITION DIPOLE' in line:
                     flag_dip = 0
@@ -652,7 +652,7 @@ def read_gms_out(input_name):
                 out['flag_nac'] = 0
                 out['nac'] = nac
 
-            elif len(elab) > 1:
+            elif nel > 1:
                 for i, elab_idx in enumerate(elab):
                     if 'STATE-SPECIFIC GRADIENT OF STATE   ' + str(elab_idx) in line:
                         flag_grad[i] = 0
