@@ -706,15 +706,17 @@ def read_gms_out(input_name):
     return(out)
 
 
-###############################################
-### Read GAMESS NACME calculation .dat file ###
-###############################################
 def read_gms_dat(input_name):
+    """
+    Read GAMESS dat file
+    """
     flag_orb = 1
     dat_file = input_name + '.dat'
     with open(os.path.join(__location__, dat_file), 'r') as f:
         for line in f:
-            if 'OPTIMIZED MCSCF' in line or 'MCSCF OPTIMIZED' in line:
+            if ('OPTIMIZED MCSCF' in line or
+                'MCSCF OPTIMIZED' in line or
+                'CLOSED SHELL ORBITALS' in line):
                 flag_orb = 0
                 [f.readline() for i in range(2)]
                 with open(os.path.join(__location__, 'vec_gamess'), 'w') as g:
@@ -733,7 +735,7 @@ def read_gms_dat(input_name):
     if flag_orb == 1:
         with open(os.path.join(__location__, 'progress.out'), 'a') as f:
             f.write('Error: Optimized orbitals not found in .dat. \n')
-            
+
     return(flag_orb)
 
 
