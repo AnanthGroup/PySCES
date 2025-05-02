@@ -36,7 +36,7 @@ tmax_rk4, Hrk4 = 60, 5.0
 frq_scale = 1.0
 
 # Number of CPUs and nodes in each internal NACME calculation
-ncpu, nnode = 1, 1
+ncpu, nnode = 12, 1
 
 # Partition of Pool cluster (astra or common)
 partition = 'astra'
