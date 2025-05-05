@@ -7,7 +7,7 @@ from tcpb import terachem_server_pb2 as pb
 from pysces.input_simulation import logging_dir, TCRunnerOptions
 from pysces.common import PhaseVars, QCRunner
 from pysces.h5file import H5File, H5Dataset, H5Group, h5py
-from pysces.qcRunners.LoadBalancing import balance_tasks_optimum, TaskTimes, ESDerivTasks
+from pysces.qcRunners.LoadBalancing import balance_tasks_optimum, ESDerivTasks, ServerBenchmark
 
 from datetime import datetime
 import functools
@@ -509,10 +509,17 @@ class TCClientExtra(TCPBClient):
         return os.path.isfile(os.path.join(self.server_root, file_name))
 
     def get_file(self, file_name, mode='rb'):
-        file_loc = os.path.join(self.server_root, file_name)
+        file_loc = self.get_file_loc(file_name)
         with open(file_loc, mode) as file:
             data = file.read()
         return data
+
+    def get_file_loc(self, file_name):
+        file_loc = os.path.join(self.server_root, file_name)
+        if os.path.isfile(file_loc):
+            return file_loc
+        else:
+            raise FileNotFoundError(f'File {file_name} not found in server root directory {self.server_root}')
             
     def set_file(self, file_name, data, mode='wb'):
         file_loc = os.path.join(self.server_root, file_name)
@@ -962,14 +969,20 @@ class TCRunner(QCRunner):
         self._interpolate_NACs = False
 
         #   use condensed jobs
-        self._combine_jobs = False
+        self._combine_jobs = True
 
         #   load balancing
         self._task_benchmarks = self._get_default_task_benchmarks()
         
     def _get_default_task_benchmarks(self):
-        task_times = TaskTimes(GS_grad=0.23, EX_grad=2.22, GS_EX_NAC=2.01, EX_EX_NAC=3.22, GS_dipole=6.93, EX_dipole=46.07, GS_EX_dipole=39.32)
-        return [task_times for _ in range(len(self._client_list))]
+        single_benchmark = ServerBenchmark(GS_grad=0.23, EX_grad=2.22, GS_EX_NAC=2.01, EX_EX_NAC=3.22, GS_dipole=6.93, EX_dipole=46.07, GS_EX_dipole=39.32)
+        benchmarks = [single_benchmark for _ in range(len(self._client_list))]
+        for i, bm in enumerate(benchmarks):
+            bm.name = f'Server_{i}'
+            bm.address = f'{self._hosts[i]}'
+            bm.port = self._ports[i]
+        
+        return benchmarks
 
     def _prepare_server_info(self):
         """Ensure server roots are valid paths and check server configuration."""
@@ -1426,6 +1439,10 @@ class TCRunner(QCRunner):
 
         all_energies, elecE, grad, nac, trans_dips = format_output_LSCIVR(job_batch.results_list)
         self._finalize_frame(job_batch, nac)
+
+        for x in all_energies, elecE, grad, nac, trans_dips:
+            print('SHAPE CHECK: ', np.shape(x))
+
         return (all_energies, elecE, grad, nac, trans_dips, job_batch.timings)
 
 
@@ -1462,10 +1479,67 @@ class TCRunner(QCRunner):
             return self._create_jobs_singles(geom, energy_only, grads, nacs)
 
     def _create_jobs_bulk(self, geom, energy_only = False, grads: list[int]=[], nacs: list[int, int]=[], dipoles: list[int]=[], tr_dipoles: list[int, int]=[]):
+
+        if self._excited_type != 'cis':
+            raise ValueError('Bulk jobs are only supported for CIS excited state calculations')
         
+        job_batch = TCJobBatch()
+
+        #   run the job balancing algorithm
         es_tasks = ESDerivTasks(grads, nacs, dipoles, tr_dipoles)
-        assignments = balance_tasks_optimum(self._task_benchmarks, es_tasks, len(self._client_list))
-        
+        balanced = balance_tasks_optimum(self._task_benchmarks, es_tasks, len(self._client_list))
+
+        #   distribute the balanced tasks across all clients
+        for i, client in enumerate(self._client_list):
+            client_tasks = balanced[i]
+            job = TCJob(geom, self._base_options, 'energy', self._excited_type, 0)
+            prop_file_contents = ''
+
+            #   handle ground state gradient differently
+            for state in client_tasks.gs_grad:
+                job.job_type = 'gradient'
+                prop_file_contents += f'gradient {state}\n'
+
+            for state in client_tasks.ex_grads:
+                job.opts.update({'cis': 'yes', 'cisgradients': 'yes'})
+                prop_file_contents += f'gradient {state}\n'
+
+            for state_1, state_2 in client_tasks.gs_ex_nacs:
+                job.opts.update({'cis': 'yes', 'ciscouplings': 'yes'})
+                prop_file_contents += f'coupling {state_1} {state_2}\n'
+
+            for state_1, state_2 in client_tasks.ex_ex_nacs:
+                job.opts.update({'cis': 'yes', 'ciscouplings': 'yes'})
+                prop_file_contents += f'coupling {state_1} {state_2}\n'
+
+            for state in client_tasks.gs_dipole_grad:
+                job.opts.update({'cis': 'yes', 'dipolederivative': 'yes'})
+                prop_file_contents += f'dipolederivative {state}\n'
+
+            for state in client_tasks.ex_dipole_grads:
+                job.opts.update({'cis': 'yes', 'cisdipolederiv': 'yes'})
+                prop_file_contents += f'cisdipolederiv {state}\n'
+
+            for state_1, state_2 in client_tasks.gs_ex_dipole_grads:
+                job.opts.update({'cis': 'yes', 'cistransdipolederiv': 'yes'})
+                prop_file_contents += f'cistransdipolederiv {state_1} {state_2}\n'
+
+            for state_1, state_2 in client_tasks.ex_ex_dipole_grads:
+                job.opts.update({'cis': 'yes', 'cistransdipolederiv': 'yes'})
+                prop_file_contents += f'cistransdipolederiv {state_1} {state_2}\n'
+
+            job.opts.update(self._excited_options)
+            print('CIS OPTS: ', self._excited_options)
+
+            self._apply_initial_frame_options(job)
+            client.set_file('cispropertyfile', prop_file_contents, 'w')
+            job.opts['cispropertyfile '] = client.get_file_loc('cispropertyfile')
+
+            job_batch.append(job)
+
+        input('Press Enter to continue...')
+
+        return job_batch
 
         raise NotImplementedError('create_jobs_bulk() not supported yet')
         
@@ -1473,28 +1547,26 @@ class TCRunner(QCRunner):
     def _create_jobs_singles(self, geom, energy_only = False, grads = [], nacs = []):
         job_batch = TCJobBatch()
 
-        #   frame specific job options
-        frame_opts = {}
-        if self._initial_frame_options is not None:
-            if self._frame_counter < self._initial_frame_options['n_frames']:
-                frame_opts.update(self._initial_frame_options)
-
         #   run energy only if gradients and NACs are not requested
         if energy_only:
-            job_batch.append(TCJob(geom, self._base_options | frame_opts, 'energy', self._excited_type, 0))
+            job_batch.append(TCJob(geom, self._base_options, 'energy', self._excited_type, 0))
 
         for name, opts in self.grad_job_options.items():
             state = opts.get(f'{self._excited_type}target', 0)
             if state not in grads:
                 continue
-            job_batch.append(TCJob(geom, opts | frame_opts, 'gradient', self._excited_type, state, name))
+            job_batch.append(TCJob(geom, opts, 'gradient', self._excited_type, state, name))
 
         #   create NAC jobs
         for name, opts in self.nac_job_options.items():
             state = (opts['nacstate1'], opts['nacstate2'])
             if state not in nacs:
                 continue
-            job_batch.append(TCJob(geom, opts | frame_opts, 'coupling', self._excited_type, max(state), name))
+            job_batch.append(TCJob(geom, opts, 'coupling', self._excited_type, max(state), name))
+
+        #   frame specific job options
+        for job in job_batch.jobs:
+            self._apply_initial_frame_options(job)
 
         return job_batch
 
@@ -1558,6 +1630,11 @@ class TCRunner(QCRunner):
     
     def get_batches_from_components(self, gs_gradient=False, ex_gradients=[], gs_ex_nacs=[], ex_ex_nacs=[], gs_dipole_deriv=False, ex_dipole_derivs=[], tr_dipole_derivs=[]):
         pass
+
+    def _apply_initial_frame_options(self, job: TCJob):
+        if self._initial_frame_options is not None:
+            if self._frame_counter < self._initial_frame_options['n_frames']:
+                job.opts.update(self._initial_frame_options)
         
     def _write_debug_batch(self):
         if _DEBUG_SAVE_TRAJ:

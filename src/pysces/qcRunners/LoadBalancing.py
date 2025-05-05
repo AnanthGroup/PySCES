@@ -5,61 +5,13 @@ import time
 from dataclasses import dataclass, fields, asdict
 from typing import Optional
 import copy
+import enum
 
 # plt.style.use('my_style_2')
 
-class DictLikeBase:
-    ''' A base class that provides dictionary-like access to attributes. 
-        DELETE ME    
-    '''
-    def __getitem__(self, key):
-        if not hasattr(self, key):
-            raise KeyError(f"Key '{key}' not found!")
-        return getattr(self, key)
+_assignments_optimum: '_BalancedCollection' = None
+_assignments_round_robin: '_BalancedCollection'  = None
 
-    def __setitem__(self, key, value):
-        if not hasattr(self, key):
-            raise KeyError(f"Key '{key}' not found!")
-        setattr(self, key, value)
-
-    def __iter__(self):
-        return iter(self.__dict__)
-
-    def items(self):
-        return self.__dict__.items()
-
-    def keys(self):
-        return self.__dict__.keys()
-
-    def values(self):
-        return self.__dict__.values()
-
-    def __contains__(self, key):
-        return key in self.__dict__
-
-    def as_dict(self):
-        return {field.name: getattr(self, field.name) for field in fields(self)}
-
-
-@dataclass
-class _TaskCounts():
-    ''' Holds the counts for each electronic structure derivative task. '''
-    GS_grad: int = 0
-    EX_grad: int = 0
-    GS_EX_NAC: int = 0
-    EX_EX_NAC: int = 0
-    GS_dipole: int = 0
-    EX_dipole: int = 0
-    GS_EX_dipole: int = 0
-
-    def __post_init__(self):
-        # if all(value == 0 for value in self.__dict__.values()):
-        #     raise ValueError("At least one task count must be provided")
-        #   check if all values are ints
-        for value in self.__dict__.values():
-            if value != 0 and not isinstance(value, int):
-                raise ValueError(f"Task count must be an int, got {type(value)}")
-            
 
 @dataclass
 class TaskTimes():
@@ -71,6 +23,7 @@ class TaskTimes():
     GS_dipole: float = 0.0
     EX_dipole: float = 0.0
     GS_EX_dipole: float = 0.0
+    EX_EX_dipole: float = 0.0
 
 
     def __post_init__(self):
@@ -80,8 +33,18 @@ class TaskTimes():
         for value in self.__dict__.values():
             if value != 0 and not isinstance(value, float):
                 raise ValueError(f"Task time must be a float, got {type(value)}")
+            
+@dataclass
+class ServerBenchmark(TaskTimes):
+    ''' Holds the benchmark times for each electronic structure derivative task. '''
+    name: Optional[str] = None
+    address: Optional[str] = None
+    port: Optional[int] = None
 
-class ElectronicState:
+    def __post_init__(self):
+        pass
+
+class ElectronicStates:
     def __init__(self, states=None):
         self._states = set()
         if states is not None:
@@ -95,6 +58,9 @@ class ElectronicState:
         
     def remove(self, state: int):
         self._states.discard(state)
+
+    def pop(self):
+        return self._states.pop()
         
     @property
     def states(self) -> list:
@@ -102,11 +68,14 @@ class ElectronicState:
     
     def __iter__(self):
         return iter(self.states)
+    
+    def __len__(self):
+        return len(self._states)
         
     def __repr__(self):
         return f"ElectronicStates({self.states})"
     
-class ElectronicStatePair:
+class ElectronicStatePairs:
     def __init__(self, states=None):
         self._states = set()
         if states is not None:
@@ -124,6 +93,9 @@ class ElectronicStatePair:
         
     def remove(self, state: tuple[int, int]):
         self._states.discard(state)
+
+    def pop(self):
+        return self._states.pop()
         
     @property
     def states(self) -> list:
@@ -131,6 +103,9 @@ class ElectronicStatePair:
     
     def __iter__(self):
         return iter(self.states)
+    
+    def __len__(self):
+        return len(self._states)
         
     def __repr__(self):
         return f"ElectronicStatePair({self.states})"
@@ -138,130 +113,60 @@ class ElectronicStatePair:
 class ESDerivTasks():
     def __init__(self, grads: list[int]=[], nacs: list[int, int]=[], dipoles: list[int]=[], tr_dipoles: list[int, int]=[]):
 
-        self.grads = ElectronicState(states=grads)
-        self.nacs = ElectronicStatePair(states=nacs)
-        self.dipoles = ElectronicState(states=dipoles)
-        self.tr_dipoles = ElectronicStatePair(states=tr_dipoles)
+        self.gs_grad = ElectronicStates()
+        self.ex_grads = ElectronicStates()
+        self.gs_ex_nacs = ElectronicStatePairs()
+        self.ex_ex_nacs = ElectronicStatePairs()
 
+        self.gs_dipole_grad = ElectronicStates()
+        self.ex_dipole_grads = ElectronicStates()
+        self.gs_ex_dipole_grads = ElectronicStatePairs()
+        self.ex_ex_dipole_grads = ElectronicStatePairs()
 
-    def _check_and_filter(self):
-        pass
-        '''
-
-        filtered_grads = set()
-        for g in self.grads:
-            if g < 0:
-                raise ValueError(f"Gradient {g} must be greater than or equal to 0")
-            filtered_grads.add(g)
-        self.grads = list(filtered_grads)
-
-        filtered_nacs = set()
-        for n in self.nacs.copy():
-            if min(n) < 0:
-                raise ValueError(f"NAC {n} must be greater than or equal to 0")
-            if n[0] == n[1]:
-                print('Warning: found a NAC with two of the same states: this is always zero and will be removed')
-            elif n[0] > n[1]:
-                filtered_nacs.add((n[1], n[0]))
+        for state in grads:
+            if state == 0:
+                self.gs_grad.add(state)
             else:
-                filtered_nacs.add(n)
-        self.nacs = list(filtered_nacs)
+                self.ex_grads.add(state)
 
-        filtered_dipoles = set()
-        for d in self.dipoles:
-            if min(d) < 0:
-                raise ValueError(f"Dipole {d} must be greater than or equal to 0")
-            filtered_dipoles.add(d)
-        self.dipoles = list(filtered_dipoles)
-
-
-        filtered_tr_dipoles = set()
-        for d in self.tr_dipoles.copy():
-            if min(d) < 0:
-                raise ValueError(f"TrDipole {d} must be greater than or equal to 0")
-            if d[0] == d[1]:
-                print('Warning: found a TrDipole with two of the same states: this is not a "transition" dipole and will be removed')
-                self.tr_dipoles.remove(d)
-            elif d[0] > d[1]:
-                filtered_tr_dipoles.add((d[1], d[0]))
+        for state_pair in nacs:
+            if min(state_pair) == 0:
+                self.gs_ex_nacs.add(state_pair)
             else:
-                filtered_tr_dipoles.add(d)
-        self.tr_dipoles = list(filtered_tr_dipoles)
-        '''
+                self.ex_ex_nacs.add(state_pair)
 
-    def get_task_times(self):
-        self._check_and_filter()
-        task_counts = _TaskCounts()
-
-        #   gradients
-        for g in self.grads:
-            if g == 0:
-                task_counts.GS_grad = 1
+        for state in dipoles:
+            if state == 0:
+                self.gs_dipole_grad.add(state)
             else:
-                task_counts.EX_grad += 1
+                self.ex_dipole_grads.add(state)
 
-        #   nacs
-        for n in self.nacs:
-            if min(n) == 0:
-                task_counts.GS_EX_NAC += 1
+        for state_pair in tr_dipoles:
+            if min(state_pair) == 0:
+                self.gs_ex_dipole_grads.add(state_pair)
             else:
-                task_counts.EX_EX_NAC += 1
-
-        #   dipole derivatives
-        for d in self.dipoles:
-            if d == 0:
-                task_counts.GS_dipole += 1
-            else:
-                task_counts.EX_dipole += 1
-
-        #   transition dipole derivatives
-        for d in self.tr_dipoles:
-            if min(d) == 0:
-                task_counts.GS_EX_dipole += 1
-            else:
-                raise NotImplementedError('Excited-Excited dipole moment derivatives not implemented yet')
-
-        return task_counts
-
-@dataclass
-class ServerBenchmark(TaskTimes):
-    ''' Holds the benchmark times for each electronic structure derivative task. '''
-    name: Optional[str] = None
-    address: Optional[str] = None
-    port: Optional[int] = None
-
-    def __post_init__(self):
-        pass
-
+                self.ex_ex_dipole_grads.add(state_pair)
 
 class TaskCollection:
     ''' A load balanced configurarion of tasks and times for a single server'''
     def __init__(self):
-        self.tasks = []
-        self.times = []
+        self.task_types: list[str] = []
+        self.times: list[float] = []
         self.total_time = 0
 
-    def add_task(self, task, time):
-        self.tasks.append(task)
+    def add_task(self, task_type: str, time: float):
+        self.task_types.append(task_type)
         self.times.append(time)
         self.total_time += time
     
     def copy(self):
         new_collection = TaskCollection()
-        new_collection.tasks = self.tasks.copy()
+        new_collection.task_types = self.task_types.copy()
         new_collection.total_time = self.total_time
         new_collection.times = self.times.copy()
         return new_collection
-    
-# @dataclass
-# class BalancedCollection:
-#     ''' A collection of load balanced configurations of tasks and times for multiple servers'''
-#     def __init__(self, n_servers):
-#         self.collections = [TaskCollection() for _ in range(n_servers)]
-#         self.order_added = []
-#         self.n_servers = n_servers
 
-class BalancedCollection:
+class _BalancedCollection:
     '''
         wrapper class with methods to help balance the tasks across multiple servers
     '''
@@ -269,21 +174,29 @@ class BalancedCollection:
         self.collections = [TaskCollection() for _ in range(n_servers)]
         self.order_added = []
         self.n_servers = n_servers
+        self.ES_tasks = {}
 
         self._possible_times = None
+    
+    def get_max_load(self):
+        return max([server.total_time for server in self.collections])
+    
+    def copy(self):
+        new_collection = _BalancedCollection(self.n_servers)
+        new_collection.collections = [server.copy() for server in self.collections]
+        new_collection.order_added = self.order_added.copy()
+        new_collection._possible_times = self._possible_times.copy()
+        return new_collection
 
-    # def get_result(self):
-    #     result = BalancedCollection(self.n_servers)
-    #     for i, server in enumerate(self.collections):
-    #         result.collections[i].tasks = server.tasks
-    #         result.collections[i].times = server.times
-    #         result.collections[i].total_time = server.total_time
-    #     result.order_added = self.order_added
-    #     return result
-
+    def assign_ES_tasks(self, tasks: ESDerivTasks):
+        tasks_reduced = copy.deepcopy(tasks)
+        for collection in self.collections:
+            for task_type in collection.task_types:
+                tasks_reduced.grads
+    
     def _set_server_benchmarks(self, benchmarks: list[ServerBenchmark]):
         possible_task_times = {}
-        task_names = [f.name for f in fields(_TaskCounts)]
+        task_names = [f.name for f in fields(TaskTimes)]
 
         for task in task_names:
             possible_task_times[task] = []
@@ -293,25 +206,15 @@ class BalancedCollection:
                 possible_task_times[task].append(getattr(bm, task))
         self._possible_times = possible_task_times
     
-    def get_max_load(self):
-        return max([server.total_time for server in self.collections])
-    
-    def copy(self):
-        new_collection = BalancedCollection(self.n_servers)
-        new_collection.collections = [server.copy() for server in self.collections]
-        new_collection.order_added = self.order_added.copy()
-        new_collection._possible_times = self._possible_times.copy()
-        return new_collection
-    
-    def _add_server(self, server):
-        self.collections.append(server)
+    # def _add_server(self, server):
+    #     self.collections.append(server)
 
     def _add_task(self, server_idx, task):
         time = self._possible_times[task][server_idx]
         self.collections[server_idx].add_task(task, time)
         self.order_added.append((server_idx, task, time))
 
-    def _find_server_with_min_time_after_add(self, task: list):
+    def _find_server_with_min_time_after_add(self, task: str):
         min_time = float('inf')
         min_idx = -1
 
@@ -327,20 +230,65 @@ class BalancedCollection:
         return min_idx
 
 
-def _flatten_tasks(benchmarks: list[ServerBenchmark], task_counts: _TaskCounts):
+def _flatten_tasks(benchmarks: list[ServerBenchmark], es_tasks: ESDerivTasks):
     flattened_tasks = []
-    for task, count in asdict(task_counts).items():
-        flattened_tasks.extend([task] * count)
+    flattened_tasks.extend(['GS_grad'] * len(es_tasks.gs_grad))
+    flattened_tasks.extend(['EX_grad'] * len(es_tasks.ex_grads))
+    flattened_tasks.extend(['GS_EX_NAC'] * len(es_tasks.gs_ex_nacs))
+    flattened_tasks.extend(['EX_EX_NAC'] * len(es_tasks.ex_ex_nacs))
+    flattened_tasks.extend(['GS_dipole'] * len(es_tasks.gs_dipole_grad))
+    flattened_tasks.extend(['EX_dipole'] * len(es_tasks.ex_dipole_grads))
+    flattened_tasks.extend(['GS_EX_dipole'] * len(es_tasks.gs_ex_dipole_grads))
+    flattened_tasks.extend(['EX_EX_dipole'] * len(es_tasks.ex_ex_dipole_grads))
 
-    #   order flat tasks by the first server benchmark
+    # Order flat tasks by the first server benchmark
     ordered_tasks = sorted(flattened_tasks, key=lambda t: -getattr(benchmarks[0], t))
-    flattened_tasks = ordered_tasks
-    return flattened_tasks
+    return ordered_tasks
 
-def tasks_to_task_counts(tasks):
-    pass
+def _partition_jobs(balanced_collection: '_BalancedCollection', es_tasks: ESDerivTasks) -> list[ESDerivTasks]:
+    depleted_tasks = copy.deepcopy(es_tasks)
 
-def balance_tasks_optimum(benchmarks: list[ServerBenchmark], tasks: ESDerivTasks, num_workers: int, n_trials: int=500):
+    collections = []
+    for coll in balanced_collection.collections:
+        sub_tasks = ESDerivTasks()
+        for name in coll.task_types:
+            if name == 'GS_grad':
+                sub_tasks.gs_grad.add(depleted_tasks.gs_grad.pop())
+
+            elif name == 'EX_grad':
+                sub_tasks.ex_grads.add(depleted_tasks.ex_grads.pop())
+
+            elif name == 'GS_EX_NAC':
+                sub_tasks.gs_ex_nacs.add(depleted_tasks.gs_ex_nacs.pop())
+            
+            elif name == 'EX_EX_NAC':
+                sub_tasks.ex_ex_nacs.add(depleted_tasks.ex_ex_nacs.pop())
+
+            elif name == 'GS_dipole':
+                sub_tasks.gs_dipole_grad.add(depleted_tasks.gs_dipole_grad.pop())
+
+            elif name == 'EX_dipole':
+                sub_tasks.ex_dipole_grads.add(depleted_tasks.ex_dipole_grads.pop())
+
+            elif name == 'GS_EX_dipole':
+                sub_tasks.gs_ex_dipole_grads.add(depleted_tasks.gs_ex_dipole_grads.pop())
+
+            elif name == 'EX_EX_dipole':
+                sub_tasks.ex_ex_dipole_grads.add(depleted_tasks.ex_ex_dipole_grads.pop())
+
+            else:
+                raise ValueError(f"Unknown task type: {name}")
+            
+        collections.append(sub_tasks)
+
+    #   check if all tasks are depleted
+    for task_type in ['gs_grad', 'ex_grads', 'gs_ex_nacs', 'ex_ex_nacs', 'gs_dipole_grad', 'ex_dipole_grads', 'gs_ex_dipole_grads', 'ex_ex_dipole_grads']:
+        if len(getattr(depleted_tasks, task_type)) != 0:
+            raise ValueError(f"Not all tasks are depleted: {task_type} has {len(getattr(depleted_tasks, task_type))} tasks left")
+
+    return collections
+
+def balance_tasks_optimum(benchmarks: list[ServerBenchmark], tasks: ESDerivTasks, num_workers: int, n_trials: int=500) -> list[ESDerivTasks]:
     '''
         Load balances the tasks across the servers using a greedy algorithm.
         The algorithm assigns tasks to the server with the least load after adding the task,
@@ -362,16 +310,16 @@ def balance_tasks_optimum(benchmarks: list[ServerBenchmark], tasks: ESDerivTasks
 
         Returns
         -------
-        BalanceResult
-            A collection of load balanced configurations of tasks and times for multiple servers
+        balanced_collection: List[ESDerivTasks]
+            A list of load balanced configurations of tasks and times for multiple servers
 
     '''
-    task_counts = tasks.get_task_times()
-    flattened_tasks = _flatten_tasks(benchmarks, task_counts)
+
+    flattened_tasks = _flatten_tasks(benchmarks, tasks)
 
     best_time = float('inf')
     best_balanced = None
-    base_collection = BalancedCollection(num_workers)
+    base_collection = _BalancedCollection(num_workers)
     base_collection._set_server_benchmarks(benchmarks)
 
     #   try random starting points
@@ -395,9 +343,13 @@ def balance_tasks_optimum(benchmarks: list[ServerBenchmark], tasks: ESDerivTasks
 
     print('Time:', time.time() - start_time)
 
-    return best_balanced
+    #   for debugging
+    global _assignments_optimum
+    _assignments_optimum = best_balanced
+
+    return _partition_jobs(best_balanced, tasks)
     
-def balance_tasks_round_robin(benchmarks: list[ServerBenchmark], tasks: ESDerivTasks, num_workers):
+def balance_tasks_round_robin(benchmarks: list[ServerBenchmark], tasks: ESDerivTasks, num_workers) -> list[ESDerivTasks]:
     '''
         Load balances the tasks across the servers using a round-robin algorithm.
         The algorithm assigns tasks to the servers in a round-robin fashion.
@@ -413,13 +365,13 @@ def balance_tasks_round_robin(benchmarks: list[ServerBenchmark], tasks: ESDerivT
 
         Returns
         -------
-        MockServerCollection
-            A collection of "server" objects with the tasks assigned to them.
+        balanced_collection: List[ESDerivTasks]
+            A list of load balanced configurations of tasks and times for multiple servers
     '''
-    task_counts = tasks.get_task_times()
-    flattened_tasks = _flatten_tasks(benchmarks, task_counts)
 
-    collection = BalancedCollection(num_workers)
+    flattened_tasks = _flatten_tasks(benchmarks, tasks)
+
+    collection = _BalancedCollection(num_workers)
     collection._set_server_benchmarks(benchmarks)
 
     # Assign tasks to workers
@@ -428,16 +380,20 @@ def balance_tasks_round_robin(benchmarks: list[ServerBenchmark], tasks: ESDerivT
         collection._add_task(server_idx, task)
         collection
 
-    return collection
+    #   debugging only
+    global _assignments_round_robin
+    _assignments_round_robin = collection
+
+    return _partition_jobs(collection, tasks)
 
 
-def _debug_plot_assignments_new(task_times, collections: BalancedCollection):
+def _debug_plot_assignments_new(task_times, collections: _BalancedCollection):
     
     fig, ax = plt.subplots()
     height = 0.8
     for i, server in enumerate(collections.collections):
         left = 0.0
-        for task, time in zip(server.tasks, task_times):
+        for task, time in zip(server.task_types, task_times):
             time = task_times[task]
             ax.barh(i, time, height, left)
             left += time
@@ -453,7 +409,7 @@ def _debug_plot_assignments_new(task_times, collections: BalancedCollection):
     fig.savefig("task_assignments.png")
     plt.show()
 
-def _debug_creat_plot(collections_1: BalancedCollection, collections_2: BalancedCollection):
+def _debug_creat_plot(collections_1: _BalancedCollection, collections_2: _BalancedCollection):
 
     max_time_1 = collections_1.get_max_load()
     max_time_2 = collections_2.get_max_load()
@@ -492,7 +448,7 @@ def _debug_creat_plot(collections_1: BalancedCollection, collections_2: Balanced
 
     return fig, ax1, ax2, colors_by_task
 
-def _debug_create_annimation(n_workers, collections_1: BalancedCollection, collections_2: BalancedCollection):
+def _debug_create_annimation(n_workers, collections_1: _BalancedCollection, collections_2: _BalancedCollection):
         
     fig, ax1, ax2, colors_by_task = _debug_creat_plot(collections_1, collections_2)
 
@@ -514,16 +470,17 @@ def _debug_create_annimation(n_workers, collections_1: BalancedCollection, colle
             plt.close(fig)
             count += 1
 
-def _debug_plot_comparisons(name: dict, collections_1: BalancedCollection, collections_2: BalancedCollection):
+def _debug_plot_comparisons(name: dict):
+    global _assignments_optimum, _assignments_round_robin
 
-    fig, ax1, ax2, colors_by_task = _debug_creat_plot(collections_1, collections_2)
+    fig, ax1, ax2, colors_by_task = _debug_creat_plot(_assignments_optimum, _assignments_round_robin)
 
     height = 0.8
-    for (ax, collections) in zip([ax1, ax2], [collections_1, collections_2]):
+    for (ax, collections) in zip([ax1, ax2], [_assignments_optimum, _assignments_round_robin]):
         for i, server in enumerate(collections.collections):
-            print(i, server.tasks, server.times)
+            print(i, server.task_types, server.times)
             left = 0.0
-            for task, time in zip(server.tasks, server.times):
+            for task, time in zip(server.task_types, server.times):
                 ax.barh(i, time, height, left, color=colors_by_task[task], edgecolor='white', linewidth=3.5)
                 left += time
 
@@ -558,9 +515,9 @@ def _debug_run_test():
 
     pprint(benchmarks)
 
-    assignments_1 = balance_tasks_optimum(benchmarks, tasks, num_workers, 500)
-    assignments_2 = balance_tasks_round_robin(benchmarks, tasks, num_workers)
-    _debug_plot_comparisons("comparison", assignments_1, assignments_2)
+    balance_tasks_optimum(benchmarks, tasks, num_workers, 500)
+    balance_tasks_round_robin(benchmarks, tasks, num_workers)
+    _debug_plot_comparisons("comparison")
 
 if __name__ == "__main__":
 
