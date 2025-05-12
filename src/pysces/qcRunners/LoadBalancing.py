@@ -341,11 +341,11 @@ def balance_tasks_optimum(benchmarks: list[ServerBenchmark], tasks: ESDerivTasks
         rand_order = np.random.permutation(len(flattened_tasks))
         flattened_tasks = [flattened_tasks[i] for i in rand_order]
 
-    print('Time:', time.time() - start_time)
 
     #   for debugging
     global _assignments_optimum
     _assignments_optimum = best_balanced
+    # print('Time:', time.time() - start_time)
 
     return _partition_jobs(best_balanced, tasks)
     

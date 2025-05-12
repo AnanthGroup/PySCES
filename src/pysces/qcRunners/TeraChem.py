@@ -974,8 +974,10 @@ class TCRunner(QCRunner):
         self._interpolate_NACs = False
 
         #   use condensed jobs
-        print('HAS TCPARSE:', _HAS_TCPARSE)
         self._combine_jobs = _HAS_TCPARSE
+        
+        #   logging
+        self._logger = None
         
         #   load balancing
         self._task_benchmarks = self._get_default_task_benchmarks()
@@ -1059,6 +1061,7 @@ class TCRunner(QCRunner):
         if orig_opts.get('cis', '') == 'yes':
             #   CI and TDDFT
             excited_type = 'cis'
+            excited_options['cisexcitonoverlap'] = 'yes'
             for key, val in orig_opts.items():
                 if key[0:3] == 'cis':
                     excited_options[key] = val
@@ -1443,16 +1446,26 @@ class TCRunner(QCRunner):
             #   step 3: combine both batches
             job_batch.jobs += job_batch_2.jobs
 
-        with open('job_batch.pickle', 'wb') as file:
-            pickle.dump(job_batch, file)
-        print('about to parse batch: \n', job_batch)
+        self._log_jobs(job_batch, phase_vars.time)
 
-        # all_energies, elecE, grad, nac, trans_dips = format_output_LSCIVR(job_batch.results_list)
         all_energies, elecE, grad, nac, trans_dips = self._extract_results(job_batch)
         self._finalize_frame(job_batch, nac)
 
-
         return (all_energies, elecE, grad, nac, trans_dips, job_batch.timings)
+    
+    def _log_jobs(self, job_batch, time):
+        if self._logger is None:
+            return
+        
+        data_to_save = []
+        for j in job_batch.jobs:
+            res = dict(j.results)
+            res['timestep'] = time
+            data_to_save.append(res)
+        
+        self._logger._write(data_to_save)
+
+
 
     def _extract_results(self, job_batch: TCJobBatch, job_batch_2: TCJobBatch = None):
         #   combine the 
@@ -1555,8 +1568,6 @@ class TCRunner(QCRunner):
             job.opts['cispropertyfile'] = client.get_file_loc('cispropertyfile')
 
             job_batch.append(job)
-
-        input('Press Enter to continue...')
 
         return job_batch
         
@@ -2084,9 +2095,10 @@ def _extract_subset_transition_data(flattend_data: np.array | list, states: list
     #   First we put all of the transition data into a matrix that is referenced by (state_i, state_j)
     flattend_data = np.array(flattend_data)
     n_elms = flattend_data.shape[-1]
-    max_states = max(states)
-    all_matrix_data = np.zeros((max_states + 1, max_states + 1, n_elms))
+    max_states = max(states) + 1
+    all_matrix_data = np.zeros((max_states, max_states, n_elms))
     state_pairs = [(i, j) for i in range(max_states) for j in range(i+1, max_states)]
+
     for pair, values in zip(state_pairs, flattend_data):
         i, j = pair
         all_matrix_data[i, j] = values
@@ -2105,8 +2117,8 @@ def _extract_subset_transition_data(flattend_data: np.array | list, states: list
         for j, state2 in enumerate(states):
             if i >= j:
                 continue
-            subset_matrix_data[i, j] = all_matrix_data[state1, state2]
-            subset_matrix_data[j, i] = scale*subset_matrix_data[i, j]
+            subset_matrix_data[i, j] =         all_matrix_data[state1, state2]
+            subset_matrix_data[j, i] = scale * all_matrix_data[state1, state2]
 
     return subset_matrix_data
 
@@ -2136,6 +2148,7 @@ def format_combo_job_results(job_data: list[dict], states: list[int]):
     #   extract the transition dipoles
     all_mu_tr = np.array(validated.cis_transition_dipoles)
     mu_tr = _extract_subset_transition_data(all_mu_tr, states, 's')
+
 
     return (all_energies, energies, gradients, nacs, mu_tr)
     

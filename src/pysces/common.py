@@ -7,12 +7,12 @@ from abc import abstractmethod
 
 
 class PhaseVars:
-    def __init__(self, elec_q0=None, elec_p0=None, nuc_q0=None, nuc_p0=None):
+    def __init__(self, time=0.0, elec_q0=None, elec_p0=None, nuc_q0=None, nuc_p0=None):
         self.elec_q = elec_q0
         self.elec_p = elec_p0
         self.nuc_q = nuc_q0
         self.nuc_p = nuc_p0
-        self.time = 0.0
+        self.time = time
 
     def get_concatenated(self):
         return np.concatenate((self.elec_q, self.elec_p, self.nuc_q, self.nuc_p))

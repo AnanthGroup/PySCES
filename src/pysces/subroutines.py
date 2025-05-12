@@ -26,6 +26,7 @@ from pysces import input_simulation as opts # we should start moving the global 
 from pysces.input_gamess import nacme_option as opt 
 from pysces.fileIO import SimulationLogger, write_restart, read_restart
 from pysces.interpolation import SignFlipper
+from pysces.common import PhaseVars
 # __location__ = os.path.realpath(os.path.join(os.getcwd(), os.path.dirname(__file__)))
 __location__ = ''
 
@@ -1567,6 +1568,8 @@ def rk4(initq, initp, tStop, H, restart, amu_mat, U, AN_mat):
         logger.state_labels = [f'S{x}' for x in tcr_state_options['grads']]
         tc_runner = TCRunner(atoms, tc_runner_opts)
         tc_runner._prev_ref_job = tcr_ref_job
+        if tcr_log_jobs:
+            tc_runner._logger = logger.loggers['tc_job_data']
 
     #   Initialization
     if restart == 1:
@@ -1589,7 +1592,7 @@ def rk4(initq, initp, tStop, H, restart, amu_mat, U, AN_mat):
         if qc_runner == 'gamess':
             elecE, grad, nac, _ = run_gamess_at_geom(input_name, AN_mat, qC, atoms)
         elif qc_runner == 'terachem':
-            all_energies, elecE, grad, nac, trans_dips, timings = tc_runner.run_new_geom(geom=qC/ang2bohr)
+            all_energies, elecE, grad, nac, trans_dips, timings = tc_runner.run_new_geom(PhaseVars(time=t, nuc_q0=qC))
             qc_runner_data = tc_runner._prev_job_batch
         else:
             timings, all_energies, elecE, grad, nac, trans_dips = qc_runner.run_new_geom(qC/ang2bohr, p[nel:])
@@ -1637,7 +1640,7 @@ def rk4(initq, initp, tStop, H, restart, amu_mat, U, AN_mat):
         if qc_runner == 'gamess':
             elecE, grad, nac, _ = run_gamess_at_geom(input_name, AN_mat, qC, atoms)
         elif qc_runner == 'terachem':
-            all_energies, elecE, grad, nac, trans_dips, timings = tc_runner.run_new_geom(geom=qC/ang2bohr)
+            all_energies, elecE, grad, nac, trans_dips, timings = tc_runner.run_new_geom(PhaseVars(time=t, nuc_q0=qC))
             qc_runner_data = tc_runner._prev_job_batch
         else:
             timings, all_energies, elecE, grad, nac, trans_dips = qc_runner.run_new_geom(qC/ang2bohr, y[-natom*3:])
