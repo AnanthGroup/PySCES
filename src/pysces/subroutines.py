@@ -1557,7 +1557,7 @@ def rk4(initq, initp, tStop, H, restart, amu_mat, U, AN_mat):
     # hist_length = 2 #this is the only implemented length
     sign_flipper = SignFlipper(nel, 2, nnuc, 'LSC')
 
-    logger = SimulationLogger(dir=logging_dir, save_jobs=tcr_log_jobs, hdf5=hdf5_logging)
+    logger = SimulationLogger(dir=logging_dir, save_jobs=tcr_log_jobs, hdf5=hdf5_logging, save_timigs=False)
 
     # Get atom labels
     atoms = get_atom_label()

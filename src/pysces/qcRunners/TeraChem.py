@@ -1465,6 +1465,15 @@ class TCRunner(QCRunner):
         
         self._logger._write(data_to_save)
 
+        #   print timings
+        print()
+        print('Terachem Job Timings:\n')
+        print('   Job        Client              Name        Time (s)')
+        print('--------------------------------------------------------')
+        for i, job in enumerate(job_batch.jobs):
+            address = f'{job.client.host}:{job.client.port}'
+            print(f'  {i:3d}   {address:22s}  {job.name:10s}   {job.total_time:8.3f}')
+        print()
 
 
     def _extract_results(self, job_batch: TCJobBatch, job_batch_2: TCJobBatch = None):
@@ -1521,11 +1530,12 @@ class TCRunner(QCRunner):
         #   run the job balancing algorithm
         es_tasks = ESDerivTasks(grads, nacs, dipoles, tr_dipoles)
         balanced = balance_tasks_optimum(self._task_benchmarks, es_tasks, len(self._client_list))
+        self._tc_client_assignments = [[f'combo_{i}'] for i in range(len(self._client_list))]
 
         #   distribute the balanced tasks across all clients
         for i, client in enumerate(self._client_list):
             client_tasks = balanced[i]
-            job = TCJob(geom, self._base_options, 'energy', self._excited_type, 0)
+            job = TCJob(geom, self._base_options, 'energy', self._excited_type, 0, name=f'combo_{i}')
             prop_file_contents = ''
 
             #   handle ground state gradient differently
@@ -1561,6 +1571,7 @@ class TCRunner(QCRunner):
                 job.opts.update({'cis': 'yes', 'cistransdipolederiv': 'yes'})
                 prop_file_contents += f'cistransdipolederiv {state_1} {state_2}\n'
 
+            #   add in the rest of the excited state options
             job.opts.update(self._excited_options)
 
             self._apply_initial_frame_options(job)
@@ -1693,7 +1704,7 @@ class TCRunner(QCRunner):
             jobs_batch._remove_clients()
             self._debug_traj.append(jobs_batch)
 
-    def _assign_jobs_by_request(self, jobs_batch: TCJobBatch):
+    def _assign_clients_by_request(self, jobs_batch: TCJobBatch):
         all_job_names = [j.name for j in jobs_batch.jobs]
         clients_IDs_for_other = []
 
@@ -1719,9 +1730,6 @@ class TCRunner(QCRunner):
                 client = self._client_list[client_id]
                 sub_batch.set_client(client)
 
-    def assign_clients_load_balancing(self, jobs_batch: TCJobBatch):
-        pass
-
     def _assign_clients_equally(self, jobs_batch: TCJobBatch):
         n_clients = len(self._client_list)
         for j, job in enumerate(jobs_batch.jobs):
@@ -1733,12 +1741,11 @@ class TCRunner(QCRunner):
         debug_batch =  self._load_debug_batch(jobs_batch)
         if debug_batch is not None: 
             return debug_batch
- 
+        
         if len(self._tc_client_assignments) > 0:
-            self._assign_jobs_by_request(jobs_batch)
+            self._assign_clients_by_request(jobs_batch)
         else:
             self._assign_clients_equally(jobs_batch)
-
 
         if not jobs_batch.check_client():
             raise ValueError('Not all jobs have been assigned a client')
@@ -1777,7 +1784,9 @@ class TCRunner(QCRunner):
                 for key, v in list(parsed.items()):
                     if v is None:
                         parsed.pop(key)
-                j.results.update(parsed)
+                parsed.update(j.results)
+                j.results = parsed
+                # j.results.update(parsed)
 
 
     def _coordinate_exciton_overlap_files(self, overlap_file_loc=None, overlap_data=None):

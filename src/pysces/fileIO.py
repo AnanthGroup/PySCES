@@ -426,25 +426,6 @@ class SimulationLogger():
             self._h5_group = self._h5_file.create_group(hdf5_name)
             self._h5_group.create_dataset('time', shape=(0,), maxshape=(None,), chunks=True)
 
-        # self._loggers = []
-        # if save_energy:
-        #     self._loggers.append(EnergyLogger(os.path.join(dir, 'energy.txt'), self._h5_group))
-        #     self._loggers.append(ExEnergyLogger(os.path.join(dir, 'ex_energy.txt'), self._h5_group))
-        # if save_grad:
-        #     self._loggers.append(GradientLogger(os.path.join(dir, 'grad.txt'), self._h5_group))
-        # if save_nac:
-        #     self._loggers.append(NACLogger(os.path.join(dir, 'nac.txt'), self._h5_group))
-        # if save_corr:
-        #     self._loggers.append(CorrelationLogger(os.path.join(dir, 'corr.txt'), self._h5_group))
-        # if save_timigs:
-        #     self._loggers.append(TimingsLogger(os.path.join(dir, 'timings.txt'), self._h5_group))
-        # if save_elec:
-        #     self._loggers.append(ElectricPQLogger(os.path.join(dir, 'electric_pq.txt'), self._h5_group))
-        # if save_p:
-        #     self._loggers.append(NuclearPLogger(os.path.join(dir, 'nuclear_P.txt'), self._h5_group))
-        # if save_jobs:
-        #     self._loggers.append(TCJobsLoggerSequential(None, self._h5_file))
-
         self.loggers = {}
         if save_energy:
             self.loggers[EnergyLogger.name] =      EnergyLogger(os.path.join(dir, 'energy.txt'), self._h5_group)
@@ -476,11 +457,6 @@ class SimulationLogger():
             self.loggers[extra_logger.name] = extra_logger
 
         self.state_labels = opts.state_labels
-
-    def __del__(self):
-        pass
-        # if self._h5_file:
-        #     self._h5_file.to_file_and_dir()
 
 
     def write(self, time, total_E=None, elec_E=None, grads=None, NACs=None, timings=None, elec_p=None, elec_q=None, nuc_p=None, nuc_q=None, qc_runner_data=None, all_energies=None):
