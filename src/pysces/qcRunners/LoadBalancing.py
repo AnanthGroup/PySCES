@@ -53,7 +53,7 @@ class ElectronicStates:
         
     def add(self, state: int):
         if not isinstance(state, int) or state < 0:
-            raise ValueError(f"State must be an integer greater than 0, got: {state}")
+            raise ValueError(f"State must be an integer >= 0, got: {state}: {type(state)}")
         self._states.add(state)
         
     def remove(self, state: int):
@@ -288,7 +288,7 @@ def _partition_jobs(balanced_collection: '_BalancedCollection', es_tasks: ESDeri
 
     return collections
 
-def balance_tasks_optimum(benchmarks: list[ServerBenchmark], tasks: ESDerivTasks, num_workers: int, n_trials: int=500) -> list[ESDerivTasks]:
+def balance_tasks_optimum(benchmarks: list[ServerBenchmark], tasks: ESDerivTasks, num_workers: int, n_trials: int=500, print_report=False) -> list[ESDerivTasks]:
     '''
         Load balances the tasks across the servers using a greedy algorithm.
         The algorithm assigns tasks to the server with the least load after adding the task,
@@ -341,6 +341,14 @@ def balance_tasks_optimum(benchmarks: list[ServerBenchmark], tasks: ESDerivTasks
         rand_order = np.random.permutation(len(flattened_tasks))
         flattened_tasks = [flattened_tasks[i] for i in rand_order]
 
+    if print_report:
+        print('Best time:', best_time)
+        for i, server in enumerate(best_balanced.collections):
+            print(f"Server {i+1}:")
+            for task, t in zip(server.task_types, server.times):
+                print(f"  {task:20s} {t:6.2f}")
+            print(f"  Total time: {server.total_time:.2f}")
+            print() 
 
     #   for debugging
     global _assignments_optimum
@@ -490,7 +498,8 @@ def _debug_plot_comparisons(name: dict):
 def _debug_run_test():
     num_workers = 3
 
-    task_times = ServerBenchmark(GS_grad=0.23, EX_grad=2.22, GS_EX_NAC=2.01, EX_EX_NAC=3.22, GS_dipole=6.93, EX_dipole=46.07*0.8, GS_EX_dipole=39.32*0.65)
+    task_times = ServerBenchmark(GS_grad=0.23, EX_grad=2.22, GS_EX_NAC=2.01, EX_EX_NAC=3.22, GS_dipole=6.93, EX_dipole=46.07, GS_EX_dipole=39.32)
+    # task_times = ServerBenchmark(GS_grad=0.23, EX_grad=2.22, GS_EX_NAC=2.01, EX_EX_NAC=3.22, GS_dipole=6.93, EX_dipole=46.07, GS_EX_dipole=39.32)
 
     benchmarks = []
     for i in range(0, num_workers):

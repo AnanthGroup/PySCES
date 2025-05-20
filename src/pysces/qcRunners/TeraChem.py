@@ -58,7 +58,7 @@ def synchronized(function):
 class TCClientExtra(TCPBClient):
     host_port_to_ID: dict = {}
 
-    def __init__(self, host: str = "127.0.0.1", port: int = 11111, debug=False, trace=False, log=True, server_root='.') -> None:
+    def __init__(self, host: str = "127.0.0.1", port: int = 11111, debug=False, trace=False, log=True, server_root='.'):
         """
         Initializes a TCClientExtra object.
 
@@ -531,6 +531,46 @@ class TCClientExtra(TCPBClient):
         with open(file_loc, mode) as file:
             file.write(data)
 
+
+
+class TCCLientExtraDebug(TCClientExtra):
+
+    debug_data: dict[int, dict]= None
+
+    def __init__(self, host: str = "127.0.0.1", port: int = 11111, debug=False, trace=False, log=True, server_root='.'):
+        super().__init__(host, port, debug, trace, log, server_root)
+
+    def startup(self, max_wait=10, time_btw_check=1):
+        print('DEBUG MODE: Setting up new client ', self.host, self.port)
+
+    def compute_job(self, job: TCJob, append_tc_out=False, use_guess_files=True, start_fresh=False):
+        print('DEBUG MODE: Computing job')
+
+        results = self.debug_data[job.jobID].results
+
+        if start_fresh:
+            self.clean_up_stale_files()
+
+        #   assign the guess files to the current job
+        if use_guess_files:
+            self.assign_guess_files(job)
+
+        #   set the results of the job
+        results['run'] = job.job_type
+        results.update(job.opts)
+        if append_tc_out:
+            self._append_output_file(results)
+        job.results = results.copy()
+        self.prev_job = job
+
+        #   set the guess files for the next job
+        self.set_guess_files_from_job(job)
+
+        return results
+
+
+    
+
 class TCServerProcess(subprocess.Popen):
     def __init__(self, port, gpus=[]):
         self.gpus = gpus
@@ -696,6 +736,14 @@ class TCJob():
 
         TCJob.__job_counter += 1
         self.__jobID = TCJob.__job_counter
+
+    def __hash__(self) -> int:
+        return hash(self.__jobID)
+    
+    def __eq__(self, other) -> bool:
+        if not isinstance(other, TCJob):
+            return False
+        return self.__jobID == other.__jobID
 
     def __repr__(self) -> str:
         out_str = '('
@@ -960,7 +1008,7 @@ class TCRunner(QCRunner):
         # self.job_batch_history = deque(maxlen=4)
 
         # Debug trajectory
-        self._debug_traj = []
+        self._debug_traj = {}
         self._load_debug_trajectory()  # Load debug trajectory if applicable
         self._initial_ref_nacs = tc_opts._initial_ref_nacs
 
@@ -983,8 +1031,10 @@ class TCRunner(QCRunner):
         self._task_benchmarks = self._get_default_task_benchmarks()
         
     def _get_default_task_benchmarks(self):
-        single_benchmark = ServerBenchmark(GS_grad=0.23, EX_grad=2.22, GS_EX_NAC=2.01, EX_EX_NAC=3.22, GS_dipole=6.93, EX_dipole=46.07, GS_EX_dipole=39.32)
-        benchmarks = [single_benchmark for _ in range(len(self._client_list))]
+        # single_benchmark = ServerBenchmark(GS_grad=0.23, EX_grad=2.22, GS_EX_NAC=2.01, EX_EX_NAC=3.22, GS_dipole=6.93, EX_dipole=46.07, GS_EX_dipole=39.32)
+        single_benchmark = ServerBenchmark(GS_grad=0.12, EX_grad=1.16, GS_EX_NAC=1.05, EX_EX_NAC=1.68, GS_dipole=3.61, EX_dipole=23.98, GS_EX_dipole=20.46, EX_EX_dipole=47.95)
+        max_n_benchmark = max(1, len(self._client_list)) # to ensure debug loading works
+        benchmarks = [single_benchmark for _ in range(max_n_benchmark)]
         for i, bm in enumerate(benchmarks):
             bm.name = f'Server_{i}'
             bm.address = f'{self._hosts[i]}'
@@ -1170,12 +1220,15 @@ class TCRunner(QCRunner):
         self._server_root_list = self._server_roots
 
         for h, p, s in zip(self._hosts, self._ports, self._server_roots):
+            # if _DEBUG_LOAD_TRAJ:
+            #     # self._client_list = [None]*len(self._hosts)
+            #     print('DEBUG_TRAJ set, TeraChem clients will not be opened')
+            #     break
+
             if _DEBUG_LOAD_TRAJ:
-                # self._client_list.append(None)
-                self._client_list = []
-                print('DEBUG_TRAJ set, TeraChem clients will not be opened')
-                break
-            client = TCClientExtra(host=h, port=p, server_root=s)
+                client = TCCLientExtraDebug(h, p, s)
+            else:
+                client = TCClientExtra(host=h, port=p, server_root=s)
             client.startup(max_wait=self._max_wait)
             self._client_list.append(client)
             client.clean_up_stale_files()
@@ -1185,6 +1238,8 @@ class TCRunner(QCRunner):
         if _DEBUG_LOAD_TRAJ:
             with open(_DEBUG_LOAD_TRAJ, 'rb') as file:
                 self._debug_traj = pickle.load(file)
+
+        TCCLientExtraDebug.debug_data = self._debug_traj
 
     def _print_options_summary(self):
         exclude_keys = ['atoms', 'cisrestart']
@@ -1448,8 +1503,9 @@ class TCRunner(QCRunner):
 
         self._log_jobs(job_batch, phase_vars.time)
 
-        all_energies, elecE, grad, nac, trans_dips = self._extract_results(job_batch)
-        self._finalize_frame(job_batch, nac)
+        all_energies, elecE, grad, nac, trans_dips, mu_deriv_matrix = self._extract_results(job_batch)
+        self._initialize_nac_sign(nac)
+        self._finalize_frame(job_batch)
 
         return (all_energies, elecE, grad, nac, trans_dips, job_batch.timings)
     
@@ -1476,19 +1532,14 @@ class TCRunner(QCRunner):
         print()
 
 
-    def _extract_results(self, job_batch: TCJobBatch, job_batch_2: TCJobBatch = None):
-        #   combine the 
-        all_results = list(job_batch.results_list)
-        if job_batch_2 is not None:
-            all_results += list(job_batch_2.results_list)
-
+    def _extract_results(self, job_batch: TCJobBatch):
         if self._combine_jobs:
-            return format_combo_job_results(all_results, self._grads)
+            return format_combo_job_results(job_batch.results_list, self._grads)
         else:
-            return format_output_LSCIVR(all_results)
+            return format_output_LSCIVR(job_batch.results_list)
         
-
-    def _finalize_frame(self, job_batch: TCJobBatch, nac=None):
+    def _initialize_nac_sign(self, nac: np.ndarray):
+        #   TODO: split this into two functions
         if (nac is not None) and (self._initial_ref_nacs is not None):
             print('SETTING INITIAL NACS FROM SETTINGS')
             for i in range(nac.shape[0]):
@@ -1498,6 +1549,8 @@ class TCRunner(QCRunner):
                     nac[j, i] = -nac[i, j]
             self._initial_ref_nacs = None
 
+
+    def _finalize_frame(self, job_batch: TCJobBatch):
         self._prev_job_batch = job_batch
         self._frame_counter += 1
         self._prev_jobs = job_batch.jobs
@@ -1514,9 +1567,9 @@ class TCRunner(QCRunner):
         else:
             raise NotImplementedError('Interpolation of gradients and NACs is not yet implemented')
 
-    def create_jobs(self, geom, energy_only = False, grads = [], nacs = []):
+    def create_jobs(self, geom, energy_only = False, grads = [], nacs = [], dipoles = [], tr_dipoles = []):
         if self._combine_jobs:
-            return self._create_jobs_bulk(geom, energy_only, grads, nacs)
+            return self._create_jobs_bulk(geom, energy_only, grads, nacs, dipoles, tr_dipoles)
         else:
             return self._create_jobs_singles(geom, energy_only, grads, nacs)
 
@@ -1557,19 +1610,19 @@ class TCRunner(QCRunner):
 
             for state in client_tasks.gs_dipole_grad:
                 job.opts.update({'cis': 'yes', 'dipolederivative': 'yes'})
-                prop_file_contents += f'dipolederivative {state}\n'
+                # prop_file_contents += f'dipolederivative {state}\n'
 
             for state in client_tasks.ex_dipole_grads:
                 job.opts.update({'cis': 'yes', 'cisdipolederiv': 'yes'})
-                prop_file_contents += f'cisdipolederiv {state}\n'
+                prop_file_contents += f'dipolederiv {state}\n'
 
             for state_1, state_2 in client_tasks.gs_ex_dipole_grads:
                 job.opts.update({'cis': 'yes', 'cistransdipolederiv': 'yes'})
-                prop_file_contents += f'cistransdipolederiv {state_1} {state_2}\n'
+                prop_file_contents += f'transdipolederiv {state_1} {state_2}\n'
 
             for state_1, state_2 in client_tasks.ex_ex_dipole_grads:
                 job.opts.update({'cis': 'yes', 'cistransdipolederiv': 'yes'})
-                prop_file_contents += f'cistransdipolederiv {state_1} {state_2}\n'
+                prop_file_contents += f'transdipolederiv {state_1} {state_2}\n'
 
             #   add in the rest of the excited state options
             job.opts.update(self._excited_options)
@@ -1702,7 +1755,11 @@ class TCRunner(QCRunner):
         if _DEBUG_SAVE_TRAJ:
             print("APPENDING DEBUG TRAJ ", jobs_batch)
             jobs_batch._remove_clients()
-            self._debug_traj.append(jobs_batch)
+            for job in jobs_batch.jobs:
+                self._debug_traj[job.jobID] = job
+            # self._debug_traj.append(jobs_batch)
+            with open(_DEBUG_SAVE_TRAJ, 'wb') as file:
+                pickle.dump(self._debug_traj, file)
 
     def _assign_clients_by_request(self, jobs_batch: TCJobBatch):
         all_job_names = [j.name for j in jobs_batch.jobs]
@@ -1738,9 +1795,9 @@ class TCRunner(QCRunner):
     def _send_jobs_to_clients(self, jobs_batch: TCJobBatch):
 
         #   debug mode
-        debug_batch =  self._load_debug_batch(jobs_batch)
-        if debug_batch is not None: 
-            return debug_batch
+        # debug_batch =  self._load_debug_batch(jobs_batch)
+        # if debug_batch is not None: 
+        #     return debug_batch
         
         if len(self._tc_client_assignments) > 0:
             self._assign_clients_by_request(jobs_batch)
@@ -1767,14 +1824,15 @@ class TCRunner(QCRunner):
                 for f in futures:
                     f.result()
 
+        self._save_debug_batch(jobs_batch)
         self._parse_tc_out_data(jobs_batch)
         self._prev_results = jobs_batch.results_list
         self._set_avg_max_times(jobs_batch.timings)
         self._coordinate_exciton_overlap_files()
-        self._save_debug_batch(jobs_batch)
         self._write_debug_batch()
 
         return jobs_batch
+
 
     def _parse_tc_out_data(self, jobs_batch: TCJobBatch):
         if _HAS_TCPARSE:
@@ -2099,67 +2157,168 @@ def _run_batch_jobs(jobs_batch: TCJobBatch):
                     time.sleep(10)
                     client.restart()
 
-def _extract_subset_transition_data(flattend_data: np.array | list, states: list[int], sym: str):
 
-    #   First we put all of the transition data into a matrix that is referenced by (state_i, state_j)
-    flattend_data = np.array(flattend_data)
-    n_elms = flattend_data.shape[-1]
-    max_states = max(states) + 1
-    all_matrix_data = np.zeros((max_states, max_states, n_elms))
-    state_pairs = [(i, j) for i in range(max_states) for j in range(i+1, max_states)]
 
-    for pair, values in zip(state_pairs, flattend_data):
-        i, j = pair
-        all_matrix_data[i, j] = values
-        all_matrix_data[j, i] = -values
-    
-    #   Now we only keep the data for the states we are interested in
+def _extract_subset_transition_data(in_data: np.array | list, states: list[int], sym: str):
     if sym.lower() == 's':
         scale = 1.0
     elif sym.lower() == 'a':
         scale = -1.0
     else:
         raise ValueError(f'Invalid symmetry type {sym}, must be "s" or "a"')
+
+    #   First we put all of the transition data into a matrix that is referenced by (state_i, state_j)
+    max_states = max(states) + 1
+    all_matrix_data = [[None for _ in range(max_states)] for _ in range(max_states)]
+    state_pairs = [(i, j) for i in range(max_states) for j in range(i+1, max_states)]
+    data_shape = None
+    for pair, values in zip(state_pairs, in_data):
+        i, j = pair
+        all_matrix_data[i][j] = all_matrix_data[j][i] = values
+        if values is not None:
+            data_shape = np.shape(values)
     
-    subset_matrix_data = np.zeros((len(states), len(states), n_elms))
+    #   Now we only keep the data for the states we are interested in
+    subset_matrix_data = np.zeros((len(states), len(states), *data_shape))
+
     for i, state1 in enumerate(states):
         for j, state2 in enumerate(states):
             if i >= j:
                 continue
-            subset_matrix_data[i, j] =         all_matrix_data[state1, state2]
-            subset_matrix_data[j, i] = scale * all_matrix_data[state1, state2]
+            subset_matrix_data[i, j] =         np.array(all_matrix_data[state1][state2])
+            subset_matrix_data[j, i] = scale * np.array(all_matrix_data[state2][state1])
 
     return subset_matrix_data
+
+def _fill_with_zeros(data: list | np.array):
+    if None not in data:
+        return data
+
+    #   get shape of the first non-None item
+    shape = None
+    for item in data_list:
+        if item is not None:
+            shape = np.array(item).shape
+            break
+
+    #   second failsafe
+    if shape is None:
+        return np.array(data)
+
+    #   fill with zeros
+    result = []
+    for item in data_list:
+        if item is None:
+            result.append(np.zeros(shape))
+        else:
+            result.append(item)
+    return np.array(result)
 
 def format_combo_job_results(job_data: list[dict], states: list[int]):
     '''
         Combine the job data from multiple jobs into a single dictionary.
     '''
     validated_list = [TCJobData.model_validate(data) for data in job_data]
-    validated = validated_list[0]
+    validated: TCJobData = validated_list[0]
+    validated.append_results(*validated_list[1:])
+
+    #   extract the energies
+    all_energies = np.array(validated.energy)
+    energies = all_energies[states]
+
+    n_states = len(states)
+    n_atoms = len(validated.geom)
+    gradients = np.zeros((n_states, n_atoms*3))
+    nacs = np.zeros((n_states, n_states, n_atoms*3))
+    mu_deriv_matrix = np.zeros((n_states, n_states, n_atoms*3, 3))
+    mu_tr_matrix = np.zeros((n_states, n_states, 3))
+
+    #   extend to lists of None so the following for-loop structure
+    #   is compatable with lists of actual arrays
+    max_state = max(states)
+    if validated.cis_gradients is None:
+        validated.cis_gradients = [None] *max_state
+    if validated.cis_unrelaxed_dipole_deriv is None:
+        validated.cis_unrelaxed_dipole_deriv = [None] * max_state
+    if validated.cis_transition_dipole_deriv is None:
+        validated.cis_transition_dipole_deriv = [None] * (max_state * (max_state + 1) // 2)
+
+    tc_gradients = [validated.gs_gradient] + validated.cis_gradients
+    tc_dipole_derivs = [validated.dipole_deriv] + validated.cis_unrelaxed_dipole_deriv
+    for i, state_i in enumerate(states):
+        #   extract the gradients
+        g = tc_gradients[state_i]
+        if g is not None:
+            gradients[state_i] = np.array(g).flatten()
+
+        #   extract the diagonal dipole derivatives
+        mu_grad = tc_dipole_derivs[state_i]
+        if mu_grad is not None:
+            mu_deriv_matrix[i, i] = np.array(mu_grad).reshape((3, n_atoms*3)).T
+
+        for j, state_j in enumerate(states):
+            if i >= j:
+                continue
+
+            #   extract the NACs
+            nac = validated.cis_couplings.pop(0)
+            if nac is not None:
+                nacs[i, j] = np.array(nac).flatten()
+                nacs[j, i] = -nacs[i, j]
+
+            #   extract the transition dipole derivatives
+            mu_tr_deriv = validated.cis_transition_dipole_deriv.pop(0)
+            if mu_tr_deriv is not None:
+                mu_tr_deriv = np.array(mu_tr_deriv).reshape((3, n_atoms*3)).T
+                mu_deriv_matrix[i, j] = mu_tr_deriv
+                mu_deriv_matrix[j, i] = mu_tr_deriv
+
+            #   extract the transition dipoles
+            mu_tr = validated.cis_transition_dipoles.pop(0)
+            if mu_tr is not None:
+                mu_tr_matrix[i, j] = mu_tr
+                mu_tr_matrix[j, i] = mu_tr
+
+
+    return (all_energies, energies, gradients, nacs, mu_tr_matrix, mu_deriv_matrix)
+
+def format_combo_job_results_OLD(job_data: list[dict], states: list[int]):
+    '''
+        Combine the job data from multiple jobs into a single dictionary.
+    '''
+    validated_list = [TCJobData.model_validate(data) for data in job_data]
+    validated: TCJobData = validated_list[0]
     validated.append_results(*validated_list[1:])
     
     #   extract the gradients
-    all_gradients = validated.cis_gradients
-    all_gradients = [validated.gs_gradient] + all_gradients
-    all_gradients = np.array(all_gradients).reshape((len(all_gradients), -1))
-    gradients = all_gradients[states]
+    all_gradients = [validated.gs_gradient] + validated.cis_gradients
+    gradients = np.array([all_gradients[i] for i in states])
+    gradients = np.reshape(gradients, (len(states), -1))
 
     #   extract the energies
     all_energies = np.array(validated.energy)
     energies = all_energies[states]
     
     #   extract the NACs
-    couplings = np.array(validated.cis_couplings)
-    all_nacs = np.reshape(couplings, (couplings.shape[0], -1))
-    nacs = _extract_subset_transition_data(all_nacs, states, 'a')
+    nacs = _extract_subset_transition_data(validated.cis_couplings, states, 'a')
+    nacs = np.reshape(nacs, nacs.shape[0:-2] + (-1,))
 
     #   extract the transition dipoles
     all_mu_tr = np.array(validated.cis_transition_dipoles)
     mu_tr = _extract_subset_transition_data(all_mu_tr, states, 's')
 
+    #   extract the transition dipole derivatives
+    mu_deriv_matrix = _extract_subset_transition_data(validated.cis_transition_dipole_deriv, states, 's')
 
-    return (all_energies, energies, gradients, nacs, mu_tr)
+    #   form the final dipole derivative matrix
+    mu_diagonal_grads = [validated.dipole_deriv] + validated.cis_unrelaxed_dipole_deriv
+    for i, state in enumerate(states):
+        mu_deriv_matrix[i, i] = mu_diagonal_grads[state]
+    mu_deriv_matrix = np.reshape(mu_deriv_matrix, mu_deriv_matrix.shape[0:-2] + (-1,))
+    mu_deriv_matrix = mu_deriv_matrix.transpose((0, 1, 3, 2))
+    
+
+    return (all_energies, energies, gradients, nacs, mu_tr, mu_deriv_matrix)
     
 
 
@@ -2251,5 +2410,5 @@ def format_output_LSCIVR(job_data: list[dict]):
                 ivr_trans_dips = None
     print(" ---------------------------------")
 
-    return all_energies, ivr_energies, ivr_grads, ivr_nacs, ivr_trans_dips
+    return all_energies, ivr_energies, ivr_grads, ivr_nacs, ivr_trans_dips, None
 

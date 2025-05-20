@@ -1595,7 +1595,7 @@ def rk4(initq, initp, tStop, H, restart, amu_mat, U, AN_mat):
             all_energies, elecE, grad, nac, trans_dips, timings = tc_runner.run_new_geom(PhaseVars(time=t, nuc_q0=qC))
             qc_runner_data = tc_runner._prev_job_batch
         else:
-            timings, all_energies, elecE, grad, nac, trans_dips = qc_runner.run_new_geom(qC/ang2bohr, p[nel:])
+            all_energies, elecE, grad, nac, trans_dips, timings = qc_runner.run_new_geom(geom=qC/ang2bohr, momentum=p[nel:])
 
         # Total initial energy at t=0
         init_energy = get_energy(au_mas, q, p, elecE)
@@ -1643,7 +1643,7 @@ def rk4(initq, initp, tStop, H, restart, amu_mat, U, AN_mat):
             all_energies, elecE, grad, nac, trans_dips, timings = tc_runner.run_new_geom(PhaseVars(time=t, nuc_q0=qC))
             qc_runner_data = tc_runner._prev_job_batch
         else:
-            timings, all_energies, elecE, grad, nac, trans_dips = qc_runner.run_new_geom(qC/ang2bohr, y[-natom*3:])
+            timings, all_energies, elecE, grad, nac, trans_dips = qc_runner.run_new_geom(geom=qC/ang2bohr, momentum=y[-natom*3:])
         
         #correct nac sign
         nac = sign_flipper.correct_nac_sign(nac, trans_dips)

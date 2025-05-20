@@ -453,7 +453,6 @@ class SimulationLogger():
         #   append additionally specified loggers
         for extra_logger in opts.extra_loggers:
             extra_logger.setup(dir, self._h5_file)
-            # self._loggers.append(extra_logger)
             self.loggers[extra_logger.name] = extra_logger
 
         self.state_labels = opts.state_labels
