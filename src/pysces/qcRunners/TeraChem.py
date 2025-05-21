@@ -2217,12 +2217,18 @@ def _fill_with_zeros(data: list | np.array):
 def format_combo_job_results(job_data: list[dict], states: list[int]):
     '''
         Combine the job data from multiple jobs into a single dictionary.
+
+        Note
+        ----
+            Only works with CIS job data for now
     '''
+
+    DEBYE_2_AU = 0.3934303
     validated_list = [TCJobData.model_validate(data) for data in job_data]
     validated: TCJobData = validated_list[0]
     validated.append_results(*validated_list[1:])
 
-    #   extract the energies
+    #   energies
     all_energies = np.array(validated.energy)
     energies = all_energies[states]
 
@@ -2231,7 +2237,7 @@ def format_combo_job_results(job_data: list[dict], states: list[int]):
     gradients = np.zeros((n_states, n_atoms*3))
     nacs = np.zeros((n_states, n_states, n_atoms*3))
     mu_deriv_matrix = np.zeros((n_states, n_states, n_atoms*3, 3))
-    mu_tr_matrix = np.zeros((n_states, n_states, 3))
+    mu_matrix = np.zeros((n_states, n_states, 3))
 
     #   extend to lists of None so the following for-loop structure
     #   is compatable with lists of actual arrays
@@ -2245,42 +2251,49 @@ def format_combo_job_results(job_data: list[dict], states: list[int]):
 
     tc_gradients = [validated.gs_gradient] + validated.cis_gradients
     tc_dipole_derivs = [validated.dipole_deriv] + validated.cis_unrelaxed_dipole_deriv
+    tc_dipoles = [np.array(validated.dipole_vector)*DEBYE_2_AU] + validated.cis_unrelaxed_dipoles
+
     for i, state_i in enumerate(states):
-        #   extract the gradients
+        #   gradients
         g = tc_gradients[state_i]
         if g is not None:
             gradients[state_i] = np.array(g).flatten()
 
-        #   extract the diagonal dipole derivatives
+        #   diagonal dipole derivatives
         mu_grad = tc_dipole_derivs[state_i]
         if mu_grad is not None:
             mu_deriv_matrix[i, i] = np.array(mu_grad).reshape((3, n_atoms*3)).T
+
+        #   diagonal dipoles
+        mu = tc_dipoles[state_i]
+        if mu is not None:
+            mu_matrix[i, i] = np.array(mu).flatten()
 
         for j, state_j in enumerate(states):
             if i >= j:
                 continue
 
-            #   extract the NACs
+            #   NACs
             nac = validated.cis_couplings.pop(0)
             if nac is not None:
                 nacs[i, j] = np.array(nac).flatten()
                 nacs[j, i] = -nacs[i, j]
 
-            #   extract the transition dipole derivatives
+            #   transition dipole derivatives
             mu_tr_deriv = validated.cis_transition_dipole_deriv.pop(0)
             if mu_tr_deriv is not None:
                 mu_tr_deriv = np.array(mu_tr_deriv).reshape((3, n_atoms*3)).T
                 mu_deriv_matrix[i, j] = mu_tr_deriv
                 mu_deriv_matrix[j, i] = mu_tr_deriv
 
-            #   extract the transition dipoles
+            #   transition dipoles
             mu_tr = validated.cis_transition_dipoles.pop(0)
             if mu_tr is not None:
-                mu_tr_matrix[i, j] = mu_tr
-                mu_tr_matrix[j, i] = mu_tr
+                mu_matrix[i, j] = mu_tr
+                mu_matrix[j, i] = mu_tr
 
 
-    return (all_energies, energies, gradients, nacs, mu_tr_matrix, mu_deriv_matrix)
+    return (all_energies, energies, gradients, nacs, mu_matrix, mu_deriv_matrix)
 
 def format_combo_job_results_OLD(job_data: list[dict], states: list[int]):
     '''
