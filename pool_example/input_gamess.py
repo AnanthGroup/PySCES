@@ -28,7 +28,7 @@ option = {
     # $elmom card
     'elmom': {'iemom': '1', 'iemint': '1'},
     # $guess card
-    'guess': {'guess': 'moread', 'norb': '169'},
+    'guess': {'guess': 'moread', 'norb': '36'},
     # $data card
     'data': {'sym': 'c1'},
     }
