@@ -589,7 +589,7 @@ def run_gms_cas(input_name, opt, atoms, AN_mat, qCart, submit_script_loc=None):
         sp.call('./run_%s' %input_name)
     else:
         #   call supplied submission script
-        output_file = 'cas.out'
+        output_file = 'ES.out'
         script_loc = os.path.abspath(submit_script_loc)
         sp.call(f'{script_loc} {input_file} {output_file}'.split())
     print("Done running GAMESS.")
@@ -866,7 +866,7 @@ def ME_ABM(restart, initq, initp, amu_mat, U, com_ang, AN_mat):
     coord = np.zeros((2, ndof, nstep+1))
     qpred, ppred, qcorr, pcorr = np.zeros(ndof), np.zeros(ndof), np.zeros(ndof), np.zeros(ndof)
     energy = np.zeros(nstep+1)
-    input_name = 'cas'
+    input_name = 'ES'
     flag_energy, flag_orb, flag_grad, flag_nac = 0, 0, 0, 0
     
     # Format descriptor depending on the number of electronic states
@@ -1332,7 +1332,7 @@ def integrate(F, xvar, yvar, xStop, tol, input_name, atoms, amu_mat, qC):
 # =============================================================================
 def BulStoer(initq, initp, xStop, H, tol, restart, amu_mat, U, com_ang, AN_mat):
    proceed      = True
-   input_name   = 'cas'
+   input_name   = 'ES'
    au_mas = np.diag(amu_mat) * amu2au # masses of atoms in atomic unit (vector)
 
    # Format descriptor depending on the number of electronic states
@@ -1579,7 +1579,7 @@ def rk4(initq, initp, tStop, H, restart, amu_mat, U, com_ang, AN_mat):
     job_results = {}
     qc_timings = {}
     proceed      = True
-    input_name   = 'cas'
+    input_name   = 'ES'
     au_mas = np.diag(amu_mat) * amu2au # masses of atoms in atomic unit (vector)
 
     # Format descriptor depending on the number of electronic states
