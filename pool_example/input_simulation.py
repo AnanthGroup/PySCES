@@ -25,10 +25,6 @@ pN0 = 0.0
 
 # Specify an integrator (Choose from 'ABM', 'BSH', and 'RK4')
 integrator = 'RK4'
-# Size of time step (a.u.), number of steps (Only relevant for ABM)
-timestep, nstep = 1.0, 16700
-# Maximum propagation time (a.u.), BSH step to be tried (a.u.), error tolerance (ratio) (Only relevant for BSH)
-tmax_bsh, Hbsh, tol = 10, 3.0, 0.01 
 # Maximum propagation time (a.u.), one Runge-Kutta step (a.u.) (Only relevant for RK4)
 tmax_rk4, Hrk4 = 60, 5.0 
 
