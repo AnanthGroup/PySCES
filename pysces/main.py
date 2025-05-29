@@ -172,13 +172,26 @@ def main():
                 if os.path.exists(os.path.join(__location__, 'vec_gamess')):
                     with open(os.path.join(__location__, 'vec_gamess'), 'r') as f:
                         previous_line = None
-                        for current_line in f:
-                            if '$end' in current_line.split()[0].casefold():
-                                norb_vec_gamess = int(previous_line.split()[0])
+                        nlines = 0
+                        while True:
+                            current_line = f.readline()
+                            nlines += 1
+                            if nlines == 1 and '$vec' not in current_line.split()[0].casefold():
+                                print("FILE FORMAT ERROR: vec_gamess does not start with ' $vec'.")
+                                print("Add a line at the beginning of vec_gamess that says ' $vec'.")
+                                exit()
+                            if not current_line:
+                                print("FILE FORMAT ERROR: vec_gamess does not end with ' $end'. ")
+                                print("Add a line at the end of vec_gamess that says ' $end'.")
+                                exit()
+                            if '$end' in current_line.casefold():
+                                nlines_AO = int(previous_line[2:5])
+                                break
                             else:
                                 previous_line = current_line
+                    norb_vec_gamess = int(nlines/nlines_AO)
                     if norb_input > norb_vec_gamess:
-                        print('ERROR: Invalid number of guess orbitals is requested in input_gamess.py.')
+                        print('GAMESS INPUT ERROR: Invalid number of guess orbitals is requested in input_gamess.py.')
                         print('Make sure the number of orbitals contained in vec_gamess >= the number provided in input_gamess.')
                         exit()
                 else:
