@@ -515,7 +515,7 @@ def write_gms_input(input_name, opt, atoms, AN_mat, cart_ang):
                         f.write(' ${:s} '.format(card) + line + ' $end\n')
 
     f.write(' $data \n')
-    f.write("Always blame ab initio calculations, not the dynamcis code I wrote ;) \n")
+    f.write("Hope you're having a good day with LSC-IVR ;) \n")
     f.write(opt['data']['sym']+' \n')
     for i in range(natom):
         f.write('{:<3s}{:<6.1f}{:>12.5f}{:>12.5f}{:>12.5f}\n'.format(atoms[i], AN_mat[3*i,3*i], cart_ang[3*i+0], cart_ang[3*i+1], cart_ang[3*i+2]))
@@ -526,11 +526,11 @@ def write_gms_input(input_name, opt, atoms, AN_mat, cart_ang):
         g = open(os.path.join(__location__, 'vec_gamess'), 'r')
         copy = False
         for line in g:
-            if line.strip() == '$VEC':
+            if line.strip().casefold() == '$vec':
                 copy = True
             if copy:
                 f.write(line)
-            if line.strip() == '$END':
+            if line.strip().casefold() == '$end':
                 copy = False
         g.close()
     f.close()
