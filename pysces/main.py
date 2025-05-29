@@ -164,6 +164,26 @@ def main():
             print("SETUP ERROR: The provided label of the initial electronic state is not included in 'elab',")
             print("or in the first nel entries of elab.")
             exit()
+
+        # Check if the number of guess orbitals in vec_gamess makes sense with the input.
+        if gms.get('guess', '') != '':
+            if gms['guess'].get('norb', '') != '':
+                norb_input = int(gms['guess']['norb'])
+                if os.path.exists(os.path.join(__location__, 'vec_gamess')):
+                    with open(os.path.join(__location__, 'vec_gamess'), 'r') as f:
+                        previous_line = None
+                        for current_line in f:
+                            if '$end' in current_line.split()[0].casefold():
+                                norb_vec_gamess = int(previous_line.split()[0])
+                            else:
+                                previous_line = current_line
+                    if norb_input > norb_vec_gamess:
+                        print('ERROR: Invalid number of guess orbitals is requested in input_gamess.py.')
+                        print('Make sure the number of orbitals contained in vec_gamess >= the number provided in input_gamess.')
+                        exit()
+                else:
+                    print('ERROR: vec_gamess not provided though reading guess orbitals is requested.')
+                    exit()
         
     ndof = 3*natom + nel
     initq, initp = np.zeros(ndof-6), np.zeros(ndof-6)
