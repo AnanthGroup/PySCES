@@ -2226,7 +2226,8 @@ def format_combo_job_results(job_data: list[dict], states: list[int]):
     DEBYE_2_AU = 0.3934303
     validated_list = [TCJobData.model_validate(data) for data in job_data]
     validated: TCJobData = validated_list[0]
-    validated.append_results(*validated_list[1:])
+    if len(validated_list) > 1:
+        validated.append_results(*validated_list[1:])
 
     #   energies
     all_energies = np.array(validated.energy)
@@ -2248,6 +2249,8 @@ def format_combo_job_results(job_data: list[dict], states: list[int]):
         validated.cis_unrelaxed_dipole_deriv = [None] * max_state
     if validated.cis_transition_dipole_deriv is None:
         validated.cis_transition_dipole_deriv = [None] * (max_state * (max_state + 1) // 2)
+    if validated.cis_couplings is None:
+        validated.cis_couplings = [None] * (max_state * (max_state + 1) // 2)
 
     tc_gradients = [validated.gs_gradient] + validated.cis_gradients
     tc_dipole_derivs = [validated.dipole_deriv] + validated.cis_unrelaxed_dipole_deriv
