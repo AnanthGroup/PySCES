@@ -1140,7 +1140,7 @@ class TCRunner(QCRunner):
                 warnings.warn(f'Number of states in TC options is less than `max_state`. Increasing number of states to {max_state}')
                 excited_options['cassinglets'] = max_state + 1
 
-        if max_state > 0:
+        if max_state > 0 and excited_type == 'cis':
             excited_options['cisrestart'] = 'cis_restart_' + str(os.getpid())
         base_options['purify'] = False
         base_options['atoms'] = self._atoms
@@ -1509,6 +1509,8 @@ class TCRunner(QCRunner):
 
         return (all_energies, elecE, grad, nac, trans_dips, job_batch.timings)
     
+    # def set_logger():
+
     def _log_jobs(self, job_batch, time):
         if self._logger is None:
             return
@@ -1519,7 +1521,8 @@ class TCRunner(QCRunner):
             res['timestep'] = time
             data_to_save.append(res)
         
-        self._logger._write(data_to_save)
+        if self._logger:
+            self._logger._write(data_to_save)
 
         #   print timings
         print()

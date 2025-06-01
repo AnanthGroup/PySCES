@@ -178,7 +178,7 @@ com_ang = np.array([0.0, 0.0, 0.0])
 
 
 
-def input_local_settings():
+def input_local_settings(**kwargs):
     '''
         Load in settings from the local input file
     '''
@@ -195,7 +195,11 @@ def input_local_settings():
         except Exception as e:
             print("Error loading local settings: ", e)
             return
-
+        
+    if len(kwargs) > 0:
+        #   if there are any kwargs, we will update the locals with them
+        for k, v in kwargs.items():
+            globals()[k] = v
 
     _check_settings(locals)
     _set_seed()
@@ -229,7 +233,6 @@ def _check_settings(local: dict):
         opts.p0 = [0.0]*nel
     if 'QC_RUNNER' in globals():
         opts.qc_runner = globals()['QC_RUNNER']
-        print('IN QC_RUNNER')
 
     #   set input format to the same type of QC runner
     if opts.mol_input_format == '':

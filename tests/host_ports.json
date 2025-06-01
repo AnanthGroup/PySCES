@@ -1,11 +1,11 @@
 {
-    "hosts": [
+    "tcr_host": [
         "10.1.1.165"
     ],
-    "ports": [
-        12340
+    "tcr_port": [
+        12341
     ],
-    "server_roots": [
-        "/home/cmyers7/scratch/single_servers/12340"
+    "tcr_server_root": [
+        "/home/cmyers7/scratch/single_servers/tmp1"
     ]
 }

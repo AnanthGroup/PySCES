@@ -1569,7 +1569,7 @@ def rk4(initq, initp, tStop, H, restart, amu_mat, U, AN_mat):
         tc_runner = TCRunner(atoms, tc_runner_opts)
         tc_runner._prev_ref_job = tcr_ref_job
         if tcr_log_jobs:
-            tc_runner._logger = logger.loggers['tc_job_data']
+            tc_runner._logger = logger.loggers.get('tc_job_data', None)
 
     #   Initialization
     if restart == 1:

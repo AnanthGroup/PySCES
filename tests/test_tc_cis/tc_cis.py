@@ -29,7 +29,11 @@ class Test_TC_CIS(unittest.TestCase):
 
     def test_jobs(self):
 
+        with open('../host_ports.json') as file:
+            tcr_settings = json.load(file)
         pysces.reset_settings()
+        pysces.options.input_local_settings(**tcr_settings)
+        pysces.options.make_logging_dir()
         pysces.run_simulation()
 
         #   check simple panda readable data
@@ -56,7 +60,7 @@ class Test_TC_CIS(unittest.TestCase):
             restart_ref = json.load(file)
         with open('restart.json') as file:
             restart_tst = json.load(file)
-        assert_dictionary(self, restart_ref, restart_tst, atol=1e-3)
+        assert_dictionary(self, restart_ref, restart_tst, atol=1e-6)
 
         cleanup()
 

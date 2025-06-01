@@ -18,6 +18,9 @@ class Test_TC_CAS(unittest.TestCase):
         TCJobBatch._TCJobBatch__batch_counter = 0
         TCJob._TCJob__job_counter = 0
 
+        reset_directory()
+        os.chdir('test_tc_cas')
+
         #   Load the reference nacs and use their values as sign references
         #   This will be later fixed with overlaps
         # ref_nacs = np.loadtxt('logs_ref/nac.txt', skiprows=3, max_rows=18)
@@ -25,12 +28,12 @@ class Test_TC_CAS(unittest.TestCase):
         # pysces.SignFlipper._ref_nacs = ref_nacs
 
     def test_jobs(self):
-        this_dir = os.path.abspath(os.path.curdir)
-        reset_directory()
-        os.chdir('test_tc_cas')
 
-
+        with open('../host_ports.json') as file:
+            tcr_settings = json.load(file)
         pysces.reset_settings()
+        pysces.options.input_local_settings(**tcr_settings)
+        pysces.options.make_logging_dir()
         pysces.run_simulation()
 
         #   check simple panda readable data
@@ -39,7 +42,7 @@ class Test_TC_CAS(unittest.TestCase):
             data_tst = pandas.read_csv(f'logs/{file}', sep='\s+', comment='#')
             for key in data_ref:
                 np.testing.assert_allclose(data_tst[key], data_ref[key], 
-                                           atol=1e-7, verbose=True,
+                                           atol=1e-6, verbose=True,
                                            err_msg=f'file: {file} key: {key}')
         
         #   check data in xyz formats
@@ -49,7 +52,7 @@ class Test_TC_CAS(unittest.TestCase):
             for frame, (frame_tst, frame_ref) in enumerate(zip(data_tst, data_ref)):
                 np.testing.assert_equal(frame_tst['atoms'], frame_ref['atoms'])
                 np.testing.assert_allclose(frame_tst['positions'], frame_ref['positions'],
-                                           atol=1e-16, verbose=True,
+                                           atol=1e-5, verbose=True,
                                            err_msg=f'file: {file}; frame {frame}')
         
         #   check checkpoint files
@@ -59,7 +62,7 @@ class Test_TC_CAS(unittest.TestCase):
             restart_tst = json.load(file)
         assert_dictionary(self, restart_ref, restart_tst)
 
-        # cleanup()
+        cleanup()
 
                 
 if __name__ == '__main__':

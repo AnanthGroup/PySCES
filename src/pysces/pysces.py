@@ -25,9 +25,9 @@ from pysces.input_simulation import *
 def main():
     print_ascii_art()
     run_modules()
-    run_simulation()
+    run_simulation_module()
 
-def run_simulation():
+def run_simulation_module():
     description = 'Main code to run LSC-IVR dynamics\n'
     description += 'When run, PySCES will look for a file named "local_settings.py" in \n'
     description += 'the current directory and use it to set the simulation parameters.\n'
@@ -37,12 +37,13 @@ def run_simulation():
     make_logging_dir()
     input_local_settings()
     print_settings()
+    run_simulation()
 
+def run_simulation():
     # TODO: Temporary fix for the global variables
     for k, v in opts.__dict__.items():
         globals()[k] = v
     set_subroutine_globals()
-
 
     ###################################
     ### Propagation of a trajectory ###
@@ -98,7 +99,7 @@ def run_simulation():
 
 
 modules_map = {'h5': run_h5_module, 
-               'run': run_simulation, 
+               'run': run_simulation_module, 
                'genrst': run_restart_module
                }
 def run_modules():

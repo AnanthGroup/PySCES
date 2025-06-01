@@ -17,10 +17,6 @@ restart_file_in = 'restart_start.json'
 QC_RUNNER = 'terachem'
 
 #   TeraChem runner options
-tcr_host = ['localhost']
-tcr_host = ['10.1.1.165']
-tcr_port = [1234]
-tcr_server_root = ['/scratch/cmyers7/single_servers/']
 tcr_job_options = {
         'method': 'hf',
         'basis': '6-31g*',

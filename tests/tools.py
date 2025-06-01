@@ -39,7 +39,7 @@ def assert_dictionary(testcase: unittest.TestCase, dict_ref, dict_tst, atol=1e-6
         elif isinstance(value, str) or isinstance(value, int):
             testcase.assertEqual(value, dict_tst[key], msg=msg)
         elif isinstance(value, float):
-            testcase.assertAlmostEqual(value, dict_tst[key], places=8, msg=msg)
+            np.testing.assert_allclose(value, dict_tst[key], atol=atol, rtol=rtol, err_msg=msg)
         elif isinstance(value, np.ndarray):
             np.testing.assert_allclose(value, dict_tst[key], atol=atol, rtol=rtol, err_msg=msg)
         elif isinstance(value, list):

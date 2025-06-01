@@ -443,7 +443,9 @@ class SimulationLogger():
         if save_p:
             self.loggers[NuclearPLogger.name] =    NuclearPLogger(os.path.join(dir, 'nuclear_P.txt'), self._h5_group)
         if save_jobs:
-            self.loggers[TCJobsLogger.name] =      TCJobsLogger(None, self._h5_file)
+            # self.loggers[TCJobsLogger.name] =      TCJobsLogger(None, self._h5_file)
+            # self.loggers[TCJobsLogger.name] =      None
+            self.loggers[TCJobsLoggerSequential.name] =      TCJobsLoggerSequential(None, self._h5_file)
 
 
         self._nuc_geo_logger = None
@@ -507,7 +509,10 @@ class TCJobsLogger(BaseLogger):
     def _initialize(self, data: LoggerData):
         if self._h5_group:
             dt = h5py.string_dtype(encoding='utf-8')
-            self._h5_dataset = self._h5_group.create_dataset(self.name, shape=(0,), maxshape=(None,), dtype=h5py.string_dtype())
+            print('CREATING ', type(self._h5_group))
+            self._h5_dataset = self._h5_group.create_dataset(self.name, shape=(0,), maxshape=(None,), dtype=dt)
+            print('CREATED DATASET: ', self._h5_dataset)
+            input()
 
         if self._file:
             raise NotImplementedError('TCJobsLogger can only write to HDF5 files')
@@ -515,6 +520,7 @@ class TCJobsLogger(BaseLogger):
     def _write(self, data: list[dict]):
         super().write(None)
 
+        print('DATASET: ', self._h5_dataset)
         if self._h5_dataset:
             H5File.append_dataset(self._h5_dataset, json.dumps(data, cls=NumpyEncoder).encode('utf-8'))
 
@@ -524,6 +530,7 @@ class TCJobsLogger(BaseLogger):
         pass
 
 class TCJobsLoggerSequential():
+    name = 'tc_job_data_sequential'
     def __init__(self, file: str = None, h5_file=None) -> None:
         self._file = None
         self._file_loc = None
