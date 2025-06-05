@@ -1,14 +1,16 @@
+from __future__ import annotations
+from typing import TYPE_CHECKING
+
 import os
 import json
 import shutil
 import numpy as np
-import h5py
 from copy import deepcopy
-import yaml
 import argparse
 import sys
-from .qcRunners import TeraChem as TC
-from .qcRunners.TeraChem import TCJob, TCJobBatch
+# import pysces.qcRunners
+# from .qcRunners import TeraChem as TC
+# from .qcRunners.TeraChem import TCJob, TCJobBatch
 from .h5file import H5File, H5Group, H5Dataset
 # from .input_simulation import extra_loggers, logging_mode
 from . import input_simulation as opts
@@ -242,10 +244,12 @@ def read_restart(file_loc: str='restart.out', ndof: int=0, integrator: str='RK4'
             nac_mat = np.array(data.pop('nac_mat', np.array([])))
 
             if 'TCJobBatch__batch_counter' in data:
-                TC.TCJobBatch.set_ID_counter(data.pop('TCJobBatch__batch_counter'))
+                from .qcRunners.TeraChem import TCJobBatch
+                TCJobBatch.set_ID_counter(data.pop('TCJobBatch__batch_counter'))
 
             if 'TCJob__job_counter' in data:
-                TC.TCJob.set_ID_counter(data.pop('TCJob__job_counter'))
+                from .qcRunners.TeraChem import TCJob
+                TCJob.set_ID_counter(data.pop('TCJob__job_counter'))
 
             if 'TCRunner' in data:
                 TCRunner_Deserialize(data.pop('TCRunner'), tc_runner)
@@ -362,11 +366,13 @@ def write_restart(file_loc: str,
             data['nac_mat'] = np.array(nac_mat).tolist()
             data['com'] = np.array(com).tolist()
 
-            if TC.TCJobBatch.get_ID_counter() > 0:
-                data['TCJobBatch__batch_counter'] = TC.TCJobBatch.get_ID_counter()
+            from .qcRunners.TeraChem import TCJobBatch, TCJob
 
-            if TC.TCJob.get_ID_counter() > 0:
-                data['TCJob__job_counter'] = TC.TCJob.get_ID_counter()
+            if TCJobBatch.get_ID_counter() > 0:
+                data['TCJobBatch__batch_counter'] = TCJobBatch.get_ID_counter()
+
+            if TCJob.get_ID_counter() > 0:
+                data['TCJob__job_counter'] = TCJob.get_ID_counter()
 
             if qc_runner:
                 data[qc_runner.__class__.__name__] = serialize(qc_runner)
@@ -401,7 +407,7 @@ class LoggerData():
         self.all_energies = all_energies
 
         #   place holder for all other types of data
-        self.jobs_data: dict | TCJobBatch = qc_runner_data
+        # self.jobs_data: dict | TCJobBatch = qc_runner_data
 
 class SimulationLogger():
     def __init__(self, save_energy=True, save_grad=True, save_nac=True, save_corr=True, save_timigs=True, dir=None, save_geo=True, save_elec=True, save_p=True, save_jobs=True, atoms=None, hdf5=False, hdf5_name='') -> None:
@@ -442,10 +448,10 @@ class SimulationLogger():
             self.loggers[ElectricPQLogger.name] =  ElectricPQLogger(os.path.join(dir, 'electric_pq.txt'), self._h5_group)
         if save_p:
             self.loggers[NuclearPLogger.name] =    NuclearPLogger(os.path.join(dir, 'nuclear_P.txt'), self._h5_group)
-        if save_jobs:
-            # self.loggers[TCJobsLogger.name] =      TCJobsLogger(None, self._h5_file)
-            # self.loggers[TCJobsLogger.name] =      None
-            self.loggers[TCJobsLoggerSequential.name] =      TCJobsLoggerSequential(None, self._h5_file)
+        # if save_jobs:
+        #     # self.loggers[TCJobsLogger.name] =      TCJobsLogger(None, self._h5_file)
+        #     # self.loggers[TCJobsLogger.name] =      None
+        #     self.loggers[TCJobsLoggerSequential.name] =      TCJobsLoggerSequential(None, self._h5_file)
 
 
         self._nuc_geo_logger = None
@@ -499,168 +505,7 @@ class BaseLogger():
         if not self._initialized:
             self._initialize(data)
             self._initialized = True
-
-class TCJobsLogger(BaseLogger):
-    name = 'tc_job_data'
-
-    def __init__(self, file_loc: str = None, h5_group: H5Group = None) -> None:
-        super().__init__(file_loc, h5_group)
-        
-    def _initialize(self, data: LoggerData):
-        if self._h5_group:
-            dt = h5py.string_dtype(encoding='utf-8')
-            print('CREATING ', type(self._h5_group))
-            self._h5_dataset = self._h5_group.create_dataset(self.name, shape=(0,), maxshape=(None,), dtype=dt)
-            print('CREATED DATASET: ', self._h5_dataset)
-            input()
-
-        if self._file:
-            raise NotImplementedError('TCJobsLogger can only write to HDF5 files')
-
-    def _write(self, data: list[dict]):
-        super().write(None)
-
-        print('DATASET: ', self._h5_dataset)
-        if self._h5_dataset:
-            H5File.append_dataset(self._h5_dataset, json.dumps(data, cls=NumpyEncoder).encode('utf-8'))
-
-    def write(self, data: list[dict]):
-        #   Dummy function: we don't want to write every time step. Instead, we want the
-        #   TeraChem runner to call when to log data, which uses _write instead.
-        pass
-
-class TCJobsLoggerSequential():
-    name = 'tc_job_data_sequential'
-    def __init__(self, file: str = None, h5_file=None) -> None:
-        self._file = None
-        self._file_loc = None
-        self._next_dataset = None
-        self.setup(None, h5_file)
-
-    def setup(self, log_dir: str, file: str | h5py.File):
-
-        if isinstance(file, str):
-            if log_dir is not None:
-                self._file_loc = os.path.join(log_dir, file)
-            else:
-                self._file_loc = file
-            self._file = H5File(self._file_loc, 'w')
-
-        elif isinstance(file, h5py.File):
-            self._file_loc = None
-            self._file = file
-        # else:
-        #     raise ValueError('file must be a string or h5py.File object')
-
-        self._data_fields = [
-            'energy', 'gradient', 'dipole_moment', 'dipole_vector', 'nacme', 'cis_', 'cas_'
-        ]
-        self._units_from_field = {'energy': 'a.u.', 'dipole_moment': 'Debye'}
-        self._job_datasets = {}
-        self._group_name = 'tc_job_data'
-
-        
-    def __del__(self):
-        if self._file is not None:
-            self._file.close()
-
-    def _initialize(self, cleaned_batch: TC.TCJobBatch):
-        #   TODO: Add a fix for when the simulation has been restarted, but
-        #   the next few jobs are missing some keywords. This happens with dipole
-        #   moments and gradients, since an extrapolation scheme doesn't need to
-        #   compute a new one every frame. 
-        self._file.create_group(self._group_name)
-        
-        str_dt = h5py.string_dtype(encoding='utf-8')
-
-        for job in cleaned_batch.jobs:
-            group = self._file[self._group_name].create_group(name=job.name)
-            group.create_dataset(name='timestep', shape=(0,1), maxshape=(None, 1))
-            for key, value in job.results.items():
-                for k in self._data_fields:
-                    if k in key:
-                        if isinstance(value, list):
-                            shape = (0,) + np.shape(value)
-                        else:   #   assume it is a single value
-                            shape = (0,1)
-                        ds = group.create_dataset(name=key, shape=shape, maxshape=(None,) + shape[1:])
-                        if k in self._units_from_field:
-                            ds.attrs['units'] = self._units_from_field[k]
-
-            #   couldn't figure out how to initialize with an empty shape when using strings,
-            #   so I just resized afterwards
-            ds = group.create_dataset(name='tc.out', shape=(1,1), maxshape=(None, 1), data='', dtype=str_dt)
-            ds.resize((0, 1))
-            ds = group.create_dataset(name='other', shape=(1,1), maxshape=(None, 1), data='', dtype=str_dt)
-            ds.resize((0, 1))
-
-
-        self._file.create_dataset(name = f'{self._group_name}/atoms', 
-                                  data = cleaned_batch.results_list[0]['atoms'], dtype=str_dt)
-        geom = np.array(cleaned_batch.results_list[0]['geom'])
-        geom_ds = self._file.create_dataset(name = f'{self._group_name}/geom', 
-                                            shape=(0,) + geom.shape,
-                                            maxshape=(None,) + geom.shape)
-        geom_ds.attrs.create('units', 'angstroms')
-    
-    def set_next_dataset(self, jobs_batch: TC.TCJobBatch):
-        self._next_dataset = jobs_batch
-
-    def write(self, data: LoggerData):
-        if self._file is None:
-            return
-
-        if data.jobs_data is not None:
-            jobs_data = data.jobs_data
-        elif self._next_dataset is not None:
-            jobs_data = self._next_dataset
-            self._next_dataset = None
-        else:
-            print('fileIO.py: No jobs data found')
-            return
-        
-        results: list[dict] = deepcopy(jobs_data.results_list)
-        #   'cis_excitations' are not guarenteed to be the same size,
-        #   so this can't be added to an H5 dataset.
-        #   TODO: add a check to make sure all jobs have the same number of cis_excitations,
-        #   or convert to a string?
-        cleaned_results = TC.TCRunner.cleanup_multiple_jobs(results, 'cis_excitations', 'orb_energies', 'bond_order', 'orb_occupations', 'spins')
-        # cleaned_batch = deepcopy(data.jobs_data)
-        cleaned_batch = jobs_data
-        for job, res in zip(cleaned_batch.jobs, cleaned_results):
-            job.results = res
-
-        #   the first job is used to establish dataset sizes
-        if self._group_name not in self._file:
-            self._initialize(cleaned_batch)
-
-        group = self._file[self._group_name]
-        H5File.append_dataset(group['geom'], cleaned_batch.results_list[0]['geom'])
-        for job in cleaned_batch.jobs:
-            results = job.results.copy()
-            results.pop('geom')
-            results.pop('atoms')
-            for key in group[job.name]:
-                if key in ['other', 'timestep', 'tc.out']:
-                    continue
-                if key in results:
-                    H5File.append_dataset(group[job.name][key], results[key])
-                    results.pop(key)
-                else:
-                    print(f'Warning: "{key}" not found in job results, using zeros instead')
-                    prev_vals = group[job.name][key][:][-1]
-                    fill_result = np.zeros_like(prev_vals)
-                    H5File.append_dataset(group[job.name][key], fill_result)
-            if 'tc.out' in results:
-                H5File.append_dataset(group[job.name]['tc.out'], json.dumps(results['tc.out']))
-                results.pop('tc.out')
-            H5File.append_dataset(group[job.name]['timestep'], data.time)
-
-            #   everything else goes into 'other'
-            other_data = json.dumps(results)
-            H5File.append_dataset(group[job.name]['other'], other_data)
-            
-        self._file.flush()     
+ 
     
 class NucGeoLogger():
     def __init__(self, file_loc: str = None, h5_group: H5Group = None) -> None:

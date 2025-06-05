@@ -7,6 +7,8 @@ from tcpb import terachem_server_pb2 as pb
 from pysces.input_simulation import logging_dir, TCRunnerOptions
 from pysces.common import PhaseVars, QCRunner
 from pysces.qcRunners.LoadBalancing import balance_tasks_optimum, ESDerivTasks, ServerBenchmark
+from pysces.h5file import H5File, H5Group, h5py
+from pysces.fileIO import BaseLogger, LoggerData
 
 _HAS_TCPARSE = True
 try:
@@ -29,6 +31,7 @@ import psutil
 import concurrent.futures
 import copy
 import pickle
+import json
 from typing import Literal
 import itertools
 from collections import deque
@@ -72,7 +75,7 @@ class TCClientExtra(TCPBClient):
         
         
         self._log = None
-        if log:
+        if log and os.path.isdir(logging_dir):
             log_file_loc = os.path.join(logging_dir, f'{host}_{port}.log')
             self._log = open(log_file_loc, 'a')
             self.log_message(f'Client started on {host}:{port}')
@@ -501,6 +504,7 @@ class TCClientExtra(TCPBClient):
             file_loc = os.path.join(self.server_root, file)
             if os.path.isfile(file_loc):
                 print('Removing stale file:', file_loc)
+                os.remove(file_loc)
         for file in os.listdir(self.server_root):
             if 'XYZia_CPCIS_' in os.path.basename(file):
                 print('Removing stale file:', file)
@@ -943,7 +947,6 @@ class TCJobBatch():
         # timings['Wall_Time'] = np.sum(list(timings.values()))
         return timings
 
-
 class TCRunner(QCRunner):
     def __init__(self, atoms: list, tc_opts: TCRunnerOptions, max_wait=20) -> None:
         super().__init__()
@@ -1300,6 +1303,12 @@ class TCRunner(QCRunner):
         print('--------------------------------------')
         print()
 
+    def set_logger_file(self, h5_file: H5File):
+        if self._combine_jobs:
+            self._logger = TCJobsLogger(None, h5_file)
+        else:
+            self._logger = TCJobsLoggerSequential(None, h5_file)
+
     def report(self):
         return self._prev_job_batch
 
@@ -1511,18 +1520,20 @@ class TCRunner(QCRunner):
     
     # def set_logger():
 
-    def _log_jobs(self, job_batch, time):
+    def _log_jobs(self, job_batch: TCJobBatch, time):
         if self._logger is None:
             return
         
         data_to_save = []
-        for j in job_batch.jobs:
-            res = dict(j.results)
-            res['timestep'] = time
-            data_to_save.append(res)
-        
-        if self._logger:
-            self._logger._write(data_to_save)
+        if isinstance(self._logger, TCJobsLogger):
+            for j in job_batch.jobs:
+                res = dict(j.results)
+                res['timestep'] = time
+                data_to_save.append(res)
+            
+            self._logger.write(data_to_save)
+        elif isinstance(self._logger, TCJobsLoggerSequential):
+            self._logger.write(job_batch, time)
 
         #   print timings
         print()
@@ -1961,6 +1972,174 @@ class TCRunner(QCRunner):
             return_dict = {'num_deriv_jobs': num_deriv_jobs, 'overlap_jobs': None}
             return return_dict
 
+class NumpyEncoder(json.JSONEncoder):
+    def default(self, obj):
+        if isinstance(obj, np.ndarray):
+            return obj.tolist()
+        return super().default(obj)
+    
+
+class TCJobsLogger(BaseLogger):
+    name = 'tc_job_data'
+
+    def __init__(self, file_loc: str = None, h5_group: H5Group = None) -> None:
+        super().__init__(file_loc, h5_group)
+        
+    def _initialize(self, data: LoggerData):
+        if self._h5_group:
+            dt = h5py.string_dtype(encoding='utf-8')
+            self._h5_dataset = self._h5_group.create_dataset(self.name, shape=(0,), maxshape=(None,), dtype=dt)
+
+        if self._file:
+            raise NotImplementedError('TCJobsLogger can only write to HDF5 files')
+
+    def write(self, data: list[dict]):
+        super().write(None)
+
+        if self._h5_dataset:
+            H5File.append_dataset(self._h5_dataset, json.dumps(data, cls=NumpyEncoder).encode('utf-8'))
+
+    # def write(self, data: list[dict]):
+    #     #   Dummy function: we don't want to write every time step. Instead, we want the
+    #     #   TeraChem runner to call when to log data, which uses _write instead.
+    #     pass
+
+class TCJobsLoggerSequential():
+    name = 'tc_job_data_sequential'
+    def __init__(self, file: str = None, h5_file=None) -> None:
+        self._file = None
+        self._file_loc = None
+        self._next_dataset = None
+        self.setup(None, h5_file)
+
+    def setup(self, log_dir: str, file: str | h5py.File):
+
+        if isinstance(file, str):
+            if log_dir is not None:
+                self._file_loc = os.path.join(log_dir, file)
+            else:
+                self._file_loc = file
+            self._file = H5File(self._file_loc, 'w')
+
+        elif isinstance(file, h5py.File):
+            self._file_loc = None
+            self._file = file
+        # else:
+        #     raise ValueError('file must be a string or h5py.File object')
+
+        self._data_fields = [
+            'energy', 'gradient', 'dipole_moment', 'dipole_vector', 'nacme', 'cis_', 'cas_'
+        ]
+        self._units_from_field = {'energy': 'a.u.', 'dipole_moment': 'Debye'}
+        self._job_datasets = {}
+        self._group_name = 'tc_job_data'
+
+        
+    def __del__(self):
+        if self._file is not None:
+            self._file.close()
+
+    def _initialize(self, cleaned_batch: TCJobBatch):
+        #   TODO: Add a fix for when the simulation has been restarted, but
+        #   the next few jobs are missing some keywords. This happens with dipole
+        #   moments and gradients, since an extrapolation scheme doesn't need to
+        #   compute a new one every frame. 
+        self._file.create_group(self._group_name)
+        
+        str_dt = h5py.string_dtype(encoding='utf-8')
+
+        for job in cleaned_batch.jobs:
+            group = self._file[self._group_name].create_group(name=job.name)
+            group.create_dataset(name='timestep', shape=(0,1), maxshape=(None, 1))
+            for key, value in job.results.items():
+                for k in self._data_fields:
+                    if k in key:
+                        if isinstance(value, list):
+                            shape = (0,) + np.shape(value)
+                        else:   #   assume it is a single value
+                            shape = (0,1)
+                        ds = group.create_dataset(name=key, shape=shape, maxshape=(None,) + shape[1:])
+                        if k in self._units_from_field:
+                            ds.attrs['units'] = self._units_from_field[k]
+
+            #   couldn't figure out how to initialize with an empty shape when using strings,
+            #   so I just resized afterwards
+            ds = group.create_dataset(name='tc.out', shape=(1,1), maxshape=(None, 1), data='', dtype=str_dt)
+            ds.resize((0, 1))
+            ds = group.create_dataset(name='other', shape=(1,1), maxshape=(None, 1), data='', dtype=str_dt)
+            ds.resize((0, 1))
+
+
+        self._file.create_dataset(name = f'{self._group_name}/atoms', 
+                                  data = cleaned_batch.results_list[0]['atoms'], dtype=str_dt)
+        geom = np.array(cleaned_batch.results_list[0]['geom'])
+        geom_ds = self._file.create_dataset(name = f'{self._group_name}/geom', 
+                                            shape=(0,) + geom.shape,
+                                            maxshape=(None,) + geom.shape)
+        geom_ds.attrs.create('units', 'angstroms')
+    
+    def set_next_dataset(self, jobs_batch: TCJobBatch):
+        self._next_dataset = jobs_batch
+
+    def write(self, jobs_data: TCJobBatch, time: float):
+        if self._file is None:
+            return
+
+        # if data.jobs_data is not None:
+        #     jobs_data = data.jobs_data
+        if self._next_dataset is not None:
+            jobs_data = self._next_dataset
+            self._next_dataset = None
+        elif jobs_data is None:
+            print(self, ': No jobs data found')
+            return
+        
+        results: list[dict] = copy.deepcopy(jobs_data.results_list)
+        #   'cis_excitations' are not guarenteed to be the same size,
+        #   so this can't be added to an H5 dataset.
+        #   TODO: add a check to make sure all jobs have the same number of cis_excitations,
+        #   or convert to a string?
+        cleaned_results = TCRunner.cleanup_multiple_jobs(results, 'cis_excitations', 'orb_energies', 'bond_order', 'orb_occupations', 'spins')
+        # cleaned_batch = deepcopy(data.jobs_data)
+        cleaned_batch = jobs_data
+        for job, res in zip(cleaned_batch.jobs, cleaned_results):
+            job.results = res
+
+        #   the first job is used to establish dataset sizes
+        if self._group_name not in self._file:
+            print('initializing HDF5 file for TC job data')
+            self._initialize(cleaned_batch)
+
+        group = self._file[self._group_name]
+        H5File.append_dataset(group['geom'], cleaned_batch.results_list[0]['geom'])
+        for job in cleaned_batch.jobs:
+            results = job.results.copy()
+            results.pop('geom')
+            results.pop('atoms')
+            for key in group[job.name]:
+                if key in ['other', 'timestep', 'tc.out']:
+                    continue
+                if key in results:
+                    H5File.append_dataset(group[job.name][key], results[key])
+                    results.pop(key)
+                else:
+                    print(f'Warning: "{key}" not found in job results, using zeros instead')
+                    prev_vals = group[job.name][key][:][-1]
+                    fill_result = np.zeros_like(prev_vals)
+                    H5File.append_dataset(group[job.name][key], fill_result)
+            if 'tc.out' in results:
+                H5File.append_dataset(group[job.name]['tc.out'], json.dumps(results['tc.out']))
+                results.pop('tc.out')
+            H5File.append_dataset(group[job.name]['timestep'], time)
+
+            #   everything else goes into 'other'
+            other_data = json.dumps(results)
+            H5File.append_dataset(group[job.name]['other'], other_data)
+            
+        self._file.flush()     
+
+        
+
 def _correct_signs_from_overlaps(job: TCJob, overlap_job: TCJob):
     '''
         Correct the sings of transition dipole moments and NACs based 
@@ -2193,29 +2372,6 @@ def _extract_subset_transition_data(in_data: np.array | list, states: list[int],
 
     return subset_matrix_data
 
-def _fill_with_zeros(data: list | np.array):
-    if None not in data:
-        return data
-
-    #   get shape of the first non-None item
-    shape = None
-    for item in data_list:
-        if item is not None:
-            shape = np.array(item).shape
-            break
-
-    #   second failsafe
-    if shape is None:
-        return np.array(data)
-
-    #   fill with zeros
-    result = []
-    for item in data_list:
-        if item is None:
-            result.append(np.zeros(shape))
-        else:
-            result.append(item)
-    return np.array(result)
 
 def format_combo_job_results(job_data: list[dict], states: list[int]):
     '''

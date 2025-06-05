@@ -1569,7 +1569,9 @@ def rk4(initq, initp, tStop, H, restart, amu_mat, U, AN_mat):
         tc_runner = TCRunner(atoms, tc_runner_opts)
         tc_runner._prev_ref_job = tcr_ref_job
         if tcr_log_jobs:
-            tc_runner._logger = logger.loggers.get('tc_job_data', None)
+            tc_runner.set_logger_file(logger._h5_file)
+    elif qc_runner != 'gamess':
+        qc_runner.set_logger_file(logger._h5_file)
 
     #   Initialization
     if restart == 1:
@@ -1595,7 +1597,8 @@ def rk4(initq, initp, tStop, H, restart, amu_mat, U, AN_mat):
             all_energies, elecE, grad, nac, trans_dips, timings = tc_runner.run_new_geom(PhaseVars(time=t, nuc_q0=qC))
             qc_runner_data = tc_runner._prev_job_batch
         else:
-            all_energies, elecE, grad, nac, trans_dips, timings = qc_runner.run_new_geom(geom=qC/ang2bohr, momentum=p[nel:])
+            # all_energies, elecE, grad, nac, trans_dips, timings = qc_runner.run_new_geom(geom=qC/ang2bohr, momentum=p[nel:])
+            all_energies, elecE, grad, nac, trans_dips, timings = qc_runner.run_new_geom(PhaseVars(time=t, nuc_q0=qC))
 
         # Total initial energy at t=0
         init_energy = get_energy(au_mas, q, p, elecE)
@@ -1643,7 +1646,8 @@ def rk4(initq, initp, tStop, H, restart, amu_mat, U, AN_mat):
             all_energies, elecE, grad, nac, trans_dips, timings = tc_runner.run_new_geom(PhaseVars(time=t, nuc_q0=qC))
             qc_runner_data = tc_runner._prev_job_batch
         else:
-            timings, all_energies, elecE, grad, nac, trans_dips = qc_runner.run_new_geom(geom=qC/ang2bohr, momentum=y[-natom*3:])
+            # all_energies, elecE, grad, nac, trans_dips, timings = qc_runner.run_new_geom(geom=qC/ang2bohr, momentum=y[-natom*3:])
+            all_energies, elecE, grad, nac, trans_dips, timings = qc_runner.run_new_geom(PhaseVars(time=t, nuc_q0=qC))
         
         #correct nac sign
         nac = sign_flipper.correct_nac_sign(nac, trans_dips)

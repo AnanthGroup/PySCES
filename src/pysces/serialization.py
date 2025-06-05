@@ -1,3 +1,10 @@
+from __future__ import annotations
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from .qcRunners import TCRunner
+    from .interpolation import SignFlipper
+
 import json
 import numpy as np
 import importlib
@@ -6,8 +13,8 @@ from types import ModuleType
 import pickle
 from itertools import zip_longest
 
-from .interpolation import SignFlipper
-from .qcRunners import TCRunner
+# from .interpolation import SignFlipper
+# from .qcRunners import TCRunner
 
 def is_json_compatible(obj):
     """Check if an object is JSON-compatible (str, int, float, bool, None, list, or dict)."""
@@ -138,15 +145,17 @@ def SignFlipper_Serialize(self: SignFlipper) -> dict:
     }
 
 def SignFlipper_Deserialize(data: dict) -> 'SignFlipper':
+    from .interpolation import SignFlipper
     sf = SignFlipper(data['n_states'], data['hist_length'], data['n_nuc'], data['name'])
     sf.nac_hist = data['nac_hist']
     sf.tdm_hist = data['tdm_hist']
     return sf
 
-def TCRunner_Serialize(self: TCRunner) -> dict:
+def TCRunner_Serialize(self: 'TCRunner') -> dict:
     '''
         as of now, this is used for a restart file. TODO: make it more general
     '''
+    from .qcRunners import TCRunner
     out_data = {}
     for key in ['_atoms', '_grads', '_max_state', '_NACs', '_excited_type']:
         out_data[key] = serialize(getattr(self, key))
@@ -178,7 +187,7 @@ def TCRunner_Serialize(self: TCRunner) -> dict:
 
     return out_data
 
-def TCRunner_Deserialize(data: dict, tc_runner: TCRunner):
+def TCRunner_Deserialize(data: dict, tc_runner: 'TCRunner'):
     '''
         as of now, this is used for a restart file. TODO: make it more general
     '''
