@@ -1622,6 +1622,12 @@ def rk4(initq, initp, tStop, H, restart, amu_mat, U, AN_mat):
 
     ### Runge-Kutta routine ###
     while t < tStop:
+        # Record nuclear geometry, logs, and restarts
+        record_nuc_geo(restart, t, atoms, qC, logger)
+        logger.write(t, total_E=new_energy, elec_E=elecE,  grads=grad, NACs=nac, timings=timings, elec_q=y[0:nel], elec_p=y[ndof:ndof+nel], nuc_p=y[-natom*3:], qc_runner_data=qc_runner_data, all_energies=all_energies)
+        write_restart(restart_file_out, [Y[-1][:ndof], Y[-1][ndof:]], sign_flipper.nac_hist, sign_flipper.tdm_hist, new_energy, t, nel, 'rk4', elecE, grad, nac, opts.com_ang, tc_runner)
+
+
         print(f"##### Performing MD Step Time: {t:8.2f} a.u. ##### ")
 
         H  = min(H, tStop-t)
@@ -1663,11 +1669,6 @@ def rk4(initq, initp, tStop, H, restart, amu_mat, U, AN_mat):
 
         # Update & store energy
         energy.append(new_energy)
-
-        # Record nuclear geometry, logs, and restarts
-        record_nuc_geo(restart, t, atoms, qC, logger)
-        logger.write(t, total_E=new_energy, elec_E=elecE,  grads=grad, NACs=nac, timings=timings, elec_q=y[0:nel], elec_p=y[ndof:ndof+nel], nuc_p=y[-natom*3:], qc_runner_data=qc_runner_data, all_energies=all_energies)
-        write_restart(restart_file_out, [Y[-1][:ndof], Y[-1][ndof:]], sign_flipper.nac_hist, sign_flipper.tdm_hist, new_energy, t, nel, 'rk4', elecE, grad, nac, opts.com_ang, tc_runner)
 
         if t == tStop:
             with open(os.path.join(__location__, 'progress.out'), 'a') as f:
