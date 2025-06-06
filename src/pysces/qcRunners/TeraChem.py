@@ -1733,20 +1733,11 @@ class TCRunner(QCRunner):
                 for i in cis_states:
                     for j in cis_states[i+1:]:
                         tr_dipole_derivs.append((i, j))
-    
-    def get_batches_from_components(self, gs_gradient=False, ex_gradients=[], gs_ex_nacs=[], ex_ex_nacs=[], gs_dipole_deriv=False, ex_dipole_derivs=[], tr_dipole_derivs=[]):
-        pass
 
     def _apply_initial_frame_options(self, job: TCJob):
         if self._initial_frame_options is not None:
             if self._frame_counter < self._initial_frame_options['n_frames']:
                 job.opts.update(self._initial_frame_options)
-        
-    def _write_debug_batch(self):
-        if _DEBUG_SAVE_TRAJ:
-            print("SAVING DEBUG TRAJ FILE: ", _DEBUG_SAVE_TRAJ)
-            with open(_DEBUG_SAVE_TRAJ, 'wb') as file:
-                pickle.dump(self._debug_traj, file)
 
     def _load_debug_batch(self, jobs_batch: TCJobBatch):
         if self._debug_traj and not _DEBUG_SAVE_TRAJ:
@@ -1768,10 +1759,12 @@ class TCRunner(QCRunner):
     def _save_debug_batch(self, jobs_batch: TCJobBatch):
         if _DEBUG_SAVE_TRAJ:
             print("APPENDING DEBUG TRAJ ", jobs_batch)
-            jobs_batch._remove_clients()
+
             for job in jobs_batch.jobs:
-                self._debug_traj[job.jobID] = job
-            # self._debug_traj.append(jobs_batch)
+                job_copy = copy.deepcopy(job)
+                job_copy.client = None
+                self._debug_traj[job_copy.jobID] = job_copy
+
             with open(_DEBUG_SAVE_TRAJ, 'wb') as file:
                 pickle.dump(self._debug_traj, file)
 
@@ -1843,7 +1836,6 @@ class TCRunner(QCRunner):
         self._prev_results = jobs_batch.results_list
         self._set_avg_max_times(jobs_batch.timings)
         self._coordinate_exciton_overlap_files()
-        self._write_debug_batch()
 
         return jobs_batch
 

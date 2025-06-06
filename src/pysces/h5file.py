@@ -97,10 +97,15 @@ class H5File(h5py.File):
     def print_trajectory_summary(self, data: h5py.File | h5py.Dataset | h5py.Group = None):
         if data is None:
             data = self
+
+        times = np.array(data['electronic/time'])
+        if len(times) < 2:
+            print('Trajectory Summary: No time data found.')
+            return
+        dt = times[1] - times[0]
+
         print('Trajectory Summary')
         print('------------------')
-        times = np.array(data['electronic/time'])
-        dt = times[1] - times[0]
         print(f'Number of frames in trajectory: ', len(times))
         print(f'Start time: {times[0]} a.u.')
         print(f'End time: {times[-1]} a.u.')
