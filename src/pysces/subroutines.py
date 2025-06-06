@@ -1606,6 +1606,7 @@ def rk4(initq, initp, tStop, H, restart, amu_mat, U, AN_mat):
         # Record nuclear geometry in angstrom and log the rest
         record_nuc_geo(restart, t, atoms, qC, logger)
         logger.write(t, init_energy, elecE,  grad, nac, timings, elec_p=p[0:nel], elec_q=q[0:nel], nuc_p=p[nel:], qc_runner_data=qc_runner_data, all_energies=all_energies)
+        write_restart(restart_file_out, [y[:ndof], y[ndof:]], sign_flipper.nac_hist, sign_flipper.tdm_hist, init_energy, t, nel, 'rk4', elecE, grad, nac, opts.com_ang, tc_runner)
 
     # Create nac history for sign-flip extrapolation
     # sign_flipper.set_history(nac, np.empty(0), trans_dips, np.empty(0))
