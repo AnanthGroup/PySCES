@@ -1534,7 +1534,10 @@ class TCRunner(QCRunner):
             self._logger.write(data_to_save)
         elif isinstance(self._logger, TCJobsLoggerSequential):
             self._logger.write(job_batch, time)
+        
+        self._print_timings(job_batch)
 
+    def _print_timings(self, job_batch: TCJobBatch):
         #   print timings
         print()
         print('Terachem Job Timings:\n')
@@ -2364,8 +2367,49 @@ def _extract_subset_transition_data(in_data: np.array | list, states: list[int],
 
     return subset_matrix_data
 
+def dipole_sign_loss(signs, dipole_matrix, ref_dipole_matrix):
+    N = dipole_matrix.shape[0]
+    S_mat = np.outer(signs, signs)
+    corrected_ref = ref_dipole_matrix * S_mat[:, :, np.newaxis]  # shape (N, N, 3)
+    diff = dipole_matrix - corrected_ref  # shape (N, N, 3)
+    squared_diff = np.sum(diff**2, axis=-1)  # shape (N, N)
 
-def format_combo_job_results(job_data: list[dict], states: list[int]):
+    # Use only upper triangle (i < j), excluding diagonal
+    i_upper = np.triu_indices(N, k=1)
+    return np.sum(squared_diff[i_upper])
+
+def get_signs_from_dipole_matrix(dipole_matrix: np.ndarray, ref_dipole_matrix: np.ndarray):
+    '''
+        Minimizes the differences between the dipole matrix and the reference dipole matrix
+        by adjusting the signs of the states. The first state is always assumed to be positive.
+
+        Parameters
+        ----------
+        dipole_matrix : np.ndarray
+            The dipole matrix for the current job, shape (n_states, n_states, 3)
+        ref_dipole_matrix : np.ndarray
+            The dipole matrix for the reference job, shape (n_states, n_states, 3)
+
+        Returns
+        -------
+        np.ndarray
+            An array of signs for each state, shape (n_states,)
+    '''
+    
+    dim = dipole_matrix.shape[0]
+
+    from scipy.optimize import minimize
+    res = minimize(
+        dipole_sign_loss, 
+        np.ones(dim), 
+        args=(dipole_matrix, ref_dipole_matrix), 
+        method='Nelder-Mead', 
+        options={'maxiter': 200, 'disp': False, 'xatol': 1e-4, 'fatol': 1e-3}
+    )
+    signs = np.array([1 if s > 0 else -1 for s in res.x])
+    return signs
+
+def format_combo_job_results(job_data: list[dict], states: list[int], ref_dipole_matrix: np.ndarray = None):
     '''
         Combine the job data from multiple jobs into a single dictionary.
 
@@ -2446,6 +2490,14 @@ def format_combo_job_results(job_data: list[dict], states: list[int]):
                 mu_matrix[i, j] = mu_tr
                 mu_matrix[j, i] = mu_tr
 
+    #   make sure the shapes are correctcorrect for sign flips
+    if ref_dipole_matrix is not None:
+        signs = get_signs_from_dipole_matrix(mu_matrix, ref_dipole_matrix)
+        for i in range(n_states):
+            for j in range(n_states):
+                mu_matrix[i, j] *= signs[i] * signs[j]
+                mu_deriv_matrix[i, j] *= signs[i] * signs[j]
+                nacs[i, j] *= signs[i] * signs[j]
 
     return (all_energies, energies, gradients, nacs, mu_matrix, mu_deriv_matrix)
 
