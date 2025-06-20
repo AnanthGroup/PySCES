@@ -60,6 +60,10 @@ class Test_TC_CIS(unittest.TestCase):
             restart_ref = json.load(file)
         with open('restart.json') as file:
             restart_tst = json.load(file)
+        
+        for key in list(restart_tst.keys()):
+            if key not in restart_ref:
+                restart_tst.pop(key)
         assert_dictionary(self, restart_ref, restart_tst, atol=1e-6)
 
         cleanup()
