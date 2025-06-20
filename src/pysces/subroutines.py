@@ -27,6 +27,7 @@ from pysces.input_gamess import nacme_option as opt
 from pysces.fileIO import SimulationLogger, write_restart, read_restart
 from pysces.interpolation import SignFlipper
 from pysces.common import PhaseVars
+from pysces import timers
 # __location__ = os.path.realpath(os.path.join(os.getcwd(), os.path.dirname(__file__)))
 __location__ = ''
 
@@ -1588,6 +1589,8 @@ def rk4(initq, initp, tStop, H, restart, amu_mat, U, AN_mat):
         y = np.concatenate((q, p))
         nac_hist, tdm_hist = np.empty(0), np.empty(0)
 
+    timers.traj_timer.update(t, tStop)
+
     #   Run first electronic structure calculation if we are not restarting,
     #   or if we are restarting and the electronic structure information is missing
     if restart == 0 or len(elecE) == 0 or len(grad) == 0 or len(nac) == 0:
@@ -1633,6 +1636,7 @@ def rk4(initq, initp, tStop, H, restart, amu_mat, U, AN_mat):
         t += H
         X.append(t)
         Y.append(y)
+        timers.traj_timer.update(t, tStop)
         
         # ES calculation at new y
         with open(os.path.join(__location__, 'progress.out'), 'a') as f:
