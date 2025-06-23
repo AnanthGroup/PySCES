@@ -472,10 +472,9 @@ class TCClientExtra(TCPBClient):
             else:
                 #   exciton_overlap.dat exists but exciton_overlap.dat.1 does not
                 #   this occus the first time exciton_overlap.dat is read by TeraChem, so we
-                #   assume that it's the first frame that does so. We rename to .1 to keep
-                #   the wavefunctiosn consistent
-        
-                os.rename(exciton_overlap_file, exciton_overlap_file_1)
+                #   assume that it's the first frame that does so. 
+                pass
+            os.rename(exciton_overlap_file, exciton_overlap_file_1)
 
             if opts.get('cisrestart', None):
                 self._possible_files_to_remove.add(opts.get('cisrestart', None))
@@ -1854,41 +1853,35 @@ class TCRunner(QCRunner):
 
     def _coordinate_exciton_overlap_files(self, overlap_file_loc=None, overlap_data=None):
         '''
-            Copy a single exciton overlap file to all server roots
+            Copy a single exciton overlap data file to all clients file systems.
+            Precedence is given to the overlap_data argument, then to the overlap_file_loc.
+            If neither is provided, the data it attempted to be read from the first client
+            that has the exciton_overlap.dat.1 file. If no such file is found, nothing is done.
         '''
 
         if self._excited_type != 'cis':
             return
 
+        #   first establish which data we are using
         exciton_overlap_data = None
         if overlap_data is not None:
             exciton_overlap_data = overlap_data
+
         elif overlap_file_loc is not None:
             with open(overlap_file_loc, 'rb') as file:
                 exciton_overlap_data = file.read()
+
         else:
             for client in self._client_list:                
                 if client.is_file('exciton_overlap.dat.1'):
                     exciton_overlap_data = client.get_file('exciton_overlap.dat.1', 'rb')
                     break
 
-                # overlap_file_loc = client.server_file('exciton_overlap.dat.1')
-                # if not os.path.isfile(overlap_file_loc):
-                #     continue
-                # with open(overlap_file_loc, 'rb') as file:
-                #     exciton_overlap_data = file.read()
-                # break
-
-
-        #   copy file to all other server roots
+        #   then copy data to all other server roots
         if exciton_overlap_data is not None:
             self._exciton_overlap_data = exciton_overlap_data
             for client in self._client_list:
                 client.set_file('exciton_overlap.dat.1', self._exciton_overlap_data, 'wb')
-                # new_file_loc = client.server_file('exciton_overlap.dat.1')
-                # with open(new_file_loc, 'wb') as file:
-                #     file.write(self._exciton_overlap_data)
-
 
 
     def _run_numerical_derivatives(self, ref_job: TCJob, n_points=3, dx=0.01, overlap=False):
