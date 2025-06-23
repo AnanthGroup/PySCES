@@ -20,8 +20,8 @@ import numpy as np
 
 class TCRunnerOptions:
     #   TeraChem runner options
-    host:str = '10.1.1.154'
-    port:int = 9876
+    host: str = 'localhost'
+    port: int = 9876
     server_root: str = '.'
     job_options: dict = {}
     state_options: dict = {

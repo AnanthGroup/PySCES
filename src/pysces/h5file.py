@@ -80,7 +80,7 @@ class H5File(h5py.File):
         data.visititems(_print_dataset_info)
         return shapes
 
-    def print_data_structure(self, data: h5py.File | h5py.Dataset | h5py.Group = None, string=''):
+    def print_data_structure_OLD(self, data: h5py.File | h5py.Dataset | h5py.Group = None, string=''):
         if data is None:
             data = self
 
@@ -94,6 +94,54 @@ class H5File(h5py.File):
         print()
         self.print_trajectory_summary(data)
 
+    def print_data_structure(self, data: h5py.File | h5py.Dataset | h5py.Group = None, string=''):
+        if data is None:
+            data = self
+
+        total_bytes = 0
+        group_mb = 0.0
+        group_lines = []
+        def _print_dataset_info(name, obj):
+            if isinstance(obj, h5py.Dataset):
+                nonlocal group_mb
+                size_str = str(obj.shape)
+                size = obj.size
+                if isinstance(obj, object):
+                    n_bytes = 0.0
+                    for i in range(len(obj)):
+                        n_bytes += sys.getsizeof(obj[i])
+                else:
+                    n_bytes = size * obj.dtype.itemsize
+                n_MB = n_bytes / 1024 / 1024
+
+                group_lines.append(f' {name:20s} {size_str:25s} {obj.dtype.name:8s} {n_MB:8.2f} MB')
+                group_mb += n_MB
+
+        print('Printing data structure:\n')
+        for k, v in data.items():
+            if isinstance(v, h5py.Dataset):
+                group_mb = 0.0
+                _print_dataset_info(v.name, v)
+                for line in group_lines:
+                    print(line)
+                group_lines = []
+            else:
+                group_mb = 0.0
+                v.visititems(_print_dataset_info)
+                print(f"Group: {v.name:20s}: {group_mb:10.2f} MB")
+                print('-------------------------------------------')
+                for line in group_lines:
+                    print(line)
+                group_lines = []
+                print()
+
+            total_bytes += group_mb
+        print()
+        print(f'Estimated total size of the file: {total_bytes:10.2f}')
+        print('(Does not include metadata or other overhead)')
+        print()
+        self.print_trajectory_summary(data)
+
     def print_trajectory_summary(self, data: h5py.File | h5py.Dataset | h5py.Group = None):
         if data is None:
             data = self
@@ -103,14 +151,16 @@ class H5File(h5py.File):
             print('Trajectory Summary: No time data found.')
             return
         dt = times[1] - times[0]
+        traj_length = times[-1] - times[0]
+        AU_2_FS = 0.02418884327
 
         print('Trajectory Summary')
-        print('------------------')
-        print(f'Number of frames in trajectory: ', len(times))
-        print(f'Start time: {times[0]} a.u.')
-        print(f'End time: {times[-1]} a.u.')
-        print(f'Trajectory time length: {times[-1] - times[0]} a.u.', )
-        print(f'Trajectory time step: {dt} a.u.')
+        print('-------------------------------------------')
+        print(f'{"Number of frames:":25s} {len(times):>10d}')
+        print(f'{"Start time:":25s} {times[0]:>10.2f} a.u. = {times[0] * AU_2_FS:>10.2f} fs')
+        print(f'{"End time:":25s} {times[-1]:>10.2f} a.u. = {times[-1] * AU_2_FS:>10.2f} fs')
+        print(f'{"Trajectory time length:":25s} {traj_length:>10.2f} a.u. = {traj_length * AU_2_FS:>10.2f} fs')
+        print(f'{"Trajectory time step:":25s} {dt:>10.2f} a.u.')
 
     @staticmethod
     def combine_files(new_file_loc: str, *file_locs):
@@ -462,7 +512,6 @@ def run_h5_module():
             file.write_new_file(args.new, args.path, args.frame)
 
         else:
-            print('Printing data structure:')
             file.print_data_structure()
 
     exit()

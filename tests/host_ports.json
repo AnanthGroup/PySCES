@@ -3,9 +3,9 @@
         "10.1.1.165"
     ],
     "tcr_port": [
-        12341
+        12342
     ],
     "tcr_server_root": [
-        "/home/cmyers7/scratch/single_servers/tmp1"
+        "/home/cmyers7/scratch/single_servers/tmp2"
     ]
 }

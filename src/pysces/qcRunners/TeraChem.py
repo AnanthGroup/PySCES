@@ -948,11 +948,10 @@ class TCJobBatch():
         return timings
 
 class TCRunner(QCRunner):
-    def __init__(self, atoms: list, tc_opts: TCRunnerOptions, max_wait=20) -> None:
+    def __init__(self, atoms: list[str], tc_opts: TCRunnerOptions, max_wait=20) -> None:
         super().__init__()
         
         # Atoms and max_wait
-        # self._atoms = np.copy(atoms)
         self._atoms = tuple(atoms)
         self._max_wait = max_wait
 
@@ -992,9 +991,6 @@ class TCRunner(QCRunner):
         self._setup_servers_and_clients(tc_opts)  # Set up servers and clients
 
         # Guesses for SCF/CAS/CI calculations
-        # self._cas_guess = None
-        # self._scf_guess = None
-        # self._ci_guess = None
         self._exciton_overlap_data = None
 
         # Timing and stall handling
@@ -1978,12 +1974,16 @@ class TCJobsLogger(BaseLogger):
     name = 'tc_job_data'
 
     def __init__(self, file_loc: str = None, h5_group: H5Group = None) -> None:
+        # if hasattr(h5_group, 'filename'):
+        #     raise TypeError('TCJobsLogger cannot be used with a global H5File object')
         super().__init__(file_loc, h5_group)
         
     def _initialize(self, data: LoggerData):
+        print('Initializing TCJobsLogger: ', self._h5_group)
         if self._h5_group:
             dt = h5py.string_dtype(encoding='utf-8')
             self._h5_dataset = self._h5_group.create_dataset(self.name, shape=(0,), maxshape=(None,), dtype=dt)
+            print('Created dataset: ', self._h5_dataset, type(self._h5_dataset))
 
         if self._file:
             raise NotImplementedError('TCJobsLogger can only write to HDF5 files')

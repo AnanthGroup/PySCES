@@ -3,19 +3,32 @@ import time
 _AU_2_FS = 0.024188843666478416
 
 class _TrajectoryTimer:
+    '''
+    A simple timer to track the elapsed time of a simulation trajectory.
+    It calculates the total runtime elapsed, trajectory time elapsed, trajectory 
+    time-rate (time-step per hour), trajectory time left, and estimated runtime left.
+    '''
     def __init__(self):
         self.start_time = None
         self.end_time = None
-
         self.start_traj_time = None
 
-    def update(self, traj_time, end_traj_time):
+    def update(self, traj_time: float, end_traj_time: float):
+        '''
+        Update the trajectory timer with the current trajectory time.
+
+        Parameters
+        ----------
+        traj_time : float
+            The current trajectory time in atomic units (a.u.).
+        end_traj_time : float
+            The trajectory time in which the trajectory will end(a.u.).
+        '''
 
         #   this must be the first time we are calling update
         if self.start_traj_time is None:
             self.start_time = time.time()
             self.start_traj_time = traj_time
-        
             return
 
         diff_traj_time = traj_time - self.start_traj_time
