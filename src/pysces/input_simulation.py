@@ -287,12 +287,20 @@ def _set_seed():
     '''
         set the random number generator seed
     '''
+    import numpy as np
+    import random
+    
     if 'input_seed' in opts.__dict__:
-        import numpy as np
-        import random
         input_seed = opts.__dict__['input_seed']
-        random.seed(input_seed)
-        np.random.seed(input_seed)
+        
+
+    else:
+        seed_bytes = os.urandom(8)
+        input_seed = int.from_bytes(seed_bytes, byteorder="big") & 0xFFFFFFFF
+    
+    random.seed(input_seed)
+    np.random.seed(input_seed)
+    print('Using a random seed for the simulation: ', input_seed)
 
 
 def print_settings():
