@@ -2421,12 +2421,13 @@ def format_combo_job_results(job_data: list[dict], states: list[int], ref_dipole
     all_energies = np.array(validated.energy)
     energies = all_energies[states]
 
+    max_s = max(states) + 1
     n_states = len(states)
     n_atoms = len(validated.geom)
-    gradients = np.zeros((n_states, n_atoms*3))
-    nacs = np.zeros((n_states, n_states, n_atoms*3))
-    mu_deriv_matrix = np.zeros((n_states, n_states, n_atoms*3, 3))
-    mu_matrix = np.zeros((n_states, n_states, 3))
+    gradients = np.zeros((max_s, n_atoms*3))
+    nacs = np.zeros((max_s, max_s, n_atoms*3))
+    mu_deriv_matrix = np.zeros((max_s, max_s, n_atoms*3, 3))
+    mu_matrix = np.zeros((max_s, max_s, 3))
 
     #   extend to lists of None so the following for-loop structure
     #   is compatable with lists of actual arrays
@@ -2448,21 +2449,24 @@ def format_combo_job_results(job_data: list[dict], states: list[int], ref_dipole
         #   gradients
         g = tc_gradients[state_i]
         if g is not None:
-            gradients[state_i] = np.array(g).flatten()
+            gradients[i] = np.array(g).flatten()
 
+    for i in range(max_s):
+
+        #   diagonal dipoles
+        mu = tc_dipoles[i]
+        if mu is not None:
+            mu_matrix[i, i] = np.array(mu).flatten()
+        
         #   diagonal dipole derivatives
-        mu_grad = tc_dipole_derivs[state_i]
+        mu_grad = tc_dipole_derivs[i]
         if mu_grad is not None:
             mu_deriv_matrix[i, i] = np.array(mu_grad).reshape((3, n_atoms*3)).T
 
-        #   diagonal dipoles
-        mu = tc_dipoles[state_i]
-        if mu is not None:
-            mu_matrix[i, i] = np.array(mu).flatten()
-
-        for j, state_j in enumerate(states):
-            if i >= j:
-                continue
+    #   NACs and transition dipole information are stored in a triangular matrix
+    #   of size N(N-1)/2
+    for i in range(max_s):
+        for j in range(i+1, max_s):
 
             #   NACs
             nac = validated.cis_couplings.pop(0)
@@ -2488,11 +2492,45 @@ def format_combo_job_results(job_data: list[dict], states: list[int], ref_dipole
         signs = get_signs_from_dipole_matrix(mu_matrix, ref_dipole_matrix)
         for i in range(n_states):
             for j in range(n_states):
-                mu_matrix[i, j] *= signs[i] * signs[j]
-                mu_deriv_matrix[i, j] *= signs[i] * signs[j]
-                nacs[i, j] *= signs[i] * signs[j]
+                mu_matrix[i, j]         *= signs[i] * signs[j]
+                mu_deriv_matrix[i, j]   *= signs[i] * signs[j]
+                nacs[i, j]              *= signs[i] * signs[j]
+
+    #   make sure the shapes are correct based on the states
+    if len(states) != max_s:
+        gradients = gradients[states]
+        nacs = nacs[states][:, states]
+        mu_matrix = mu_matrix[states][:, states]
+        mu_deriv_matrix = mu_deriv_matrix[states][:, states]
+    
 
     return (all_energies, energies, gradients, nacs, mu_matrix, mu_deriv_matrix)
+
+def _print_ES_values(energies, gradients, nacs, mu_matrix, mu_deriv_matrix):
+    '''
+        Print the energies, gradients, NACs, transition dipoles, and transition dipole derivatives
+        in a human-readable format.
+    '''
+    print('Energies:')
+    print(energies)
+    print('\nGradients:')
+    for i, g in enumerate(gradients):
+        print(f'State {i}\n:{g}')
+
+    print('\nNACs:')
+    for i in range(nacs.shape[0]):
+        for j in range(i+1, nacs.shape[1]):
+            print(f'NAC {i} - {j}\n:{nacs[i, j]}')
+
+    print('\nDipole Matrix:')
+    for i in range(mu_matrix.shape[0]):
+        for j in range(i, mu_matrix.shape[1]):
+            print(f'Dipole {i} - {j}\n:{mu_matrix[i, j]}')
+
+    print('\nDipole Derivative Matrix:')
+    for i in range(mu_deriv_matrix.shape[0]):
+        for j in range(i, mu_deriv_matrix.shape[1]):
+            print(f'Dipole Derivative {i} - {j}\n:{mu_deriv_matrix[i, j]}')
 
 def format_combo_job_results_OLD(job_data: list[dict], states: list[int]):
     '''
