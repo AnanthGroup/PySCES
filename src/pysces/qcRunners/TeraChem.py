@@ -98,9 +98,7 @@ class TCClientExtra(TCPBClient):
         if self._log:
             self._log.close()
         for file in self._possible_files_to_remove:
-            full_file = os.path.join(self.server_root, file)
-            if os.path.isfile(full_file):
-                os.remove(full_file)
+            self.remove_file(file, raise_error=False)
 
     def __exit__(self):
         if self._log:
@@ -190,7 +188,7 @@ class TCClientExtra(TCPBClient):
         return self.host_port_to_ID[(self.host, self.port)]
     
     def get_curr_job_dir(self):
-        return os.path.join(self.server_root, self.curr_job_dir)
+        return self.get_dir_loc(self.curr_job_dir)
     
     @property
     def prev_results(self):
@@ -215,7 +213,6 @@ class TCClientExtra(TCPBClient):
         if len(self._results_history) == self._results_history.maxlen:
             oldest_res = self._results_history[0]
             job_dir = os.path.join(self.server_root, oldest_res['job_dir'])
-            
 
             if os.path.isdir(job_dir):
                 shutil.rmtree(job_dir)
@@ -263,19 +260,22 @@ class TCClientExtra(TCPBClient):
         cas_guess = None
         scf_guess = None
         cis_guess = prev_job.opts.get('cisrestart', None)
-        if prev_job.state > 0:
-            if prev_job.excited_type == 'cas':
-                for prev_job_res in reversed(res_history):
-                    if prev_job_res.get('castarget', 0) >= 1:
-                        prev_orb_file = prev_job_res['orbfile']
-                        if prev_orb_file[-6:] == 'casscf':
-                            cas_guess = os.path.join(server_root, prev_orb_file)
-                            break
+        if prev_job.state > 0 and prev_job.excited_type == 'cas':
+            for prev_job_res in reversed(res_history):
+                if prev_job_res.get('castarget', 0) < 1:
+                    continue
+                prev_orb_file = prev_job_res['orbfile']
+                if prev_orb_file[-6:] != 'casscf':
+                    continue
+                # cas_guess = os.path.join(server_root, prev_orb_file)
+                cas_guess = self.get_file_loc(prev_orb_file)
+                break
 
 
         for i, prev_job_res in enumerate(reversed(res_history)):
             if 'orbfile' in prev_job_res:
-                scf_guess = os.path.join(server_root, prev_job_res['orbfile'])
+                # scf_guess = os.path.join(server_root, prev_job_res['orbfile'])
+                scf_guess = self.get_file_loc(prev_job_res['orbfile'])
                 #   This is to fix a bug in terachem that still sets the c0.casscf file as the
                 #   previous job's orbital file
                 if scf_guess[-6:] == 'casscf':
@@ -312,16 +312,13 @@ class TCClientExtra(TCPBClient):
         self.__dict__['curr_job_dir'] = value
         self._last_known_curr_dir = value
 
-    def server_file(self, file_name):
-        return os.path.join(self.server_root, file_name)
-
     def print_end_of_file(self, n_lines=30):
         lines  = []
 
         if self.curr_job_dir is not None:
-            job_dir = self.server_file(self.curr_job_dir)
+            job_dir = self.get_dir_loc(self.curr_job_dir)
         elif self._last_known_curr_dir is not None:
-            job_dir = self.server_file(self._last_known_curr_dir)
+            job_dir = self.get_dir_loc(self._last_known_curr_dir)
         else:
             print('No job directory set, cannot print end of tc.out file')
             return
@@ -463,6 +460,7 @@ class TCClientExtra(TCPBClient):
                 overlap_data = np.array(overlap_data)
                 self._exciton_data = overlap_data
                 results['exciton_overlap'] = overlap_data
+                print('CIS OVERLAP: ', overlap_data)
                 self.remove_file('exciton.dat')
             else:
                 #   exciton_overlap.dat exists but exciton_overlap.dat.1 does not
@@ -495,10 +493,8 @@ class TCClientExtra(TCPBClient):
 
     def clean_up_stale_files(self):
         for file in ['exciton.dat', 'exciton_overlap.dat', 'exciton_overlap.dat.1']:
-            file_loc = os.path.join(self.server_root, file)
-            if os.path.isfile(file_loc):
-                print('Removing stale file:', file_loc)
-                os.remove(file_loc)
+            if self.remove_file(file, raise_error=False):
+                print('Removing stale file:', file)
         for file in os.listdir(self.server_root):
             if 'XYZia_CPCIS_' in os.path.basename(file):
                 print('Removing stale file:', file)
@@ -508,36 +504,54 @@ class TCClientExtra(TCPBClient):
                 os.remove(os.path.join(self.server_root, file))
 
 
+    def _convert_file_path(self, file_name):
+        if not os.path.isabs(file_name):
+            return os.path.join(self.server_root, file_name)
+        else:
+            return file_name
+
     def is_file(self, file_name):
         return os.path.isfile(os.path.join(self.server_root, file_name))
 
+    def get_file_loc(self, file_name):
+        file_loc = self._convert_file_path(file_name)
+
+        if os.path.isfile(file_loc):
+            return file_loc
+        else:
+            raise FileNotFoundError(f'File {file_name} not found in server root directory {self.server_root}')
+
+    def get_dir_loc(self, dir_name):
+        dir_loc = self._convert_file_path(dir_name)
+            
+        if os.path.isdir(dir_loc):
+            return dir_loc
+        else:
+            raise FileNotFoundError(f'Directory {dir_name} not found in server root directory {self.server_root}')
+            
     def get_file(self, file_name, mode='rb'):
         file_loc = self.get_file_loc(file_name)
         with open(file_loc, mode) as file:
             data = file.read()
         return data
 
-    def get_file_loc(self, file_name):
-        file_loc = os.path.join(self.server_root, file_name)
-        if os.path.isfile(file_loc):
-            return file_loc
-        else:
-            raise FileNotFoundError(f'File {file_name} not found in server root directory {self.server_root}')
-            
     def set_file(self, file_name, data, mode='wb'):
-        file_loc = os.path.join(self.server_root, file_name)
+        file_loc = self._convert_file_path(file_name)
+            
         with open(file_loc, mode) as file:
             file.write(data)
 
-    def remove_file(self, file_name):
-        file_loc = os.path.join(self.server_root, file_name)
+    def remove_file(self, file_name, raise_error=True):
+        file_loc = self._convert_file_path(file_name)
         if os.path.isfile(file_loc):
             os.remove(file_loc)
-        else:
+            return True
+        elif raise_error:
             raise FileNotFoundError(f'File {file_name} not found in server root directory {self.server_root}')
+        return False
 
     def rename_file(self, old_name, new_name):
-        old_file_loc = os.path.join(self.server_root, old_name)
+        old_file_loc = self._convert_file_path(old_name)
         new_file_loc = os.path.join(self.server_root, new_name)
         if os.path.isfile(old_file_loc):
             os.rename(old_file_loc, new_file_loc)

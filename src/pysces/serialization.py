@@ -173,17 +173,23 @@ def TCRunner_Serialize(self: 'TCRunner') -> dict:
             out_data['exciton_overlap_data'] = base64.b64encode(pickle.dumps(exciton_overlap_data)).decode('utf-8')
         
         if client._scf_guess_file is not None and out_data.get('scf_guess', None) is None:
-            with open(client._scf_guess_file, 'rb') as file:
-                out_data['scf_guess'] = base64.b64encode(file.read()).decode('utf-8')
+            data = client.get_file(client._scf_guess_file)
+            out_data['scf_guess'] = base64.b64encode(data).decode('utf-8')
+            # with open(client._scf_guess_file, 'rb') as file:
+            #     out_data['scf_guess'] = base64.b64encode(file.read()).decode('utf-8')
         
         if client._cis_guess_file is not None and out_data.get('cis_guess', None) is None:
-            cis_file = client.server_file(client._cis_guess_file)
-            with open(cis_file, 'rb') as file:
-                out_data['cis_guess'] = base64.b64encode(file.read()).decode('utf-8')
+            data = client.get_file(client._cis_guess_file)
+            out_data['cis_guess'] = base64.b64encode(data).decode('utf-8')
+            # cis_file = client.server_file(client._cis_guess_file)
+            # with open(cis_file, 'rb') as file:
+            #     out_data['cis_guess'] = base64.b64encode(file.read()).decode('utf-8')
         
         if client._cas_guess_file is not None and out_data.get('cas_guess', None) is None:
-            with open(client._cas_guess_file, 'rb') as file:
-                out_data['cas_guess'] = base64.b64encode(file.read()).decode('utf-8')
+            data = client.get_file(client._cas_guess_file)
+            out_data['cas_guess'] = base64.b64encode(data).decode('utf-8')
+            # with open(client._cas_guess_file, 'rb') as file:
+            #     out_data['cas_guess'] = base64.b64encode(file.read()).decode('utf-8')
 
     return out_data
 
@@ -222,22 +228,16 @@ def TCRunner_Deserialize(data: dict, tc_runner: 'TCRunner'):
 
     for client in tc_runner._client_list:
         if 'scf_guess' in data:
-            tmp_scf_guess_file = client.server_file('scf_guess')
-            with open(tmp_scf_guess_file, 'wb') as file:
-                file.write(base64.b64decode(data['scf_guess']))
-            client._scf_guess_file = tmp_scf_guess_file
+            client.set_file('scf_guess', base64.b64decode(data['scf_guess']))
+            client._scf_guess_file = client.get_file_loc('scf_guess')
 
         if 'cis_guess' in data:
-            cis_guess_file = client.server_file(tc_runner._excited_options['cisrestart'])
-            with open(cis_guess_file, 'wb') as file:
-                file.write(base64.b64decode(data['cis_guess']))
-            client._cis_guess_file = cis_guess_file
+            client.set_file('cis_guess', base64.b64decode(data['cis_guess']))
+            client._cis_guess_file = client.get_file_loc('cis_guess')
 
         if 'cas_guess' in data:
-            tmp_cas_guess_file = client.server_file('cas_guess')
-            with open(tmp_cas_guess_file, 'wb') as file:
-                file.write(base64.b64decode(data['cas_guess']))
-            client._cas_guess_file = tmp_cas_guess_file
+            client.set_file('cas_guess', base64.b64decode(data['cas_guess']))
+            client._cas_guess_file = client.get_file_loc('cas_guess')
 
     # exit()
 
