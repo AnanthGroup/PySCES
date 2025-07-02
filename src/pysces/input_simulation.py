@@ -16,8 +16,6 @@ from pysces import input_simulation as opts
 from subprocess import Popen
 from typing import Callable
 import numpy as np
-
-
 class TCRunnerOptions:
     #   TeraChem runner options
     host: str = 'localhost'

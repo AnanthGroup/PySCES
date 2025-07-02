@@ -319,9 +319,9 @@ class TCClientExtra(TCPBClient):
         lines  = []
 
         if self.curr_job_dir is not None:
-            job_dir = os.path.join(self.server_root, self.curr_job_dir)
+            job_dir = self.server_file(self.curr_job_dir)
         elif self._last_known_curr_dir is not None:
-            job_dir = os.path.join(self.server_root, self._last_known_curr_dir)
+            job_dir = self.server_file(self._last_known_curr_dir)
         else:
             print('No job directory set, cannot print end of tc.out file')
             return
@@ -431,50 +431,45 @@ class TCClientExtra(TCPBClient):
 
         def _ensure_file_exists(file_loc):
             #   if the file is still not found, raise an error
-            if not os.path.isfile(file_loc):
+            if not self.is_file(file_loc): 
                 out_str = f'{file_loc} file not found in server root directory\n'
                 out_str += 'Current files in server root directory:\n'
                 out_str += f'    {self.server_root}\n'
                 for x in os.listdir(self.server_root):
                     out_str += f'        {x}\n'
                 exit(out_str)
-
-
         
         if opts.get('cisexcitonoverlap', 'no') == 'yes' and opts.get('cis', 'no') == 'yes':
             self.expect_exciton_overlap_dat = True
 
-            exciton_overlap_file = os.path.join(self.server_root, 'exciton_overlap.dat')
-            exciton_overlap_file_1 = os.path.join(self.server_root, 'exciton_overlap.dat.1')
-            exciton_file = os.path.join(self.server_root, 'exciton.dat')
 
             #   make sure the files exist, exit if it does not
-            _ensure_file_exists(exciton_overlap_file)
+            _ensure_file_exists('exciton_overlap.dat')
     
             #   read in previous data
-            with open(exciton_overlap_file, 'rb') as file:
-                self._exciton_overlap_data = file.read()
+            self._exciton_overlap_data = self.get_file('exciton_overlap.dat')
 
             #   if exciton_overlap_file_1 also exists, then exciton.dat must have been created
-            if os.path.isfile(exciton_overlap_file_1):
-                _ensure_file_exists(exciton_file)
+            if self.is_file('exciton_overlap.dat.1'):
+                _ensure_file_exists('exciton.dat')
                 overlap_data = []
-                with open(exciton_file, 'r') as file:
-                    for line in file:
-                        sp = line.split()
-                        if sp[0] == 'Overlap:':
-                            data = [float(x) for x in sp[1:]]
-                            overlap_data.append(data)
+
+                exciton_data = self.get_file('exciton.dat', 'r')
+                for line in exciton_data.splitlines():
+                    sp = line.split()
+                    if sp[0] == 'Overlap:':
+                        data = [float(x) for x in sp[1:]]
+                        overlap_data.append(data)
                 overlap_data = np.array(overlap_data)
                 self._exciton_data = overlap_data
                 results['exciton_overlap'] = overlap_data
-                os.remove(exciton_file)
+                self.remove_file('exciton.dat')
             else:
                 #   exciton_overlap.dat exists but exciton_overlap.dat.1 does not
                 #   this occus the first time exciton_overlap.dat is read by TeraChem, so we
                 #   assume that it's the first frame that does so. 
                 pass
-            os.rename(exciton_overlap_file, exciton_overlap_file_1)
+            self.rename_file('exciton_overlap.dat', 'exciton_overlap.dat.1')
 
             if opts.get('cisrestart', None):
                 self._possible_files_to_remove.add(opts.get('cisrestart', None))
@@ -534,6 +529,20 @@ class TCClientExtra(TCPBClient):
         with open(file_loc, mode) as file:
             file.write(data)
 
+    def remove_file(self, file_name):
+        file_loc = os.path.join(self.server_root, file_name)
+        if os.path.isfile(file_loc):
+            os.remove(file_loc)
+        else:
+            raise FileNotFoundError(f'File {file_name} not found in server root directory {self.server_root}')
+
+    def rename_file(self, old_name, new_name):
+        old_file_loc = os.path.join(self.server_root, old_name)
+        new_file_loc = os.path.join(self.server_root, new_name)
+        if os.path.isfile(old_file_loc):
+            os.rename(old_file_loc, new_file_loc)
+        else:
+            raise FileNotFoundError(f'File {old_name} not found in server root directory {self.server_root}')
 
 
 class TCCLientExtraDebug(TCClientExtra):
