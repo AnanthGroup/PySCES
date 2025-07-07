@@ -80,7 +80,7 @@ class TCClientExtra(TCPBClient):
             self._log = open(log_file_loc, 'a')
             self.log_message(f'Client started on {host}:{port}')
         self.server_root = server_root
-        self._possible_files_to_remove: set[str] = {'exciton_overlap.dat', 'exciton_overlap.dat.1', 'exciton.dat'}
+        self._possible_files_to_remove: set[str] = {'exciton_overlap.dat', 'exciton_overlap.dat.1', 'exciton.dat', 'cispropertyfile', 'scf_guess', 'cas_guess', 'cis_guess'}
         self._last_known_curr_dir = None
         self._results_history = deque(maxlen=10)
         self._exciton_overlap_data = None
@@ -460,7 +460,6 @@ class TCClientExtra(TCPBClient):
                 overlap_data = np.array(overlap_data)
                 self._exciton_data = overlap_data
                 results['exciton_overlap'] = overlap_data
-                print('CIS OVERLAP: ', overlap_data)
                 self.remove_file('exciton.dat')
             else:
                 #   exciton_overlap.dat exists but exciton_overlap.dat.1 does not
@@ -2472,7 +2471,7 @@ def format_combo_job_results(job_data: list[dict], states: list[int], ref_dipole
         #   gradients
         g = tc_gradients[state_i]
         if g is not None:
-            gradients[i] = np.array(g).flatten()
+            gradients[state_i] = np.array(g).flatten()
 
     for i in range(max_s):
 

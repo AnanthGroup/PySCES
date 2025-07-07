@@ -1612,9 +1612,10 @@ def rk4(initq, initp, tStop, H, restart, amu_mat, U, AN_mat):
         write_restart(restart_file_out, [y[:ndof], y[ndof:]], sign_flipper.nac_hist, sign_flipper.tdm_hist, init_energy, t, nel, 'rk4', elecE, grad, nac, opts.com_ang, tc_runner)
 
     # Create nac history for sign-flip extrapolation
-    # sign_flipper.set_history(nac, np.empty(0), trans_dips, np.empty(0))
     sign_flipper.set_history(nac, nac_hist, trans_dips, tdm_hist)
-    # exit()
+    
+    #   the first frame of the trajectory has a restart file written
+    write_restart('initial_restart.json', [y[:ndof], y[ndof:]], sign_flipper.nac_hist, sign_flipper.tdm_hist, init_energy, t, nel, 'rk4', elecE, grad, nac, opts.com_ang, tc_runner)
 
     opt['guess'] = 'moread'
     X,Y = [],[]
