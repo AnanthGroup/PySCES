@@ -1099,13 +1099,13 @@ class TCRunner(QCRunner):
             self._max_state = max(self._grads)
         elif tc_opts.state_options.get('max_state', False):
             self._max_state = tc_opts.state_options['max_state']
-            self._grads = list(range(self._max_state + 1))
+            self._grads = tuple(range(self._max_state + 1))
         else:
             raise ValueError('either "max_state" or a list of "grads" must be specified')
 
         self._NACs = tc_opts.state_options.pop('nacs', 'all')
         if self._NACs == 'all':
-            self._NACs = list(itertools.combinations(self._grads, 2))
+            self._NACs = tuple(itertools.combinations(self._grads, 2))
     
     def _initialize_base_and_excited_options(self):
         orig_opts = self._orig_options.copy()

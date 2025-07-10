@@ -175,22 +175,14 @@ def TCRunner_Serialize(self: 'TCRunner') -> dict:
         if client._scf_guess_file is not None and out_data.get('scf_guess', None) is None:
             data = client.get_file(client._scf_guess_file)
             out_data['scf_guess'] = base64.b64encode(data).decode('utf-8')
-            # with open(client._scf_guess_file, 'rb') as file:
-            #     out_data['scf_guess'] = base64.b64encode(file.read()).decode('utf-8')
         
         if client._cis_guess_file is not None and out_data.get('cis_guess', None) is None:
             data = client.get_file(client._cis_guess_file)
             out_data['cis_guess'] = base64.b64encode(data).decode('utf-8')
-            # cis_file = client.server_file(client._cis_guess_file)
-            # with open(cis_file, 'rb') as file:
-            #     out_data['cis_guess'] = base64.b64encode(file.read()).decode('utf-8')
         
         if client._cas_guess_file is not None and out_data.get('cas_guess', None) is None:
             data = client.get_file(client._cas_guess_file)
             out_data['cas_guess'] = base64.b64encode(data).decode('utf-8')
-            # with open(client._cas_guess_file, 'rb') as file:
-            #     out_data['cas_guess'] = base64.b64encode(file.read()).decode('utf-8')
-
     return out_data
 
 def TCRunner_Deserialize(data: dict, tc_runner: 'TCRunner'):

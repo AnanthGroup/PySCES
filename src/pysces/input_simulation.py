@@ -315,7 +315,7 @@ def print_settings():
     print(f'Normal mode frequency scaling:      {frq_scale}')
     print(f'Electronic structure runner:        {qc_runner}')
     print(f'Molecule input format:              {mol_input_format}')
-    print(f'Restart file will be written to     {restart_file_in}')
+    print(f'Restart file will be written to     {restart_file_out}')
     print(f'current working directory:          {os.path.abspath(os.path.curdir)}')
     print(f'Logs will be written to:            {logging_dir}')
 

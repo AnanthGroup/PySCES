@@ -127,7 +127,22 @@ def run_restart_module():
 
     exit()
 
-def read_restart(file_loc: str='restart.out', ndof: int=0, integrator: str='RK4', tc_runner=None) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, float, float]:
+def check_json_format(data: dict, root: str='/'):
+    ''''
+        Recursively checks if the data provided is json serializable.
+    '''
+    if isinstance(data, dict):
+        for key, value in data.items():
+            if not isinstance(key, str):
+                raise ValueError(f'Key {root}/{key} is not a string')
+            check_json_format(value, f'{root}/{key}')
+    elif isinstance(data, (list, tuple)):
+        for i, item in enumerate(data):
+            check_json_format(item, f'{root}[{i}]')
+    elif not isinstance(data, (str, int, float, bool, None.__class__)):
+        raise ValueError(f'Value {root}/{type(data)} is not json serializable')
+
+def read_restart(file_loc: str='restart.out', ndof: int=0, integrator: str='RK4', tc_runner=None, qc_runner=None) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, float, float]:
     '''
         Reads in a restart file and extracts it's data
         Parameters
@@ -254,6 +269,9 @@ def read_restart(file_loc: str='restart.out', ndof: int=0, integrator: str='RK4'
             if 'TCRunner' in data:
                 TCRunner_Deserialize(data.pop('TCRunner'), tc_runner)
 
+            if 'qc_runner' in data and qc_runner is not None:
+                qc_runner.load_restart(data.pop('qc_runner'))
+
 
             # phase_vars = PhaseVars(elec_q, elec_p, nucl_q, nucl_p, time)
             # es_vars = ESVars(elecE, grads, nac_mat)
@@ -280,6 +298,7 @@ def write_restart(file_loc: str,
                     grads: np.ndarray = np.empty(0), 
                     nac_mat: np.ndarray = np.empty(0),
                     com=None,
+                    tc_runner=None,
                     qc_runner=None):
     '''
         Writes a restart file for restarting a simulation from the previous conditions
@@ -374,8 +393,13 @@ def write_restart(file_loc: str,
             if TCJob.get_ID_counter() > 0:
                 data['TCJob__job_counter'] = TCJob.get_ID_counter()
 
-            if qc_runner:
-                data[qc_runner.__class__.__name__] = serialize(qc_runner)
+            if qc_runner is not None:
+                serialized_runner = qc_runner.save_restart()
+                check_json_format(serialized_runner, root='qc_runner')
+                data['qc_runner'] = serialized_runner
+
+            elif qc_runner:
+                data[tc_runner.__class__.__name__] = serialize(tc_runner)
 
             with open(file_loc, 'w') as file:
                 json.dump(data, file, indent=2)
