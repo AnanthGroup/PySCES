@@ -26,7 +26,7 @@ from pysces import input_simulation as opts # we should start moving the global 
 from pysces.input_gamess import nacme_option as opt 
 from pysces.fileIO import SimulationLogger, write_restart, read_restart
 from pysces.interpolation import SignFlipper
-from pysces.common import PhaseVars
+from pysces.common import PhaseVars, ESVarsHistory, ESVars
 from pysces import timers
 # __location__ = os.path.realpath(os.path.join(os.getcwd(), os.path.dirname(__file__)))
 __location__ = ''
@@ -1535,6 +1535,54 @@ def scipy_rk4(elecE, grad, nac, yvar, dt, au_mas):
     result = it.solve_ivp(get_deriv, (0,dt), yvar, method='RK45', max_step=dt, t_eval=[dt], rtol=1e-10, atol=1e-10)
     return(result.y.flatten())
 
+def interpolate_rk4(yvar: list, t: float, dt: float, au_mas: np.ndarray, es_history: ESVarsHistory):
+    def get_deriv(t_new, y0):
+        q = y0[:ndof]
+        p = y0[ndof:]
+        nac_new = es_history.nacs(t_new)
+        grad_new = es_history.grads(t_new)
+        elecE_new = es_history.elecE(t_new)
+        der = get_derivatives(au_mas, q, p, nac_new, grad_new, elecE_new)
+        der = der.flatten()
+        return(der)
+    result = it.solve_ivp(get_deriv, (t,t+dt), yvar, method='RK45', max_step=dt, t_eval=[t+dt], rtol=1e-10, atol=1e-10)
+    return(result.y.flatten())
+
+def verlet_schrodinger(elecE, grad, nac, yvar, dt, au_mas):
+    q_all = yvar[:ndof]  # position variables
+    p_all = yvar[ndof:]  # momentum variables
+
+    #   Verlet Velocity update for nuclear variables
+    all_der = get_derivatives(au_mas, q_all, p_all, nac, grad, elecE)
+    nuc_der = np.array(all_der[1, nel:])
+    p_nuc_new = p_all[nel:] + dt * nuc_der * au_mas
+    q_nuc_new = q_all[nel:] + dt * p_nuc_new / au_mas
+
+    #   Update the electronic variables
+    nuc_vel_old = p_all[nel:] / au_mas
+    H = np.zeros((nel, nel), dtype=np.complex128)
+    for i in range(nel):
+        for j in range(nel):
+            if i == j:
+                H[i, j] = np.mean(elecE[i] - elecE)
+            else:
+                H[i, j] = - (1j)*np.dot(nac[:, i, j], nuc_vel_old)
+    
+    eps, U = np.linalg.eigh(H)
+    propagator = U @ np.diag(np.exp(-1j * eps * dt)) @ U.conj()
+
+    x_old = q_all[0:nel]  # electronic position variables
+    p_old = p_all[0:nel]  # electronic momentum variables
+    C_old = (x_old + 1j * p_old) / np.sqrt(2.0)  # complex electronic variables
+    C_new = propagator @ C_old  # new complex electronic variables
+    x_new = np.sqrt(2.0) * C_new.real  # new electronic position variables
+    p_new = np.sqrt(2.0) * C_new.imag  # new electronic momentum variables
+
+    #   Combine the new electronic and nuclear variables
+    y_new = np.concatenate((x_new, q_nuc_new, p_new, p_nuc_new))
+
+    return y_new
+    
 
 def rk4(initq, initp, tStop, H, restart, amu_mat, U, AN_mat):
 
@@ -1550,6 +1598,7 @@ def rk4(initq, initp, tStop, H, restart, amu_mat, U, AN_mat):
     initial_time = 0.0
     q, p         = np.zeros(ndof), np.zeros(ndof)  # collections of all mapping variables
     elecE, grad, nac = np.empty(0), np.empty(0), np.empty(0)
+    es_history = ESVarsHistory()
 
     #   very first step does not need a GAMESS guess
     opt['guess'] = ''
@@ -1634,7 +1683,9 @@ def rk4(initq, initp, tStop, H, restart, amu_mat, U, AN_mat):
         with open(os.path.join(__location__, 'progress.out'), 'a') as f:
             f.write('\n')
             f.write('Starting 4th-order Runge-Kutta routine.\n')
-        y  = scipy_rk4(elecE,grad,nac,y,H,au_mas)
+        es_history.append(ESVars(t, None, elecE, grad, nac, None))
+        y = interpolate_rk4(y, t, H, au_mas, es_history)
+        # y  = scipy_rk4(elecE,grad,nac,y,H,au_mas)
         t += H
         X.append(t)
         Y.append(y)

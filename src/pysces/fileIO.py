@@ -393,13 +393,13 @@ def write_restart(file_loc: str,
             if TCJob.get_ID_counter() > 0:
                 data['TCJob__job_counter'] = TCJob.get_ID_counter()
 
-            if qc_runner is not None:
+            if tc_runner:
+                data[tc_runner.__class__.__name__] = serialize(tc_runner)
+
+            elif qc_runner is not None:
                 serialized_runner = qc_runner.save_restart()
                 check_json_format(serialized_runner, root='qc_runner')
                 data['qc_runner'] = serialized_runner
-
-            elif qc_runner:
-                data[tc_runner.__class__.__name__] = serialize(tc_runner)
 
             with open(file_loc, 'w') as file:
                 json.dump(data, file, indent=2)
