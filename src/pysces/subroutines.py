@@ -1548,29 +1548,48 @@ def interpolate_rk4(yvar: list, t: float, dt: float, au_mas: np.ndarray, es_hist
     result = it.solve_ivp(get_deriv, (t,t+dt), yvar, method='RK45', max_step=dt, t_eval=[t+dt], rtol=1e-10, atol=1e-10)
     return(result.y.flatten())
 
-def verlet_schrodinger(elecE, grad, nac, yvar, dt, au_mas):
+def verlet_schrodinger(elecE, grad, nac, yvar, dt, au_mas, t):
+    '''
+        This integrator impliments a Velocity-Verlet scheme for the nuclear variables
+        and a Schrodinger equation propagator for the electronic variables. set of
+        variables (electronic, nuclear) assumes the other are kept constant.
+        Details are from Talbot, Head-Gordon, and Cotton (2023)
+        doi.org/10.1080/00268976.2022.2153761
+    '''
+
+
     q_all = yvar[:ndof]  # position variables
     p_all = yvar[ndof:]  # momentum variables
 
     #   Verlet Velocity update for nuclear variables
     all_der = get_derivatives(au_mas, q_all, p_all, nac, grad, elecE)
     nuc_der = np.array(all_der[1, nel:])
-    p_nuc_new = p_all[nel:] + dt * nuc_der * au_mas
-    q_nuc_new = q_all[nel:] + dt * p_nuc_new / au_mas
+    p_nuc_old = p_all[nel:]  # old nuclear momentum variables
+    q_nuc_old = q_all[nel:]  # old nuclear position variables
+    if t == 0.0:
+        p_nuc_new = p_nuc_old + 0.5*dt * nuc_der
+    else:
+        p_nuc_new = p_nuc_old + dt * nuc_der
+    q_nuc_new = q_nuc_old + dt * p_nuc_new / au_mas
 
     #   Update the electronic variables
-    nuc_vel_old = p_all[nel:] / au_mas
+    # nuc_vel_old = p_nuc_old / au_mas
+    nuc_vel_old = 0.5*(p_nuc_old + p_nuc_new) / au_mas  # average nuclear velocity
+
+    #   equation 8
     H = np.zeros((nel, nel), dtype=np.complex128)
     for i in range(nel):
         for j in range(nel):
             if i == j:
                 H[i, j] = np.mean(elecE[i] - elecE)
             else:
-                H[i, j] = - (1j)*np.dot(nac[:, i, j], nuc_vel_old)
+                H[i, j] = - (1j)*np.dot(nac[i, j], nuc_vel_old)
     
+    #   equation 9
     eps, U = np.linalg.eigh(H)
-    propagator = U @ np.diag(np.exp(-1j * eps * dt)) @ U.conj()
+    propagator = U @ np.diag(np.exp(-1j * eps * dt)) @ U.conj().T
 
+    #   equation 7
     x_old = q_all[0:nel]  # electronic position variables
     p_old = p_all[0:nel]  # electronic momentum variables
     C_old = (x_old + 1j * p_old) / np.sqrt(2.0)  # complex electronic variables
@@ -1684,7 +1703,8 @@ def rk4(initq, initp, tStop, H, restart, amu_mat, U, AN_mat):
             f.write('\n')
             f.write('Starting 4th-order Runge-Kutta routine.\n')
         es_history.append(ESVars(t, None, elecE, grad, nac, None))
-        y = interpolate_rk4(y, t, H, au_mas, es_history)
+        # y = interpolate_rk4(y, t, H, au_mas, es_history)
+        y = verlet_schrodinger(elecE, grad, nac, y, H, au_mas, t)
         # y  = scipy_rk4(elecE,grad,nac,y,H,au_mas)
         t += H
         X.append(t)
