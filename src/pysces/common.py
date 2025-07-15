@@ -170,16 +170,12 @@ class ESVarsHistory:
         self._nacs_history = _HistoryInterpolation()
         self._trans_dips_history = _HistoryInterpolation()
 
-        self._interp_func = None
-        self._need_to_recalculate_interp = True
-
         if initial_vars is not None:
             self.append(initial_vars)
 
     def append(self, es_vars: ESVars) -> None:
         if es_vars.time < self._time_history[-1]:
             raise ValueError("Time must be increasing")
-
 
         self._time_history.append(es_vars.time)
         self._all_energies_history.append(es_vars.all_energies, es_vars.time)

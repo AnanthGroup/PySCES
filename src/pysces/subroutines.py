@@ -1548,30 +1548,7 @@ def interpolate_rk4(yvar: list, t: float, dt: float, au_mas: np.ndarray, es_hist
     result = it.solve_ivp(get_deriv, (t,t+dt), yvar, method='RK45', max_step=dt, t_eval=[t+dt], rtol=1e-10, atol=1e-10)
     return(result.y.flatten())
 
-def _verlet_step(yvar, t, dt, au_mas, es_history):
-    q_all = yvar[:ndof]  # position variables
-    p_all = yvar[ndof:]  # momentum variables
-
-    #   Verlet Velocity update for nuclear variables
-    all_der = get_derivatives(au_mas, q_all, p_all, es_history.nacs(t), es_history.grads(t), es_history.elecE(t))
-    nuc_der = np.array(all_der[1, nel:])
-    p_nuc_old = p_all[nel:]  # old nuclear momentum variables
-    q_nuc_old = q_all[nel:]  # old nuclear position variables
-    p_nuc_new = p_nuc_old + dt * nuc_der
-    q_nuc_new = q_nuc_old + dt * p_nuc_new / au_mas
-
-    return q_nuc_new, p_nuc_new
-
-def verlet_schrodinger(elecE, grad, nac, yvar, dt, au_mas, t):
-    '''
-        This integrator impliments a Velocity-Verlet scheme for the nuclear variables
-        and a Schrodinger equation propagator for the electronic variables. set of
-        variables (electronic, nuclear) assumes the other are kept constant.
-        Details are from Talbot, Head-Gordon, and Cotton (2023)
-        doi.org/10.1080/00268976.2022.2153761
-    '''
-
-
+def _verlet_step(elecE, grad, nac, yvar, t, dt, au_mas):
     q_all = yvar[:ndof]  # position variables
     p_all = yvar[ndof:]  # momentum variables
 
@@ -1586,8 +1563,13 @@ def verlet_schrodinger(elecE, grad, nac, yvar, dt, au_mas, t):
         p_nuc_new = p_nuc_old + dt * nuc_der
     q_nuc_new = q_nuc_old + dt * p_nuc_new / au_mas
 
-    #   Update the electronic variables
-    # nuc_vel_old = p_nuc_old / au_mas
+    return q_nuc_new, p_nuc_new
+
+def _schrodinger_step(elecE, nac, yvar, dt, au_mas, p_nuc_new):
+    q_all = yvar[:ndof]  # position variables
+    p_all = yvar[ndof:]  # momentum variables
+    p_nuc_old = p_all[nel:]  # old nuclear momentum variables
+
     nuc_vel_old = 0.5*(p_nuc_old + p_nuc_new) / au_mas  # average nuclear velocity
 
     #   equation 8
@@ -1611,38 +1593,77 @@ def verlet_schrodinger(elecE, grad, nac, yvar, dt, au_mas, t):
     x_new = np.sqrt(2.0) * C_new.real  # new electronic position variables
     p_new = np.sqrt(2.0) * C_new.imag  # new electronic momentum variables
 
+    return x_new, p_new
+
+def _rk4_nuclear_step(elecE, grad, nac, yvar, dt, au_mas):
+    '''
+
+    '''
+    def get_deriv(t, y0):
+        q, p = np.reshape(y0, (2, -1))
+        q_all, p_all = yvar[:ndof], yvar[ndof:]
+        q_all[nel:] = q
+        p_all[nel:] = p
+        der = get_derivatives(au_mas, q_all, p_all, nac, grad, elecE)
+        der_q = der[0, nel:]  # nuclear derivatives
+        der_p = der[1, nel:]  # nuclear derivatives
+        der_flat = np.concatenate((der_q, der_p))  # concatenate nuclear derivatives
+        return der_flat
+    
+    q_0 = yvar[:ndof][nel:]  # initial position variables
+    p_0 = yvar[ndof:][nel:]  # initial momentum variables
+    y_0 = np.concatenate((q_0, p_0))  # initial variables
+    result = it.solve_ivp(get_deriv, (0,dt), y_0, method='RK45', max_step=dt, t_eval=[dt], rtol=1e-10, atol=1e-10)
+    q_new, p_new = result.y.reshape(2, -1)  
+    return q_new, p_new
+
+def verlet_schrodinger(elecE, grad, nac, yvar, dt, au_mas, t):
+    '''
+        This integrator impliments a Velocity-Verlet scheme for the nuclear variables
+        and a Schrodinger equation propagator for the electronic variables. set of
+        variables (electronic, nuclear) assumes the other are kept constant.
+        Details are from Talbot, Head-Gordon, and Cotton (2023)
+        doi.org/10.1080/00268976.2022.2153761
+    '''
+
+    # q_nuc_new, p_nuc_new = _verlet_step(elecE, grad, nac, yvar, t, dt, au_mas)
+    q_nuc_new, p_nuc_new = _rk4_nuclear_step(elecE, grad, nac, yvar, dt, au_mas)
+    q_new, p_new = _schrodinger_step(elecE, nac, yvar, dt, au_mas, p_nuc_new)
+
     #   Combine the new electronic and nuclear variables
-    y_new = np.concatenate((x_new, q_nuc_new, p_new, p_nuc_new))
+    y_new = np.concatenate((q_new, q_nuc_new, p_new, p_nuc_new))
 
     return y_new
 
-def hybrid_rk4_verlet_schrodinger_2(yvar: list, t: float, dt: float, au_mas: np.ndarray, es_history: ESVarsHistory, n_substeps: int = 100):
+def hybrid_rk4_verlet_schrodinger(yvar: list, t: float, dt: float, au_mas: np.ndarray, es_history: ESVarsHistory, n_substeps: int = 100):
 
-    print('Performing Hybrid Integration')
-
-    from scipy.integrate import simps
-
+    # print('Performing Hybrid Integration 2')
 
     y_var_new = np.copy(yvar)
     elecE_0 = es_history.elecE(t)  # initial electronic energy
-    for n in range(n_substeps):
+    P_points = []
+    running_dE = 0.0
+    for n in range(n_substeps+1):
         t_n = t + n * dt / n_substeps
         nacs = es_history.nacs(t_n)
         grads = es_history.grads(t_n)
-        # elecE = es_history.elecE(t_n)
-
-        nuclear_P = y_var_new[ndof:][nel:]
-        nuclear_V = nuclear_P / au_mas  # nuclear velocity
-        t_points = np.linspace(t_n, t_n + dt / n_substeps, n_substeps + 1)
-        grad_pts = np.array([es_history.grads(t_point) for t_point in t_points])
-        grad_dot_V = np.einsum('ijk, k -> ij', grad_pts, nuclear_V)  # dot product of gradients and nuclear velocity
-        elecE = elecE_0 + np.array([simps(grad_dot_V[:, i], t_points) for i in range(nel)])  # integrate the dot product over time
-
+        
+        P_points.append(y_var_new[ndof:][nel:])
+        if n == 0:
+            elecE = elecE_0
+        else:
+            grad_dot_V1 = np.einsum('ij, j -> i', grads, P_points[-1]/au_mas)
+            grad_dot_V2 = np.einsum('ij, j -> i', grads, P_points[-2]/au_mas)
+            sub_dt = dt / n_substeps
+            running_dE += (grad_dot_V1 + grad_dot_V2) * sub_dt / 2.0
+            elecE = elecE_0 + running_dE
+        
         y_var_new = verlet_schrodinger(elecE, grads, nacs, y_var_new, dt / n_substeps, au_mas, t_n)
+            
 
     return y_var_new
 
-def hybrid_rk4_verlet_schrodinger(yvar: list, t: float, dt: float, au_mas: np.ndarray, es_history: ESVarsHistory, n_substeps: int = 100):
+def hybrid_rk4_verlet_schrodinger_old(yvar: list, t: float, dt: float, au_mas: np.ndarray, es_history: ESVarsHistory, n_substeps: int = 100):
 
     print('Performing Hybrid Integration')
     # import pickle
