@@ -88,7 +88,7 @@ def run_simulation():
         time_array, coord, initial_time = BulStoer(initq,initp,tmax_bsh,Hbsh,tol,restart,amu_mat,U, AN_mat)
         compute_CF(time_array, coord)
 
-    elif integrator == 'RK4':
+    elif integrator.lower() in ['rk4', 'rk4-uprop', 'verlet-uprop']:
         time_array, coord, initial_time = rk4(initq, initp, tmax_rk4, Hrk4, restart, amu_mat, U, AN_mat)
         compute_CF(time_array, coord)
 

@@ -70,6 +70,8 @@ pN0 = 0.0
 
 # Specify an integrator (Choose from 'ABM', 'BSH', and 'RK4')
 integrator = 'RK4'
+# If Smaller incremental steps are used durring the integration
+incremental_int = False
 # Size of time step (a.u.), number of steps (Only relevant for ABM)
 timestep, nstep = 1.0, 16700
 # Maximum propagation time (a.u.), BSH step to be tried (a.u.), error tolerance (ratio) (Only relevant for BSH)
@@ -270,6 +272,9 @@ def _check_settings(local: dict):
             print(f"         Resetting q0 and p0 to all zeros")
             opts.q0 = [0.0]*opts.nel
             opts.p0 = [0.0]*opts.nel
+
+    if integrator.lower() not in ['abm', 'bsh', 'rk4', 'rk4-uprop', 'verlet-uprop']:
+        raise ValueError(f"Integrator '{integrator}' is not supported. Choose from 'ABM', 'BSH', 'RK4', 'RK4-Uprop', or 'Verlet-Uprop'")
      
     opts.ndof = opts.nel + opts.nnuc
 
