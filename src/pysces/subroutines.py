@@ -339,7 +339,13 @@ def sample_wignerLSC(qN0, frq):
     def eqn(F, r):
         return 2 ** (F + 1) * (r - 0.5) * np.exp(-(r + 0.5 * (F - 1))) - 1
 
-    root = fsolve(partial(eqn, nel), 2)
+    if debug_eff_wigner_nel > 0:
+        print(f'DEBUG: Using effective number of electron states of {debug_eff_wigner_nel} for Wigner sampling.')
+        exp_nel = debug_eff_wigner_nel
+    else:
+        exp_nel = nel
+
+    root = fsolve(partial(eqn, exp_nel), 2)
     r = root[0] ** 0.5
         
     # Electronic phase space variables
@@ -1570,7 +1576,8 @@ def _uprop_step(elecE, nac, yvar, dt, au_mas, p_nuc_new):
     p_all = yvar[ndof:]  # momentum variables
     p_nuc_old = p_all[nel:]  # old nuclear momentum variables
 
-    nuc_vel_old = 0.5*(p_nuc_old + p_nuc_new) / au_mas  # average nuclear velocity
+    # nuc_vel_old = 0.5*(p_nuc_old + p_nuc_new) / au_mas  # average nuclear velocity
+    nuc_vel_old = p_nuc_new / au_mas  # nuclear velocity at the old time step
 
     #   equation 8
     H = np.zeros((nel, nel), dtype=np.complex128)
@@ -1652,7 +1659,7 @@ def incremental_integrate(yvar: list, t: float, dt: float, au_mas: np.ndarray, e
     for n in range(n_substeps+1):
         
         t_n = t + n * sub_dt
-        nacs = es_history.nacs(t_n)
+        # nacs = es_history.nacs(t_n)
         grads = es_history.grads(t_n)
         
         P_points.append(y_var_new[ndof:][nel:])
@@ -1664,6 +1671,13 @@ def incremental_integrate(yvar: list, t: float, dt: float, au_mas: np.ndarray, e
             
             running_dE += (grad_dot_V1 + grad_dot_V2) * sub_dt / 2.0
             elecE = elecE_0 + running_dE
+
+        dim = np.shape(elecE)[0]
+        deriv_coupling = es_history.deriv_coupling(t_n)
+        nacs = np.zeros_like(deriv_coupling)
+        for i in range(dim):
+            for j in range(dim):
+                nacs[i, j] = deriv_coupling[i, j]/(elecE[j] - elecE[i])
         
         if integrator.lower() == 'rk4':
             y_var_new = scipy_rk4(elecE, grads, nacs, y_var_new, sub_dt, au_mas)

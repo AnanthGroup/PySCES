@@ -741,10 +741,14 @@ class CorrelationLogger(BaseLogger):
         # if data.all_energies is not None:
         #     labels = [f'S{i}' for i in range(len(data.all_energies))]
         # elif labels is None:
+
         if data.state_labels is None:
             labels = [f'S{i}' for i in range(len(data.elec_q))]
         else:
             labels = data.state_labels
+
+        if opts.debug_eff_wigner_nel > 0:
+            labels += [f'Sx{i}' for i in range(len(data.elec_q), opts.debug_eff_wigner_nel)]
             
         if self._file:
             #   write file header
@@ -765,13 +769,21 @@ class CorrelationLogger(BaseLogger):
         time = data.time
         
         ### Compute the estimator of electronic state population ###
-        nel = len(q)
+        if opts.debug_eff_wigner_nel > len(q):
+            print(f'DEBUG: Using {opts.debug_eff_wigner_nel} effective Wigner states')
+            nel = opts.debug_eff_wigner_nel
+            n_diff = nel - len(q)
+            p = np.concatenate((p, np.zeros(n_diff)))
+            q = np.concatenate((q, np.ones(n_diff)*np.sqrt(0.5)))
+        else:
+            nel = len(q)
+        
         pops = np.zeros(nel)
         common_TCF = 2**(nel+1) * np.exp(-np.dot(q, q) - np.dot(p, p))
-        for i in range(nel):
+        for i in range(len(p)):
                 final_state_TCF = q[i]**2 + p[i]**2 - 0.5
                 pops[i] = common_TCF * final_state_TCF
-    
+
         total = np.sum(pops)
 
         if self._file:

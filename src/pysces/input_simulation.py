@@ -156,6 +156,9 @@ tcr_ref_job = None
 
 ########## END DEFAULT SETTINGS ##########
 
+##########   DEBUGGING SETTINGS   ##########
+debug_eff_wigner_nel = -1
+########## END DEBUGGING SETTINGS ##########
 
 
 ########## GLOBAL SETTINGS, SHOULD NOT BE SET BY USER ##########

@@ -168,6 +168,7 @@ class ESVarsHistory:
         self._ElecE_history = _HistoryInterpolation()
         self._grads_history = _HistoryInterpolation()
         self._nacs_history = _HistoryInterpolation()
+        self._deriv_coupling_history = _HistoryInterpolation()
         self._trans_dips_history = _HistoryInterpolation()
 
         if initial_vars is not None:
@@ -183,6 +184,18 @@ class ESVarsHistory:
         self._grads_history.append(es_vars.grads, es_vars.time)
         self._nacs_history.append(es_vars.nacs, es_vars.time)
         self._trans_dips_history.append(es_vars.trans_dips, es_vars.time)
+
+        if (es_vars.nacs is not None) and (es_vars.elecE is not None):
+            E = es_vars.elecE
+            dim = es_vars.nacs.shape[0]
+            deriv_coupling = np.zeros_like(es_vars.nacs)
+            for i in range(dim):
+                for j in range(dim):
+                    if i != j:
+                        deriv_coupling[i, j, :] = es_vars.nacs[i, j, :] * (E[j] - E[i])
+        else:
+            deriv_coupling = None
+        self._deriv_coupling_history.append(deriv_coupling, es_vars.time)
 
 
     @property
@@ -200,6 +213,10 @@ class ESVarsHistory:
     @property
     def nacs(self):
         return self._nacs_history
+    
+    @property
+    def deriv_coupling(self):
+        return self._deriv_coupling_history
 
     @property
     def trans_dips(self):
