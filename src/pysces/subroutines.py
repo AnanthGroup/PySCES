@@ -1669,6 +1669,7 @@ def incremental_integrate(yvar: list, t: float, dt: float, au_mas: np.ndarray, e
             grad_dot_V1 = np.einsum('ij, j -> i', grads, P_points[-1]/au_mas)
             grad_dot_V2 = np.einsum('ij, j -> i', grads, P_points[-2]/au_mas)
             
+            #   trapazoidal integration of the energy
             running_dE += (grad_dot_V1 + grad_dot_V2) * sub_dt / 2.0
             elecE = elecE_0 + running_dE
 
@@ -1677,7 +1678,12 @@ def incremental_integrate(yvar: list, t: float, dt: float, au_mas: np.ndarray, e
         nacs = np.zeros_like(deriv_coupling)
         for i in range(dim):
             for j in range(dim):
-                nacs[i, j] = deriv_coupling[i, j]/(elecE[j] - elecE[i])
+                energy_diff = elecE[j] - elecE[i] # avoid division by zero
+                if np.abs(energy_diff) < 1e-10 and energy_diff != 0.0:
+                    energy_diff = 1e-10 * np.sign(energy_diff)
+                elif energy_diff == 0.0:
+                    energy_diff = 1e-10
+                nacs[i, j] = deriv_coupling[i, j]/energy_diff
         
         if integrator.lower() == 'rk4':
             y_var_new = scipy_rk4(elecE, grads, nacs, y_var_new, sub_dt, au_mas)

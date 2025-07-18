@@ -5,14 +5,9 @@ import os
 import json
 import shutil
 import numpy as np
-from copy import deepcopy
 import argparse
 import sys
-# import pysces.qcRunners
-# from .qcRunners import TeraChem as TC
-# from .qcRunners.TeraChem import TCJob, TCJobBatch
 from .h5file import H5File, H5Group, H5Dataset
-# from .input_simulation import extra_loggers, logging_mode
 from . import input_simulation as opts
 from .serialization import serialize, deserialize, TCRunner_Deserialize
 from .common import PhaseVars, ESVars
@@ -41,7 +36,7 @@ def run_restart_module():
     print(args)
 
     if args.file.endswith('.h5'):
-        traj_file = H5File(args.file, 'r')
+        traj_file = H5File(args.file, 'r', swmr=True)
         times = np.array(traj_file['electronic/time'])
         dt = times[1] - times[0]
         print('\nReading in data from HDF5 file\n')
@@ -442,7 +437,6 @@ class SimulationLogger():
         self._h5_file = None
         self._h5_group = None
         if hdf5:
-            # self._h5_file = H5File(os.path.join(dir, 'logs.h5'), 'w')
             if 'r' in opts.logging_mode and os.path.exists('logs.h5'):
                 raise ValueError('logging mode must be either "w", "a", or "x/w-"')
             if opts.logging_mode == 'w' and os.path.exists('logs.h5'):
@@ -450,7 +444,9 @@ class SimulationLogger():
                     if not os.path.exists(f'logs_{n}.h5'):
                         shutil.move('logs.h5', f'logs_{n}.h5')
                         break
-            self._h5_file = H5File('logs.h5', opts.logging_mode)
+            self._h5_file = H5File('logs.h5', opts.logging_mode, libver='latest')
+            self._h5_file.swmr_mode = True
+
             if hdf5_name == '':
                 hdf5_name = 'electronic'
             self._h5_group = self._h5_file.create_group(hdf5_name)

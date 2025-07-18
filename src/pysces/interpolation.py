@@ -1,6 +1,6 @@
 import numpy as np
 from collections import deque
-from scipy.integrate import simps
+from scipy.integrate import simpson
 from scipy.interpolate import interp1d
 class GradEstimator():
 
@@ -65,7 +65,7 @@ class GradEstimator():
         grads = self._evaluate(times)
         prod = grads * velocities[:, None]
         axis = len(grads.shape) - 2
-        delta_f = simps(prod, times, axis=axis)
+        delta_f = simpson(prod, times, axis=axis)
         extrap_f = f0 + delta_f
 
         return extrap_f
