@@ -5,7 +5,7 @@ from tcpb.exceptions import ServerError
 from tcpb import terachem_server_pb2 as pb
 
 from pysces.input_simulation import logging_dir, TCRunnerOptions
-from pysces.common import PhaseVars, QCRunner
+from pysces.common import PhaseVars, QCRunner, ESVars
 from pysces.qcRunners.LoadBalancing import balance_tasks_optimum, ESDerivTasks, ServerBenchmark
 from pysces.h5file import H5File, H5Group, h5py
 from pysces.fileIO import BaseLogger, LoggerData
@@ -1533,7 +1533,8 @@ class TCRunner(QCRunner):
         self._initialize_nac_sign(nac)
         self._finalize_frame(job_batch)
 
-        return (all_energies, elecE, grad, nac, trans_dips, job_batch.timings)
+        return ESVars(None, all_energies, elecE, grad, nac, trans_dips, job_batch.timings)
+        # return (all_energies, elecE, grad, nac, trans_dips, job_batch.timings)
     
     # def set_logger():
 

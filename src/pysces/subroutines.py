@@ -813,7 +813,8 @@ def run_gamess_at_geom(input_name, AN_mat, qC, atoms):
     if not proceed:
         sys.exit("Electronic structure calculation failed at initial time. Exitting.")
 
-    return elecE, grad, nac, None
+    return ESVars(elecE=elecE, grads=grad, nacs=nac)
+    # return elecE, grad, nac
 
 # #######################################################
 # ### Compute the population of the electronic states ###
@@ -1678,11 +1679,13 @@ def incremental_integrate(yvar: list, t: float, dt: float, au_mas: np.ndarray, e
         nacs = np.zeros_like(deriv_coupling)
         for i in range(dim):
             for j in range(dim):
-                energy_diff = elecE[j] - elecE[i] # avoid division by zero
+                # avoid division by zero
+                energy_diff = elecE[j] - elecE[i] 
                 if np.abs(energy_diff) < 1e-10 and energy_diff != 0.0:
                     energy_diff = 1e-10 * np.sign(energy_diff)
                 elif energy_diff == 0.0:
                     energy_diff = 1e-10
+
                 nacs[i, j] = deriv_coupling[i, j]/energy_diff
         
         if integrator.lower() == 'rk4':
@@ -1695,6 +1698,9 @@ def incremental_integrate(yvar: list, t: float, dt: float, au_mas: np.ndarray, e
     return y_var_new
 
 def integrate_rk4(elecE, grad, nac, yvar, dt, au_mas, t, es_history=None):
+
+    # if es_history is None and integrator.lower() =
+
     if incremental_int:
         y_new = incremental_integrate(yvar, t, dt, au_mas, es_history)
     elif integrator.lower() == 'rk4':
@@ -1713,27 +1719,22 @@ def integrate_rk4(elecE, grad, nac, yvar, dt, au_mas, t, es_history=None):
 def rk4(initq, initp, tStop, H, restart, amu_mat, U, AN_mat):
 
     #   Initialize variables
-    tc_runner    = None
-    trans_dips   = None
-    all_energies = None
-    timings      = {}
-    input_name   = 'cas'
-    qc_runner_data = None
-    au_mas       = np.diag(amu_mat) * amu2au # masses of atoms in atomic unit (vector)
-    t            = 0.0
-    initial_time = 0.0
-    q, p         = np.zeros(ndof), np.zeros(ndof)  # collections of all mapping variables
-    elecE, grad, nac = np.empty(0), np.empty(0), np.empty(0)
-    es_history = ESVarsHistory()
+    tc_runner       = None
+    input_name      = 'cas'
+    qc_runner_data  = None
+    au_mas          = np.diag(amu_mat) * amu2au # masses of atoms in atomic unit (vector)
+    t               = 0.0
+    initial_time    = 0.0
+    X,Y             = [],[]
+    q, p            = np.zeros(ndof), np.zeros(ndof)  # collections of all mapping variables
+    es_history      = ESVarsHistory()
+    sign_flipper    = SignFlipper(nel, 2, nnuc, 'LSC')
+    logger          = SimulationLogger(dir=logging_dir, hdf5=hdf5_logging)
 
     #   very first step does not need a GAMESS guess
     opt['guess'] = ''
 
-    # History length for nonadiabatic coupling vector and transition dipole moments
-    # hist_length = 2 #this is the only implemented length
-    sign_flipper = SignFlipper(nel, 2, nnuc, 'LSC')
 
-    logger = SimulationLogger(dir=logging_dir, save_jobs=tcr_log_jobs, hdf5=hdf5_logging, save_timigs=False)
 
     # Get atom labels
     atoms = get_atom_label()
@@ -1751,7 +1752,7 @@ def rk4(initq, initp, tStop, H, restart, amu_mat, U, AN_mat):
 
     #   Initialization
     if restart == 1:
-        q, p, nac_hist, tdm_hist, init_energy, initial_time, elecE, grad, nac = read_restart(file_loc=restart_file_in, ndof=ndof, tc_runner=tc_runner, qc_runner=qc_runner)
+        q, p, nac_hist, tdm_hist, init_energy, initial_time, es_vars = read_restart(file_loc=restart_file_in, ndof=ndof, tc_runner=tc_runner, qc_runner=qc_runner)
         t = initial_time
         qC, pC = q[nel:], p[nel:]
         y = np.concatenate((q, p))
@@ -1768,33 +1769,32 @@ def rk4(initq, initp, tStop, H, restart, amu_mat, U, AN_mat):
 
     #   Run first electronic structure calculation if we are not restarting,
     #   or if we are restarting and the electronic structure information is missing
-    if restart == 0 or len(elecE) == 0 or len(grad) == 0 or len(nac) == 0:
+    # if restart == 0 or len(elecE) == 0 or len(grad) == 0 or len(nac) == 0:
+    if restart == 0 or not es_vars.complete:
         if qc_runner == 'gamess':
-            elecE, grad, nac, _ = run_gamess_at_geom(input_name, AN_mat, qC, atoms)
+            es_vars = run_gamess_at_geom(input_name, AN_mat, qC, atoms)
         elif qc_runner == 'terachem':
-            all_energies, elecE, grad, nac, trans_dips, timings = tc_runner.run_new_geom(PhaseVars(time=t, nuc_q0=qC))
-            qc_runner_data = tc_runner._prev_job_batch
+            es_vars = tc_runner.run_new_geom(PhaseVars(time=t, nuc_q0=qC))
         else:
-            # all_energies, elecE, grad, nac, trans_dips, timings = qc_runner.run_new_geom(geom=qC/ang2bohr, momentum=p[nel:])
-            all_energies, elecE, grad, nac, trans_dips, timings = qc_runner.run_new_geom(PhaseVars(time=t, nuc_q0=qC))
+            es_vars = qc_runner.run_new_geom(PhaseVars(time=t, nuc_q0=qC))
 
         # Total initial energy at t=0
-        init_energy = get_energy(au_mas, q, p, elecE)
+        init_energy = get_energy(au_mas, q, p, es_vars.elecE)
 
         # Record nuclear geometry in angstrom and log the rest
         record_nuc_geo(restart, t, atoms, qC, logger)
-        logger.write(t, init_energy, elecE,  grad, nac, timings, elec_p=p[0:nel], elec_q=q[0:nel], nuc_p=p[nel:], qc_runner_data=qc_runner_data, all_energies=all_energies)
+        logger.write(t, init_energy, es_vars, y)
 
 
     # Create nac history for sign-flip extrapolation
-    sign_flipper.set_history(nac, nac_hist, trans_dips, tdm_hist)
+    sign_flipper.set_history(es_vars.nacs, nac_hist, es_vars.trans_dips, tdm_hist)
     
     #   the first frame of the trajectory has a restart file written
     if t == 0.0:
-        write_restart('initial_restart.json', [y[:ndof], y[ndof:]], sign_flipper.nac_hist, sign_flipper.tdm_hist, init_energy, t, nel, 'rk4', elecE, grad, nac, opts.com_ang, tc_runner, qc_runner)
+        write_restart(y, sign_flipper, init_energy, t, es_vars, tc_runner, qc_runner, file_loc='initial_restart.json')
 
+    es_vars.time = t
     opt['guess'] = 'moread'
-    X,Y = [],[]
     X.append(t)
     Y.append(y)
     energy      = [init_energy]
@@ -1809,8 +1809,9 @@ def rk4(initq, initp, tStop, H, restart, amu_mat, U, AN_mat):
         with open(os.path.join(__location__, 'progress.out'), 'a') as f:
             f.write('\n')
             f.write('Starting 4th-order Runge-Kutta routine.\n')
-        es_history.append(ESVars(t, None, elecE, grad, nac, None))
-        y = integrate_rk4(elecE, grad, nac, y, H, au_mas, t, es_history)
+
+        es_history.append(es_vars)
+        y = integrate_rk4(es_vars.elecE, es_vars.grads, es_vars.nacs, y, H, au_mas, t, es_history)
         t += H
         X.append(t)
         Y.append(y)
@@ -1824,19 +1825,18 @@ def rk4(initq, initp, tStop, H, restart, amu_mat, U, AN_mat):
         qC = y[nel:ndof]
 
         if qc_runner == 'gamess':
-            elecE, grad, nac, _ = run_gamess_at_geom(input_name, AN_mat, qC, atoms)
+            es_vars = run_gamess_at_geom(input_name, AN_mat, qC, atoms)
         elif qc_runner == 'terachem':
-            all_energies, elecE, grad, nac, trans_dips, timings = tc_runner.run_new_geom(PhaseVars(time=t, nuc_q0=qC))
-            qc_runner_data = tc_runner._prev_job_batch
+            es_vars = tc_runner.run_new_geom(PhaseVars(time=t, nuc_q0=qC))
         else:
-            # all_energies, elecE, grad, nac, trans_dips, timings = qc_runner.run_new_geom(geom=qC/ang2bohr, momentum=y[-natom*3:])
-            all_energies, elecE, grad, nac, trans_dips, timings = qc_runner.run_new_geom(PhaseVars(time=t, nuc_q0=qC))
-        
+            es_vars = qc_runner.run_new_geom(PhaseVars(time=t, nuc_q0=qC))
+        es_vars.time = t
+
         #correct nac sign
-        nac = sign_flipper.correct_nac_sign(nac, trans_dips)
+        es_vars.nacs = sign_flipper.correct_nac_sign(es_vars.nacs, es_vars.trans_dips)
 
         # Compute energy
-        new_energy = get_energy(au_mas, y[:ndof], y[ndof:], elecE)
+        new_energy = get_energy(au_mas, y[:ndof], y[ndof:], es_vars.elecE)
         with open(os.path.join(__location__, 'progress.out'), 'a') as f:
             f.write('Energy = {:<12.6f} \n'.format(new_energy))
 
@@ -1849,14 +1849,14 @@ def rk4(initq, initp, tStop, H, restart, amu_mat, U, AN_mat):
 
         # Record nuclear geometry, logs, and restarts
         record_nuc_geo(restart, t, atoms, qC, logger)
-        logger.write(t, total_E=new_energy, elec_E=elecE,  grads=grad, NACs=nac, timings=timings, elec_q=y[0:nel], elec_p=y[ndof:ndof+nel], nuc_p=y[-natom*3:], qc_runner_data=qc_runner_data, all_energies=all_energies)
-        write_restart(restart_file_out, [Y[-1][:ndof], Y[-1][ndof:]], sign_flipper.nac_hist, sign_flipper.tdm_hist, new_energy, t, nel, 'rk4', elecE, grad, nac, opts.com_ang, tc_runner, qc_runner)
+        logger.write(t, new_energy, es_vars, y)
+        write_restart(y, sign_flipper, new_energy, t, es_vars, tc_runner, qc_runner)
 
         if t == tStop:
             with open(os.path.join(__location__, 'progress.out'), 'a') as f:
                 f.write('Propagated to the final time step.\n')
-
-    write_restart(restart_file_out, [Y[-1][:ndof], Y[-1][ndof:]], sign_flipper.nac_hist, sign_flipper.tdm_hist, energy[-1], t, nel, 'rk4', elecE, grad, nac, opts.com_ang, tc_runner, qc_runner)
+                
+    write_restart(y, sign_flipper, energy[-1], t, es_vars, tc_runner, qc_runner)
     if qc_runner == 'terachem':
         tc_runner.cleanup()
 
@@ -1868,7 +1868,7 @@ def rk4(initq, initp, tStop, H, restart, amu_mat, U, AN_mat):
     return (np.array(X), coord, initial_time)
 
 
-'''
+'''h
 Main driver of RK4 and electronic structure 
 '''
 

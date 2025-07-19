@@ -176,6 +176,7 @@ class SignFlipper():
             For now, the diagonal elements (i, i, :) should be a 3-vector of zeros
         '''
 
+
         if tdm is None:
             use_tdm = False
         elif len(tdm) == 0:

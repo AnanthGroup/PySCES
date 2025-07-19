@@ -58,7 +58,7 @@ class TCRunnerOptions:
 
 ########## DEFAULT SETTINGS ##########
 
-nel, natom = 3, 6 # number of electronic states, number of atoms in the molecule
+nel, natom = 2, 6 # number of electronic states, number of atoms in the molecule
 temp = 300 # simulation temperature in Kelvin
 
 # Initial sampling function ('wigner', 'sc', or 'spin' LSC-IVR)

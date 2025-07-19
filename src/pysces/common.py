@@ -14,11 +14,11 @@ class PhaseVars:
         self.nuc_p = nuc_p0
         self.time = time
 
-    def get_concatenated(self):
+    def get_vec(self):
         return np.concatenate((self.elec_q, self.elec_p, self.nuc_q, self.nuc_p))
     
     @staticmethod
-    def from_concatenated(concatenated):
+    def from_vec(concatenated):
         out_vars = PhaseVars()
         out_vars.elec_q = concatenated[:nel]
         out_vars.elec_p = concatenated[nel:2*nel]
@@ -39,7 +39,7 @@ class PhaseVarHistory:
         if initial_vars is None:
             initial_vars = PhaseVars()
 
-        self.var_history = deque([initial_vars.get_concatenated()], maxlen=max_history)
+        self.var_history = deque([initial_vars.get_vec()], maxlen=max_history)
         self.time_history = deque([initial_vars.time], maxlen=max_history)
 
         self._interp_func = None
@@ -49,7 +49,7 @@ class PhaseVarHistory:
         if phase_vars.time < self.time_history[-1]:
             raise ValueError("Time must be increasing")
 
-        self.var_history.append(phase_vars.get_concatenated())
+        self.var_history.append(phase_vars.get_vec())
         self.time_history.append(phase_vars.time)
 
 
@@ -62,7 +62,7 @@ class PhaseVarHistory:
         else:
             self._interp_func = lambda t: self.var_history[0] 
 
-        return PhaseVars.from_concatenated(self._interp_func(time))
+        return PhaseVars.from_vec(self._interp_func(time))
     
 class QCRunner:
     def __init__(self):
@@ -80,12 +80,19 @@ class QCRunner:
     
 class ESVars:
     def __init__(self,
-                time: float,
+                time: float = None,
                 all_energies: Optional[np.array] = None, 
                 elecE: Optional[np.array] = None, 
                 grads: Optional[np.array] = None,
                 nacs: Optional[np.array] = None,
                 trans_dips: Optional[np.array] = None,
+                timings: Optional[dict] = None,
+
+                elecE_func: Optional[callable] = None,
+                grads_func: Optional[callable] = None,
+                nacs_func: Optional[callable] = None,
+
+                other: Optional[dict] = None
     ) -> None:
 
         '''
@@ -111,6 +118,17 @@ class ESVars:
         self.grads = grads
         self.nacs = nacs
         self.trans_dips = trans_dips
+        self.timings = timings if timings is not None else {}
+        self.elecE_func = elecE_func
+        self.grads_func = grads_func
+        self.nacs_func = nacs_func
+
+    @property
+    def complete(self) -> bool:
+        return (self.elecE is not None and
+                self.grads is not None and
+                self.nacs is not None)
+
 
 class _HistoryInterpolation:
     def __init__(self):

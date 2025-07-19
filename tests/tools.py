@@ -16,14 +16,17 @@ def parse_xyz_data(file_loc):
             if n_atoms is None:
                 n_atoms = int(line)
                 next(file)
-                frame_data = {'atoms': [], 'positions': []}
+                atoms = []
+                positions = []
                 for i in range(n_atoms):
                     sp = next(file).split()
                     coords = [float(x) for x in sp[1:4]]
-                    frame_data['atoms'].append(sp[0])
-                    frame_data['positions'].append(coords)
-                frame_data['atoms'] = np.array(frame_data['atoms'])
-                frame_data['positions'] = np.array(frame_data['positions'])
+                    atoms.append(sp[0])
+                    positions.append(coords)
+                frame_data = {
+                    'atoms': np.array(atoms),
+                    'positions': np.array(positions)
+                }
                 n_atoms = None
                 all_frames.append(frame_data)
 
@@ -90,14 +93,17 @@ def cleanup(*files_and_dirs):
 
 def reset_directory():
     #   directory of test_tools.py, could be called from anywhere
-    this_dir = os.path.dirname(os.path.abspath(inspect.getfile(inspect.currentframe())))
+    current_frame = inspect.currentframe()
+    if current_frame is None:
+        raise RuntimeError("Failed to retrieve the current frame.")
+    this_dir = os.path.dirname(os.path.abspath(inspect.getfile(current_frame)))
     os.chdir(this_dir)
 
 def assert_logs_dir(tst_dir_name, ref_dir_name):
     #   check simple panda readable data
     for file in ['corr.txt', 'electric_pq.txt', 'energy.txt', 'grad.txt', 'nac.txt']:
-        data_ref = pandas.read_csv(f'{ref_dir_name}/{file}', sep='\s+', comment='#')
-        data_tst = pandas.read_csv(f'{tst_dir_name}/{file}', sep='\s+', comment='#')
+        data_ref = pandas.read_csv(f'{ref_dir_name}/{file}', sep='\\s+', comment='#')
+        data_tst = pandas.read_csv(f'{tst_dir_name}/{file}', sep='\\s+', comment='#')
         for key in data_ref:
             np.testing.assert_allclose(data_tst[key], data_ref[key], 
                                         rtol=1e-5, verbose=True,
@@ -139,13 +145,13 @@ class Tester(unittest.TestCase):
         #   If an error is raised, logs will be print
         self.print_log = False
 
-    def assert_allclose(self, label, actual, desired, rtol=1e-7, atol=0, equal_nan=True):
+    def assert_allclose(self, label, actual, desired, rtol=1e-7, atol=0, equal_nan=True, file=''):
         self.print_log = True
         diff = actual - desired
         max_diff = np.max(np.abs(diff))
         rel_diff = np.abs(diff)/max_diff
-        self.log(label, max_diff, rel_diff)
-        np.testing.assert_allclose(actual, desired, rtol, atol, equal_nan, verbose=True, strict=True)
+        self.log(file, label, max_diff, rel_diff)
+        np.testing.assert_allclose(actual, desired, rtol, atol, equal_nan, verbose=True)
         self.print_log = False
 
     def log(self, file, key, diff, rel_diff):

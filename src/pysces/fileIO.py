@@ -7,10 +7,13 @@ import shutil
 import numpy as np
 import argparse
 import sys
+from typing import Optional
+
 from .h5file import H5File, H5Group, H5Dataset
 from . import input_simulation as opts
 from .serialization import serialize, deserialize, TCRunner_Deserialize
 from .common import PhaseVars, ESVars
+from .interpolation import SignFlipper
 
 ANG_2_BOHR = 1.8897259886
 
@@ -116,9 +119,13 @@ def run_restart_module():
             print('Warning: No integrator data found\n         Assuming RK4')
             integrator = 'RK4'
 
-        coord_out = [np.concatenate((elec_q, nuc_Q)), np.concatenate((elec_p, nuc_P))]
 
-        write_restart(args.output, coord_out, nac_hist, np.array([]), total_e, times[time_idx], len(elec_p), integrator, elec_E, grads, nac_mat, com)
+        coord_out = np.concatenate((elec_q, nuc_Q, elec_p, nuc_P))
+        sign_flipper = SignFlipper(len(elec_p), 2, len(nuc_Q))
+        sign_flipper.nac_hist = nac_hist
+
+
+        write_restart(args.output, coord_out, sign_flipper, total_e, times[time_idx], integrator, elec_E, grads, nac_mat, com)
 
     exit()
 
@@ -221,7 +228,8 @@ def read_restart(file_loc: str='restart.out', ndof: int=0, integrator: str='RK4'
                     if 'Electronic Energies' in line:
                         elecE = _read_array_data(ff)    
 
-            return q, p, nac_hist, np.array([]), init_energy, t, elecE, grads, nac_mat
+            es_vars = ESVars(elecE=elecE, grads=grads, nacs=nac_mat)
+            return q, p, nac_hist, np.array([]), init_energy, t, es_vars
 
         elif extension == '.json':
             #  json data format
@@ -268,33 +276,28 @@ def read_restart(file_loc: str='restart.out', ndof: int=0, integrator: str='RK4'
                 qc_runner.load_restart(data.pop('qc_runner'))
 
 
-            # phase_vars = PhaseVars(elec_q, elec_p, nucl_q, nucl_p, time)
-            # es_vars = ESVars(elecE, grads, nac_mat)
-            # return phase_vars, es_vars, nac_hist, tdm_hist, energy, time
-                
-            
-
-            return combo_q, combo_p, nac_hist, tdm_hist, energy, time, elecE, grads, nac_mat
+            es_vars = ESVars(elecE=elecE, grads=grads, nacs=nac_mat)
+            return combo_q, combo_p, nac_hist, tdm_hist, energy, time, es_vars
 
         else:
             exit(f'ERROR: File extension "{extension}" is not a valid restart file')
     else:
         exit(f'ERROR: only RK4 is implimented fileIO')
 
-def write_restart(file_loc: str, 
-                    coord: np.ndarray | list, 
-                    nac_hist: np.ndarray, 
-                    tdm_hist: np.ndarray, 
+def write_restart(  coord: np.ndarray | list, 
+                    sign_flipper: SignFlipper,
                     energy: float, 
-                    time: float, 
-                    n_states: int, 
-                    integrator='rk4', 
-                    elecE: float=np.empty(0), 
-                    grads: np.ndarray = np.empty(0), 
-                    nac_mat: np.ndarray = np.empty(0),
-                    com=None,
+                    time: float,
+                    es_vars: ESVars,
+                    # elecE: float=np.empty(0), 
+                    # grads: np.ndarray = np.empty(0), 
+                    # nac_mat: np.ndarray = np.empty(0),
                     tc_runner=None,
-                    qc_runner=None):
+                    qc_runner=None,
+                    file_loc: Optional[str] = None,
+                    integrator: Optional[str] = None, 
+                    com=None,
+                    ):
     '''
         Writes a restart file for restarting a simulation from the previous conditions
 
@@ -314,11 +317,34 @@ def write_restart(file_loc: str,
             The last total energy of the the system in a.u.
         time: float
             The last time stamp of the simulation in a.u.
-        n_states: int
-            number of electronic states
         integrator: str
             The integrator used to run the simulation
     '''
+
+    #   use default values if not provided
+    if integrator is None:
+        integrator = opts.integrator
+    if com is None:
+        com = opts.com_ang
+    if file_loc is None:
+        file_loc = opts.restart_file_out
+    
+
+    #   electronic variables
+    elecE = es_vars.elecE
+    grads = es_vars.grads
+    nac_mat = es_vars.nacs
+
+    #   sign flipper data
+    nac_hist = sign_flipper.nac_hist
+    tdm_hist = sign_flipper.tdm_hist
+    n_states = len(elecE)
+
+    #   positions and momenta
+    coord = np.reshape(coord, (2, -1))
+    q = np.array(coord[0])
+    p = np.array(coord[1])
+
     if com is None:
         com = opts.com_ang
 
@@ -391,7 +417,7 @@ def write_restart(file_loc: str,
             if tc_runner:
                 data[tc_runner.__class__.__name__] = serialize(tc_runner)
 
-            elif qc_runner is not None:
+            elif qc_runner is not None and not isinstance(qc_runner, str):
                 serialized_runner = qc_runner.save_restart()
                 check_json_format(serialized_runner, root='qc_runner')
                 data['qc_runner'] = serialized_runner
@@ -410,7 +436,7 @@ class NumpyEncoder(json.JSONEncoder):
     
 #   TODO: Convert to a @dataclass
 class LoggerData():
-    def __init__(self, time, atoms=None, total_E=None, elec_E=None, grads=None, NACs=None, timings=None, elec_p=None, elec_q=None, nuc_p=None, nuc_q=None, state_labels=None, qc_runner_data=None, all_energies = None) -> None:
+    def __init__(self, time, atoms=None, total_E=None, elec_E=None, grads=None, NACs=None, timings=None, elec_p=None, elec_q=None, nuc_p=None, nuc_q=None, state_labels=None, all_energies = None) -> None:
         self.time = time
         self.atoms = atoms
         self.total_E = total_E
@@ -425,11 +451,9 @@ class LoggerData():
         self.state_labels = state_labels
         self.all_energies = all_energies
 
-        #   place holder for all other types of data
-        # self.jobs_data: dict | TCJobBatch = qc_runner_data
 
 class SimulationLogger():
-    def __init__(self, save_energy=True, save_grad=True, save_nac=True, save_corr=True, save_timigs=True, dir=None, save_geo=True, save_elec=True, save_p=True, save_jobs=True, atoms=None, hdf5=False, hdf5_name='') -> None:
+    def __init__(self, save_energy=True, save_grad=True, save_nac=True, save_corr=True, save_timigs=False, dir=None, save_geo=True, save_elec=True, save_p=True, save_jobs=True, atoms=None, hdf5=False, hdf5_name='') -> None:
         if dir is None:
             dir = os.path.abspath(os.path.curdir)
         self.atoms = atoms
@@ -486,8 +510,22 @@ class SimulationLogger():
         self.state_labels = opts.state_labels
 
 
-    def write(self, time, total_E=None, elec_E=None, grads=None, NACs=None, timings=None, elec_p=None, elec_q=None, nuc_p=None, nuc_q=None, qc_runner_data=None, all_energies=None):
-        data = LoggerData(time, self.atoms, total_E, elec_E, grads, NACs, timings, elec_p, elec_q, nuc_p, None, self.state_labels, qc_runner_data, all_energies)
+    def write(self, time, total_E=None, es_vars: ESVars = None, coord=None):
+        all_energies = es_vars.all_energies if es_vars is not None else None
+        elec_E = es_vars.elecE if es_vars is not None else None
+        grads = es_vars.grads if es_vars is not None else None
+        NACs = es_vars.nacs if es_vars is not None else None
+        timings = es_vars.timings if es_vars is not None else None
+
+        nel = opts.nel
+        ndof = opts.ndof
+        elec_q = coord[0:ndof][0:nel] if coord is not None else None
+        nuc_q = coord[0:ndof][nel:] if coord is not None else None
+        elec_p = coord[ndof:][0:nel] if coord is not None else None
+        nuc_p = coord[ndof:][nel:] if coord is not None else None
+
+
+        data = LoggerData(time, self.atoms, total_E, elec_E, grads, NACs, timings, elec_p, elec_q, nuc_p, None, self.state_labels, all_energies)
         for logger in self.loggers.values():
             logger.write(data)
 
@@ -500,9 +538,6 @@ class SimulationLogger():
 
         if self._h5_file:
             self._h5_file.flush()
-
-        #TODO: add nuc_geo logging here
-
 class BaseLogger():
     name = 'Unnamed Logger'
     def __init__(self, file_loc: str = None, h5_group: H5Group = None) -> None:

@@ -1,6 +1,6 @@
 {
   "time": 0.0,
-  "energy": -76.65954770798393,
+  "energy": -76.65954770798396,
   "integrator": "rk4",
   "elec_q": [
     0.242143583628071,
@@ -730,140 +730,140 @@
     [
       [
         [
-          0.0,
-          0.0
+          0.030636461659839298,
+          0.030636461659839298
         ],
         [
-          0.0,
-          0.0
+          -0.0020433397397931733,
+          -0.0020433397397931733
         ],
         [
-          0.0,
-          0.0
+          -0.062439229067388705,
+          -0.062439229067388705
         ]
       ],
       [
         [
-          0.0,
-          0.0
+          0.6220294855099532,
+          0.6220294855099532
         ],
         [
-          0.0,
-          0.0
+          -0.017177810380926816,
+          -0.017177810380926816
         ],
         [
-          0.0,
-          0.0
+          -0.07008501523337936,
+          -0.07008501523337936
         ]
       ],
       [
         [
-          0.0,
-          0.0
+          -1.5167463716614837,
+          -1.5167463716614837
         ],
         [
-          0.0,
-          0.0
+          -0.056128711496227016,
+          -0.056128711496227016
         ],
         [
-          0.0,
-          0.0
+          0.13849165863494436,
+          0.13849165863494436
         ]
       ]
     ],
     [
       [
         [
-          0.0,
-          0.0
+          0.6220294855099532,
+          0.6220294855099532
         ],
         [
-          0.0,
-          0.0
+          -0.017177810380926816,
+          -0.017177810380926816
         ],
         [
-          0.0,
-          0.0
+          -0.07008501523337936,
+          -0.07008501523337936
         ]
       ],
       [
         [
-          0.0,
-          0.0
+          0.24227394444031053,
+          0.24227394444031053
         ],
         [
-          0.0,
-          0.0
+          0.13419619397120747,
+          0.13419619397120747
         ],
         [
-          0.0,
-          0.0
+          -0.27172016670378984,
+          -0.27172016670378984
         ]
       ],
       [
         [
-          0.0,
-          0.0
+          0.10411913707756092,
+          0.10411913707756092
         ],
         [
-          0.0,
-          0.0
+          0.05332097253419411,
+          0.05332097253419411
         ],
         [
-          0.0,
-          0.0
+          0.05951484437829105,
+          0.05951484437829105
         ]
       ]
     ],
     [
       [
         [
-          0.0,
-          0.0
+          -1.5167463716614837,
+          -1.5167463716614837
         ],
         [
-          0.0,
-          0.0
+          -0.056128711496227016,
+          -0.056128711496227016
         ],
         [
-          0.0,
-          0.0
+          0.13849165863494436,
+          0.13849165863494436
         ]
       ],
       [
         [
-          0.0,
-          0.0
+          0.10411913707756092,
+          0.10411913707756092
         ],
         [
-          0.0,
-          0.0
+          0.05332097253419411,
+          0.05332097253419411
         ],
         [
-          0.0,
-          0.0
+          0.05951484437829105,
+          0.05951484437829105
         ]
       ],
       [
         [
-          0.0,
-          0.0
+          0.06902831642662494,
+          0.06902831642662494
         ],
         [
-          0.0,
-          0.0
+          0.019563563788406152,
+          0.019563563788406152
         ],
         [
-          0.0,
-          0.0
+          -0.06910996942019929,
+          -0.06910996942019929
         ]
       ]
     ]
   ],
   "elec_E": [
-    -77.04645568548966,
-    -76.6741807640972,
-    -76.65205662854832
+    -77.04645568548969,
+    -76.67418076409723,
+    -76.65205662854835
   ],
   "grads": [
     [
@@ -1162,15 +1162,15 @@
     "_prev_results": [
       {
         "energy": [
-          -77.04645568548966,
-          -76.6741807640972,
-          -76.65205662854832
+          -77.04645568548969,
+          -76.67418076409723,
+          -76.65205662854835
         ],
-        "dipole_moment": 0.17685559991162067,
+        "dipole_moment": 0.17685559991160285,
         "dipole_vector": [
-          0.07787011234226328,
-          -0.005193651174789286,
-          -0.15870467797572052
+          0.0778701123422352,
+          -0.0051936511747904856,
+          -0.1587046779757144
         ],
         "gs_gradient": [
           [
@@ -1206,34 +1206,34 @@
         ],
         "gradient": [
           [
-            -0.0964738370493782,
-            -0.02445602999744586,
-            0.039027946967476405
+            -0.09647383704938159,
+            -0.024456029997446515,
+            0.03902794696747438
           ],
           [
-            0.07977092276380324,
-            -0.15187230118036602,
-            -0.015057849005779608
+            0.0797709227637977,
+            -0.15187230118036338,
+            -0.01505784900577923
           ],
           [
-            0.0005071572858374173,
-            0.027475150573657438,
-            -0.014508180573367826
+            0.000507157285837446,
+            0.027475150573655936,
+            -0.014508180573366957
           ],
           [
-            0.02251662637735627,
-            0.06847833749931713,
-            -0.0001478597132124013
+            0.022516626377355103,
+            0.06847833749931552,
+            -0.00014785971321182534
           ],
           [
-            0.03368309722347794,
-            0.017669056657624308,
-            -0.008778302832403367
+            0.03368309722347881,
+            0.01766905665762703,
+            -0.00877830283240185
           ],
           [
-            -0.04000396660107825,
-            0.06270578644721356,
-            -0.0005357548427127606
+            -0.04000396660108116,
+            0.0627057864472152,
+            -0.0005357548427127536
           ]
         ],
         "cis_states": 2,
@@ -1474,31 +1474,31 @@
         ],
         "cis_transition_dipoles": [
           [
-            0.6220294855101093,
-            -0.017177810380921293,
-            -0.07008501523339164
+            0.6220294855099532,
+            -0.017177810380926816,
+            -0.07008501523337936
           ],
           [
-            -1.516746371661422,
-            -0.05612871149622719,
-            0.13849165863493887
+            -1.5167463716614837,
+            -0.056128711496227016,
+            0.13849165863494436
           ],
           [
-            0.10411913707757872,
-            0.05332097253420603,
-            0.05951484437827158
+            0.10411913707756092,
+            0.05332097253419411,
+            0.05951484437829105
           ]
         ],
         "cis_unrelaxed_dipoles": [
           [
-            0.2422739444403031,
-            0.13419619397120208,
-            -0.2717201667038047
+            0.24227394444031053,
+            0.13419619397120747,
+            -0.27172016670378984
           ],
           [
-            0.06902831642664192,
-            0.019563563788415478,
-            -0.06910996942018274
+            0.06902831642662494,
+            0.019563563788406152,
+            -0.06910996942019929
           ]
         ],
         "atoms": [
@@ -1542,17 +1542,17 @@
           ]
         ],
         "charges": [
-          -0.1352016432174281,
-          -0.11413040886889725,
-          0.06621686693240625,
-          0.04259314782497292,
-          0.06767356542348979,
-          0.07284847190546528
+          -0.13520164321743522,
+          -0.11413040886891324,
+          0.06621686693240803,
+          0.04259314782497592,
+          0.06767356542349301,
+          0.07284847190546773
         ],
-        "job_dir": "server_2025-07-18-11.36.22/job_43",
-        "job_scr_dir": "server_2025-07-18-11.36.22/job_43/scr",
-        "server_job_id": 43,
-        "orbfile": "server_2025-07-18-11.36.22/job_43/scr/c0",
+        "job_dir": "server_2025-07-19-09.00.12/job_20",
+        "job_scr_dir": "server_2025-07-19-09.00.12/job_20/scr",
+        "server_job_id": 20,
+        "orbfile": "server_2025-07-19-09.00.12/job_20/scr/c0",
         "run": "gradient",
         "method": "hf",
         "basis": "sto-3g",
@@ -1577,7 +1577,7 @@
         "cisnumstates": 2,
         "cisconvtol": 1e-08,
         "cismaxiter": 100,
-        "cisrestart": "cis_restart_3826048",
+        "cisrestart": "cis_restart_1426562",
         "cispropertyfile": "/home/cmyers7/scratch/single_servers/tmp5/cispropertyfile",
         "tc.out": [
           "-----------------------------------",
@@ -1604,18 +1604,18 @@
           "             cisnumstates 2",
           "               cisconvtol 1e-08",
           "               cismaxiter 100",
-          "               cisrestart cis_restart_3826048",
+          "               cisrestart cis_restart_1426562",
           "          cispropertyfile /home/cmyers7/scratch/single_servers/tmp5/cispropertyfile",
-          "              coordinates server_2025-07-18-11.36.22/job_43/geom.xyz",
-          "                   scrdir server_2025-07-18-11.36.22/job_43/scr",
+          "              coordinates server_2025-07-19-09.00.12/job_20/geom.xyz",
+          "                   scrdir server_2025-07-19-09.00.12/job_20/scr",
           "-----------------------------------",
           "Jobname: geom",
           "Scratch data will be generated",
-          "Scratch directory: server_2025-07-18-11.36.22/job_43/scr",
-          "| Random number seed: 346469030",
+          "Scratch directory: server_2025-07-19-09.00.12/job_20/scr",
+          "| Random number seed: 630993992",
           "",
-          "XYZ coordinates server_2025-07-18-11.36.22/job_43/geom.xyz",
-          "Molden File Output: server_2025-07-18-11.36.22/job_43/scr/geom.molden",
+          "XYZ coordinates server_2025-07-19-09.00.12/job_20/geom.xyz",
+          "Molden File Output: server_2025-07-19-09.00.12/job_20/scr/geom.molden",
           "Using basis set: sto-3g",
           "dmrgstart not found",
           "Spin multiplicity: 1",
@@ -1766,7 +1766,7 @@
           "",
           "Iteration:   10   Subspace Size:    4",
           "Root: 1:         0.37227492        -0.00000000         0.00000199  ",
-          "Root: 2:         0.39439906         0.00000000         0.00000167  ",
+          "Root: 2:         0.39439906        -0.00000000         0.00000167  ",
           "",
           "Iteration:   11   Subspace Size:    6",
           "Root: 1:         0.37227492        -0.00000000         0.00000050  ",
@@ -2027,8 +2027,8 @@
           "    0.0336830972     0.0176690567    -0.0087783028",
           "   -0.0400039666     0.0627057864    -0.0005357548",
           "---------------------------------------------------",
-          "Net gradient:  1.840878e-14  5.585810e-16  4.430321e-16",
-          "Net torque:   -2.787752e-09 -4.843493e-10  7.855154e-10",
+          "Net gradient:  6.308322e-15  3.788636e-15  1.763292e-15",
+          "Net torque:   -2.787752e-09 -4.843490e-10  7.855162e-10",
           "",
           "",
           "Gradient units are Hartree/Bohr",
@@ -2041,16 +2041,16 @@
           "    0.0336830972     0.0176690567    -0.0087783028",
           "   -0.0400039666     0.0627057864    -0.0005357548",
           "---------------------------------------------------",
-          "Net gradient:  1.840878e-14  5.585810e-16  4.430321e-16",
-          "Net torque:   -2.787752e-09 -4.843493e-10  7.855154e-10",
+          "Net gradient:  6.308322e-15  3.788636e-15  1.763292e-15",
+          "Net torque:   -2.787752e-09 -4.843490e-10  7.855162e-10",
           "",
           "Writing out molden info"
         ]
       }
     ],
     "_prev_job_batch": null,
-    "exciton_overlap_data": "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",
-    "scf_guess": "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",
-    "cis_guess": "AgAAADAAAACFMTV2ItojPzCMcCCx0A8/0NlnPQWPJL9tHiZfdsEov0NLl8b2qjg/DcSJGwnvNz/A6O8j2BgiP7wskAOA6gE/tKFajOXqMD86GVRLKx8KP9S1DB4v9Da/aAI0tqyjNL+9VTQIvXO7v1xIXp4gl3e/XohxDgBuiD83F8buE6eKP/rCxhpf5ZS/lm12Zi24kL/l+MoljsKXv8qtjDwWOpc/P/+v2FAxhT//DhqYGMeUvz1PX8JR+GO/DONujFe0gb9Ch5eJ/ButP4NRRaMJr4E/NR6h0DwOdb+eTQA/rW6NvzqhLKkQ+JK/uv+1xbYNmD89MfTcb8vhvwmg9TBY7YW/YbRVHIn5or9/JZaeJMCeP8M4Zv8tvqy/UiVtLLkHqr9OaIqRxjvmv3vKsg7eN4c/bwahqiDWnL/BSrxHQ9OWP4aHKbFrFZC/jNuwz7+clb+8XKXlpPHaP9m8JZkjIZ6/uz9aaEO1nj/iqStBtkmEv5u/tGZSBnE/uN1D4Xu7fj/RhLDsSf4avw2CUm053ia/Qb6HLy/OOj+OxiFyIAo9P3gAwqh0+0q/u5K/GRynSL8rpuZG/7c4v6oA/8+psxq/qVskqnLYQr8rsPkVsOoiv81oo+RIVkg/YSFMahkQSD/hK6R4XMmbv53AE7n/UXs/v6e/ylL1pr8H2gCd5K6Xv2oRXD7SZag/hBf3BTWFoz84qCJVFJakP7ruOeLfx6y/++HqTtwmmL9LW9ppqGusP4plOlPFX1Q/FCPvIA/ujD/m8nFG4reXP6zCL6N1ZZq/Anq+mPnEkz9MHIeM9ySdP+Z0A01X2aA/oyIJEeMtsb/5i+/+/4/Pv/UJJLILV4W/KXavs7pMoD9jwmITfBSkvwfrhV1lHME/HU2Y7babvz+gjdx/Cu3WvzDuPHoRwrC/knUUG6/XdT+ulz/Jw+uSv9pVWdH3r6Y/6OYnbYH1pT9/eCwiNJLrv4uRK0tVA4i/obXya8rOiD+n8wrFwSBpP9KtkjA7yoq/MPltOjlNjL8="
+    "exciton_overlap_data": "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",
+    "scf_guess": "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",
+    "cis_guess": "AgAAADAAAADDOTV2ItojPz6JcCCx0A8/+r1nPQWPJL9DEyZfdsEov5o3l8b2qjg/CLGJGwnvNz9+2u8j2BgiP6MUkAOA6gE/RKNajOXqMD/AR1RLKx8KP+rADB4v9Da/NA00tqyjNL8FVjQIvXO7vzRDXp4gl3e/mH1xDgBuiD9AEcbuE6eKP869xhpf5ZS/zmh2Zi24kL9m88oljsKXvxenjDwWOpc//vmv2FAxhT/0CBqYGMeUv2xMX8JR+GO/pN9ujFe0gb/eh5eJ/ButP2NLRaMJr4E/Ixah0DwOdb/7RgA/rW6NvyKdLKkQ+JK/+fe1xbYNmD+pMfTcb8vhv/Ce9TBY7YW/LrJVHIn5or/rH5aeJMCeP24xZv8tvqy/Ah5tLLkHqr8FaoqRxjvmvyy9sg7eN4c/iwahqiDWnL+5SLxHQ9OWPwyEKbFrFZC/h9ewz7+clb9AVqXlpPHaP+68JZkjIZ6/PkBaaEO1nj8lqCtBtkmEv1G4tGZSBnE/59ZD4Xu7fj9JyLDsSf4av3GLUm053ia/d6iHLy/OOj/AwiFyIAo9P//ywah0+0q/EIS/GRynSL+PoOZG/7c4v6/l/s+psxq/kmUkqnLYQr9h1vkVsOoiv497o+RIVkg/RjFMahkQSD93HaR4XMmbvw7AE7n/UXs/Oqi/ylL1pr/72gCd5K6XvwgTXD7SZag/CBj3BTWFoz9IqSJVFJakP9fvOeLfx6y/eePqTtwmmL/GXNppqGusPwFnOlPFX1Q/kiXvIA/ujD/t53FG4reXP7LDL6N1ZZq/Z3u+mPnEkz+BHoeM9ySdP8V1A01X2aA/SiMJEeMtsb+qge/+/4/Pv3QJJLILV4W/g3ivs7pMoD+Hw2ITfBSkvxPshV1lHME/TU6Y7babvz8yidx/Cu3Wv/XuPHoRwrC/NoQUG6/XdT8Mmj/Jw+uSv5pYWdH3r6Y/WOknbYH1pT8MeiwiNJLrvyyPK0tVA4i/N67ya8rOiD8P/wrFwSBpPwmukjA7yoq/KPptOjlNjL8="
   }
 }

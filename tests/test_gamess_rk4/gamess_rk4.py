@@ -13,11 +13,6 @@ class Test_GAMESS_RK4(unittest.TestCase):
         reset_directory()
         os.chdir('test_gamess_rk4')
 
-        pysces.reset_settings()
-        pysces.options.input_local_settings()
-        pysces.options.make_logging_dir()
-        pysces.run_simulation()
-
         with open('geo_gamess', 'w') as file:
             file.write('6\n')
             file.write('C    6.0   0.6655781462   0.0000000000   3.0000000000\n')
@@ -26,6 +21,13 @@ class Test_GAMESS_RK4(unittest.TestCase):
             file.write('H    1.0   1.2398447212   0.9238158831   3.0000000000\n')
             file.write('H    1.0  -1.2398447212  -0.9238158831   3.0000000000\n')
             file.write('H    1.0   1.2398447212  -0.9238158831   3.0000000000\n')
+
+        pysces.reset_settings()
+        pysces.options.input_local_settings()
+        pysces.options.make_logging_dir()
+        pysces.run_simulation()
+
+
 
         assert_logs_dir('logs', 'logs_ref')
         assert_reset_files(self, 'restart.json', 'restart_end.json')
