@@ -21,6 +21,8 @@ width = [1.0, 1.0, 1.0]
 
 # Specify an integrator (Choose from 'ABM', 'BSH', and 'RK4')
 integrator = 'RK4'
+incremental_int = False
+
 # Size of time step (a.u.), number of steps (Only relevant for ABM)
 timestep, nstep = 1.0, 16700
 # Maximum propagation time (a.u.), BSH step to be tried (a.u.), error tolerance (ratio) (Only relevant for BSH)

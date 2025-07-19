@@ -3,6 +3,9 @@ natom = 6
 nel = 3 # number of electronic states
 temp = 300 # simulation temperature in Kelvin
 
+incremental_int = False
+integrator='rk4'
+
 # Maximum propagation time (a.u.), one Runge-Kutta step (a.u.) (Only relevant for RK4)
 tmax_rk4, Hrk4 = 6, 2.0
 
