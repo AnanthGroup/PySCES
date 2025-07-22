@@ -1744,6 +1744,7 @@ def rk4(initq, initp, tStop, H, restart, amu_mat, U, AN_mat):
     initial_time    = 0.0
     X,Y             = [],[]
     q, p            = np.zeros(ndof), np.zeros(ndof)  # collections of all mapping variables
+    es_vars         = ESVars()  # electronic structure variables
     es_history      = ESVarsHistory()
     sign_flipper    = SignFlipper(nel, 2, nnuc, 'LSC')
     logger          = SimulationLogger(dir=logging_dir, hdf5=hdf5_logging)
@@ -1769,7 +1770,7 @@ def rk4(initq, initp, tStop, H, restart, amu_mat, U, AN_mat):
 
     #   Initialization
     if restart == 1:
-        q, p, nac_hist, tdm_hist, init_energy, initial_time, es_vars = read_restart(file_loc=restart_file_in, ndof=ndof, tc_runner=tc_runner, qc_runner=qc_runner)
+        q, p, nac_hist, tdm_hist, init_energy, initial_time, es_vars = read_restart(restart_file_in, tc_runner=tc_runner, qc_runner=qc_runner)
         t = initial_time
         qC, pC = q[nel:], p[nel:]
         y = np.concatenate((q, p))
@@ -1786,7 +1787,6 @@ def rk4(initq, initp, tStop, H, restart, amu_mat, U, AN_mat):
 
     #   Run first electronic structure calculation if we are not restarting,
     #   or if we are restarting and the electronic structure information is missing
-    # if restart == 0 or len(elecE) == 0 or len(grad) == 0 or len(nac) == 0:
     if restart == 0 or not es_vars.complete:
         if qc_runner == 'gamess':
             es_vars = run_gamess_at_geom(input_name, AN_mat, qC, atoms)

@@ -144,7 +144,11 @@ def check_json_format(data: dict, root: str='/'):
     elif not isinstance(data, (str, int, float, bool, None.__class__)):
         raise ValueError(f'Value {root}/{type(data)} is not json serializable')
 
-def read_restart(file_loc: str='restart.out', ndof: int=0, integrator: str='RK4', tc_runner=None, qc_runner=None) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, float, float]:
+def read_restart(file_loc: str='restart.out', 
+                 ndof: int=0, 
+                 integrator: str='RK4',
+                 tc_runner=None, 
+                 qc_runner=None) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, float, float, ESVars]:
     '''
         Reads in a restart file and extracts it's data
         Parameters
@@ -172,7 +176,9 @@ def read_restart(file_loc: str='restart.out', ndof: int=0, integrator: str='RK4'
             time: float
                 Total elapsed time
     '''
+    ndof = opts.ndof
     if integrator.lower() in ['rk4', 'rk4-uprop', 'verlet-uprop']:
+    
 
         def _read_array_data(ff):
             shape = [int(x) for x in next(ff).split()]
@@ -240,7 +246,8 @@ def read_restart(file_loc: str='restart.out', ndof: int=0, integrator: str='RK4'
                 raise ValueError(f'ERROR: Restart file integrator {rst_integrator} does not match request integrator "{integrator}"')
             if any([x not in data for x in ['nucl_q', 'nucl_p', 'elec_q', 'elec_p', 'energy', 'time']]):
                 raise ValueError(f'ERROR: Restart file requires at least the following keys: nucl_q, nucl_p, elec_q, elec_p, energy, time')
-            
+
+
             data: dict
             nucl_q = data.pop('nucl_q')
             nucl_p = data.pop('nucl_p')
@@ -248,8 +255,8 @@ def read_restart(file_loc: str='restart.out', ndof: int=0, integrator: str='RK4'
             elec_p = data.pop('elec_p')
             energy = data.pop('energy')
             time = data.pop('time')
-            nac_hist = np.array(data.pop('nac_hist', np.array([])))
-            tdm_hist = np.array(data.pop('tdm_hist', np.array([])))
+            nac_hist = np.array(data.pop('nac_hist', np.empty(0)))
+            tdm_hist = np.array(data.pop('tdm_hist', np.empty(0)))
 
             combo_q = np.array(elec_q + nucl_q)
             combo_p = np.array(elec_p + nucl_p)
@@ -257,9 +264,9 @@ def read_restart(file_loc: str='restart.out', ndof: int=0, integrator: str='RK4'
             if 'com' in data: 
                 opts.com_ang = np.array(data.pop('com'))
    
-            elecE = np.array(data.pop('elec_E', np.array([])))
-            grads = np.array(data.pop('grads', np.array([])))
-            nac_mat = np.array(data.pop('nac_mat', np.array([])))
+            elecE = np.array(data.pop('elec_E')) if 'elec_E' in data else None
+            grads = np.array(data.pop('grads')) if 'grads' in data else None
+            nac_mat = np.array(data.pop('nac_mat')) if 'nac_mat' in data else None
 
             if 'TCJobBatch__batch_counter' in data:
                 from .qcRunners.TeraChem import TCJobBatch
