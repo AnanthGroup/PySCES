@@ -1644,7 +1644,7 @@ def verlet_Uprop_step(elecE, grad, nac, yvar, dt, au_mas, t):
     y_new = np.concatenate((q_new, q_nuc_new, p_new, p_nuc_new))
     return y_new
 
-def incremental_integrate(yvar: list, t: float, dt: float, au_mas: np.ndarray, es_history: ESVarsHistory, n_substeps: int = 100):
+def incremental_integrate(yvar: list, t: float, dt: float, au_mas: np.ndarray, es_history: ESVarsHistory, es_vars: ESVars, n_substeps: int = 100):
 
     print(f'Performing Incremental Time Integration with {n_substeps} substeps')
     description = {'rk4': 'unified nuclear-electronic RK4(5) integration',
@@ -1657,10 +1657,9 @@ def incremental_integrate(yvar: list, t: float, dt: float, au_mas: np.ndarray, e
     P_points = []
     running_dE = 0.0
     sub_dt = dt / n_substeps
-    for n in range(n_substeps+1):
-        
-        t_n = t + n * sub_dt
-        # nacs = es_history.nacs(t_n)
+
+    def update_fun(t_n, y_var_new):
+        nonlocal P_points, running_dE, elecE_0, sub_dt, au_mas, es_history
         grads = es_history.grads(t_n)
         
         P_points.append(y_var_new[ndof:][nel:])
@@ -1688,6 +1687,22 @@ def incremental_integrate(yvar: list, t: float, dt: float, au_mas: np.ndarray, e
 
                 nacs[i, j] = deriv_coupling[i, j]/energy_diff
         
+        return elecE, grads, nacs
+
+    if es_vars.eval_func is not None:
+        print('    Using user-provided function to update electronic structure variables')
+        eval_func = es_vars.eval_func
+    else:
+        print('    Using internal function to update electronic structure variables')
+        eval_func = update_fun
+
+    for n in range(n_substeps+1):
+        
+        t_n = t + n * sub_dt
+        P_points.append(y_var_new[ndof:][nel:])
+        elecE, grads, nacs = eval_func(t_n, y_var_new)
+
+        
         if integrator.lower() == 'rk4':
             y_var_new = scipy_rk4(elecE, grads, nacs, y_var_new, sub_dt, au_mas)
         elif integrator.lower() == 'verlet-uprop':
@@ -1697,12 +1712,14 @@ def incremental_integrate(yvar: list, t: float, dt: float, au_mas: np.ndarray, e
 
     return y_var_new
 
-def integrate_rk4(elecE, grad, nac, yvar, dt, au_mas, t, es_history=None):
+def integrate_rk4_main(yvar, dt, au_mas, t, es_history, es_vars: ESVars):
 
-    # if es_history is None and integrator.lower() =
+    elecE = es_vars.elecE
+    grad = es_vars.grads
+    nac = es_vars.nacs
 
     if incremental_int:
-        y_new = incremental_integrate(yvar, t, dt, au_mas, es_history)
+        y_new = incremental_integrate(yvar, t, dt, au_mas, es_history, es_vars)
     elif integrator.lower() == 'rk4':
         print('Performing RK4 integration')
         y_new = scipy_rk4(elecE, grad, nac, yvar, dt, au_mas)
@@ -1811,7 +1828,7 @@ def rk4(initq, initp, tStop, H, restart, amu_mat, U, AN_mat):
             f.write('Starting 4th-order Runge-Kutta routine.\n')
 
         es_history.append(es_vars)
-        y = integrate_rk4(es_vars.elecE, es_vars.grads, es_vars.nacs, y, H, au_mas, t, es_history)
+        y = integrate_rk4_main(y, H, au_mas, t, es_history, es_vars)
         t += H
         X.append(t)
         Y.append(y)

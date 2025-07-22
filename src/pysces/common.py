@@ -85,13 +85,11 @@ class ESVars:
                 elecE: Optional[np.array] = None, 
                 grads: Optional[np.array] = None,
                 nacs: Optional[np.array] = None,
+                dipole_matrix: Optional[np.array] = None,
+                dipole_matrix_grads: Optional[np.array] = None,
                 trans_dips: Optional[np.array] = None,
                 timings: Optional[dict] = None,
-
-                elecE_func: Optional[callable] = None,
-                grads_func: Optional[callable] = None,
-                nacs_func: Optional[callable] = None,
-
+                eval_func = None,
                 other: Optional[dict] = None
     ) -> None:
 
@@ -117,11 +115,11 @@ class ESVars:
         self.elecE = elecE
         self.grads = grads
         self.nacs = nacs
+        self.dipole_matrix = dipole_matrix
+        self.dipole_matrix_grads = dipole_matrix_grads
         self.trans_dips = trans_dips
         self.timings = timings if timings is not None else {}
-        self.elecE_func = elecE_func
-        self.grads_func = grads_func
-        self.nacs_func = nacs_func
+        self.eval_func = eval_func
 
     @property
     def complete(self) -> bool:
@@ -131,11 +129,12 @@ class ESVars:
 
 
 class _HistoryInterpolation:
-    def __init__(self):
+    def __init__(self, maxlen=50):
         self._data_history = None
         self._time_history = None
 
         self._interpolation_function = None
+        self._maxlen = maxlen
 
     def append(self, vals: np.array, time: float) -> None:
         if vals is None:
@@ -143,8 +142,8 @@ class _HistoryInterpolation:
             return
         
         if self._data_history is None:
-            self._data_history = deque([vals], maxlen=100)
-            self._time_history = deque([time], maxlen=100)
+            self._data_history = deque([vals], maxlen=self._maxlen)
+            self._time_history = deque([time], maxlen=self._maxlen)
         else:
             if time < self._time_history[-1]:
                 raise ValueError("Time must be increasing")
@@ -179,15 +178,17 @@ class _HistoryInterpolation:
         return self._data_history[idx]
 
 class ESVarsHistory:
-    def __init__(self, initial_vars: ESVars = None, max_history=None) -> None:
+    def __init__(self, initial_vars: ESVars = None, maxlen=None) -> None:
 
-        self._time_history = deque([0.0], maxlen=max_history)
-        self._all_energies_history = _HistoryInterpolation()
-        self._ElecE_history = _HistoryInterpolation()
-        self._grads_history = _HistoryInterpolation()
-        self._nacs_history = _HistoryInterpolation()
-        self._deriv_coupling_history = _HistoryInterpolation()
-        self._trans_dips_history = _HistoryInterpolation()
+        self._time_history = deque([0.0], maxlen=maxlen)
+        self._all_energies_history = _HistoryInterpolation(maxlen)
+        self._ElecE_history = _HistoryInterpolation(maxlen)
+        self._grads_history = _HistoryInterpolation(maxlen)
+        self._nacs_history = _HistoryInterpolation(maxlen)
+        self._deriv_coupling_history = _HistoryInterpolation(maxlen)
+        self._dipole_matrix_history = _HistoryInterpolation(maxlen)
+        self._dipole_matrix_grads_history = _HistoryInterpolation(maxlen)
+        self._trans_dips_history = _HistoryInterpolation(maxlen)
 
         if initial_vars is not None:
             self.append(initial_vars)
@@ -202,6 +203,8 @@ class ESVarsHistory:
         self._grads_history.append(es_vars.grads, es_vars.time)
         self._nacs_history.append(es_vars.nacs, es_vars.time)
         self._trans_dips_history.append(es_vars.trans_dips, es_vars.time)
+        self._dipole_matrix_history.append(es_vars.dipole_matrix, es_vars.time)
+        self._dipole_matrix_grads_history.append(es_vars.dipole_matrix_grads, es_vars.time)
 
         if (es_vars.nacs is not None) and (es_vars.elecE is not None):
             E = es_vars.elecE
@@ -214,6 +217,21 @@ class ESVarsHistory:
         else:
             deriv_coupling = None
         self._deriv_coupling_history.append(deriv_coupling, es_vars.time)
+
+    def __getitem__(self, idx: int) -> ESVars:
+        if idx >= len(self._time_history):
+            raise IndexError(f'index {idx} out of range for history of length {len(self._time_history)}')
+
+        return ESVars(
+            time=self._time_history[idx],
+            all_energies=self._all_energies_history[idx],
+            elecE=self._ElecE_history[idx],
+            grads=self._grads_history[idx],
+            nacs=self._nacs_history[idx],
+            dipole_matrix=self._dipole_matrix_history[idx],
+            dipole_matrix_grads=self._dipole_matrix_grads_history[idx],
+            trans_dips=self._trans_dips_history[idx],
+        )
 
 
     @property
@@ -239,3 +257,11 @@ class ESVarsHistory:
     @property
     def trans_dips(self):
         return self._trans_dips_history
+    
+    @property
+    def dipole_matrix(self):
+        return self._dipole_matrix_history
+    
+    @property
+    def dipole_matrix_grads(self):
+        return self._dipole_matrix_grads_history

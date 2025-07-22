@@ -172,7 +172,7 @@ def read_restart(file_loc: str='restart.out', ndof: int=0, integrator: str='RK4'
             time: float
                 Total elapsed time
     '''
-    if integrator.lower() == 'rk4':
+    if integrator.lower() in ['rk4', 'rk4-uprop', 'verlet-uprop']:
 
         def _read_array_data(ff):
             shape = [int(x) for x in next(ff).split()]
@@ -289,9 +289,6 @@ def write_restart(  coord: np.ndarray | list,
                     energy: float, 
                     time: float,
                     es_vars: ESVars,
-                    # elecE: float=np.empty(0), 
-                    # grads: np.ndarray = np.empty(0), 
-                    # nac_mat: np.ndarray = np.empty(0),
                     tc_runner=None,
                     qc_runner=None,
                     file_loc: Optional[str] = None,
@@ -348,7 +345,7 @@ def write_restart(  coord: np.ndarray | list,
     if com is None:
         com = opts.com_ang
 
-    if integrator.upper() == 'RK4':
+    if integrator.lower() in ['rk4', 'rk4-uprop', 'verlet-uprop']:
         extension = os.path.splitext(file_loc)[-1]
         
         if extension == '.out':
@@ -512,7 +509,7 @@ class SimulationLogger():
 
     def write(self, time, total_E=None, es_vars: ESVars = None, coord=None):
         all_energies = es_vars.all_energies if es_vars is not None else None
-        elec_E = es_vars.elecE if es_vars is not None else None
+        elecE = es_vars.elecE if es_vars is not None else None
         grads = es_vars.grads if es_vars is not None else None
         NACs = es_vars.nacs if es_vars is not None else None
         timings = es_vars.timings if es_vars is not None else None
@@ -525,7 +522,7 @@ class SimulationLogger():
         nuc_p = coord[ndof:][nel:] if coord is not None else None
 
 
-        data = LoggerData(time, self.atoms, total_E, elec_E, grads, NACs, timings, elec_p, elec_q, nuc_p, None, self.state_labels, all_energies)
+        data = LoggerData(time, self.atoms, total_E, elecE, grads, NACs, timings, elec_p, elec_q, nuc_p, None, self.state_labels, all_energies)
         for logger in self.loggers.values():
             logger.write(data)
 
