@@ -1064,6 +1064,33 @@ class TCRunner(QCRunner):
 
     def _prepare_server_info(self):
         """Ensure server roots are valid paths and check server configuration."""
+
+        main_error_message = 'No host specified for TeraChem servers. \
+                              Either set "{}" in the options file, or \
+                              set the environment variable "{}"'
+
+        #   environment variables take precedence over options file
+
+        env_hosts = os.environ.get('PYSCES_TC_HOST', None)
+        env_ports = os.environ.get('PYSCES_TC_PORT', None)
+        env_server_roots = os.environ.get('PYSCES_TC_SERVER_ROOT', None)
+
+        if env_hosts is not None:
+            self._hosts = env_hosts.split(',')
+        if env_ports is not None:
+            self._ports = [int(x) for x in env_ports.split(',')]
+        if env_server_roots is not None:
+            self._server_roots = env_server_roots.split(':')
+
+        if self._hosts is None:
+            raise ValueError(main_error_message.format('tct_host', 'PYSCES_TC_HOST'))
+        
+        if self._ports is None:
+            raise ValueError(main_error_message.format('tct_port', 'PYSCES_TC_PORT'))
+
+        if self._server_roots  is None:
+            raise ValueError(main_error_message.format('tct_server_root', 'PYSCES_TC_SERVER_ROOT'))
+
         if isinstance(self._hosts, str):
             self._hosts = [self._hosts]
         if isinstance(self._ports, int):
