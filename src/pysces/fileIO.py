@@ -981,7 +981,8 @@ class NACLogger(BaseLogger):
         if self._h5_group:
             indices = np.triu_indices(data.NACs.shape[0], 1)
             tmp_data = data.NACs[indices]
-            self._h5_dataset = self._h5_group.create_dataset(self.name, shape=(0,) + tmp_data.shape, maxshape=(None, ) + tmp_data.shape)
+            shape = (0, ) + tmp_data.shape
+            self._h5_dataset = self._h5_group.create_dataset(self.name, shape=shape, maxshape=(None, ) + tmp_data.shape)
             self._h5_dataset.attrs.create('labels', labels)
 
     def write(self, data: LoggerData):

@@ -13,14 +13,13 @@ dynamics of polyatomic molecules
 """
 import numpy as np
 import scipy.integrate as it
-from scipy.interpolate import interp1d
 import os
 import sys
 import subprocess as sp
 import random
 import pandas
 import time
-from collections import deque
+import qcelemental as qcel
 from pysces.input_simulation import *
 from pysces import input_simulation as opts # we should start moving the global variables to the opts module
 from pysces.input_gamess import nacme_option as opt 
@@ -56,6 +55,20 @@ def set_subroutine_globals():
     for k, v in opts.__dict__.items():
         globals()[k] = v
 
+def _dict_to_geo_hess(data: dict):
+    atomic_symbols = data.get('atoms')
+    xyz_ang = data.get('xyz')
+    hessian_vecs = data.get('hessian_vecs')
+    frq = data.get('freq')
+    redmas = data.get('reduced_mass')
+    L = np.zeros_like(hessian_vecs)
+    U = np.zeros_like(hessian_vecs)
+
+    amu_masses = [qcel.periodictable.to_mass(sym) for sym in atomic_symbols for _ in range(3)]
+    amu_mat = np.diag(amu_masses)
+    atom_number_mat = [] # not necesary for not-GAMESS runners
+
+    return(amu_mat, xyz_ang, frq, redmas, L, U, atom_number_mat)
 
 
 #####################################################
@@ -74,7 +87,10 @@ def get_geo_hess():
     elif mol_input_format == "gamess":
         amu_mat, xyz_ang, frq, redmas, L, U, atom_number_mat = get_geo_hess_gamess()
     else:
-        raise ValueError('mol_input_format must be either "terachem" or "gamess"; got "{}"'.format(mol_input_format))
+        data = qc_runner.get_molecule_props({})
+        amu_mat, xyz_ang, frq, redmas, L, U, atom_number_mat = _dict_to_geo_hess(data)
+    # else:
+    #     raise ValueError('mol_input_format must be either "terachem" or "gamess"; got "{}"'.format(mol_input_format))
 
     return(amu_mat, xyz_ang, frq, redmas, L, U, atom_number_mat)
 
@@ -433,7 +449,10 @@ def get_atom_label():
       f.readline()
       f.readline()
     else:
-        raise ValueError("'mol_input_format' must be either 'gamess' or 'terachem'")
+        # TODO: Add a case for qc_runner
+        return ['H'] * opts.natom
+    # else:
+    #     raise ValueError("'mol_input_format' must be either 'gamess' or 'terachem'")
     for i in range(natom):
         x = f.readline().split()
         atoms.append(x[0])
