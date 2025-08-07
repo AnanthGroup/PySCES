@@ -4,10 +4,11 @@ from pysces.common import PhaseVars, ESVars
 
 class DebugRunner:
     def __init__(self, atoms: list[str], model_params: dict):
-        self.A = model_params.get("A", 0.01)
-        self.B = model_params.get("B", 1.6)
-        self.C = model_params.get("C", 0.005)
-        self.D = model_params.get("D", 1.0)
+        self.k1 = model_params.get("k1", 0.1)          # force constant for state 1
+        self.k2 = model_params.get("k2", 0.1)          # force constant for state 2
+        self.R1 = model_params.get("R1", 1.0)           # equilibrium bond length for state 1
+        self.R2 = model_params.get("R2", 1.5)           # equilibrium bond length for state 2
+        self.V12 = model_params.get("V12", 0.005)       # constant electronic coupling
         self.atoms = atoms
 
     def set_logger_file(self, logger_file: h5py.File):
@@ -15,7 +16,21 @@ class DebugRunner:
         self.logger_file = logger_file
 
     def save_restart(self):
-        pass
+        out_data = {
+            'k1': self.k1,
+            'k2': self.k2,
+            'R1': self.R1,
+            'R2': self.R2,
+            'V12': self.V12,
+        }
+        return out_data
+    
+    def load_restart(self, data: dict):
+        self.k1 =  data.get("k1", 0.1)
+        self.k2 =  data.get("k2", 0.1)
+        self.R1 =  data.get("R1", 1.0)
+        self.R2 =  data.get("R2", 1.5)
+        self.V12 = data.get("V12", 0.005)
 
     @staticmethod
     def get_molecule_props(model_params):
@@ -31,16 +46,14 @@ class DebugRunner:
     def run_new_geom(self, phase_vars: PhaseVars) -> ESVars:
         ''' run a new calculation '''
         nuc_coords = phase_vars.nuc_q.reshape(-1, 3)
-        print("DebugRunner: Running new geometry with nuclear coordinates:", nuc_coords)
+
         if len(nuc_coords) != 2:
             raise ValueError("DebugRunner requires exactly two nuclear coordinates.")
-        
-        R = np.linalg.norm(nuc_coords[0] - nuc_coords[1])
 
-        energy, U = self._diagonalize(R)
-        dH = self._dHdx(R)
-        grads = self._gradients(R, dH, U)
-        nacs = self._nac(R, dH, energy, U)
+        energy, U = self._diagonalize(nuc_coords)
+        dH = self._dHdx(nuc_coords)
+        grads = self._gradients(nuc_coords, dH, U)
+        nacs = self._nac(nuc_coords, dH, energy, U)
 
         return ESVars(
             all_energies=energy,
@@ -50,23 +63,23 @@ class DebugRunner:
         )
 
 
-    def _H(self, x: float) -> np.ndarray:
-        """Return 2x2 diabatic Hamiltonian at position x."""
-        V = self.A * np.tanh(self.B * x)
-        coupling = self.C * np.exp(-self.D * x**2)
-        return np.array([[ V, coupling],
-                         [coupling, -V]])
+    def _H(self, coords: np.ndarray) -> np.ndarray:
+        
+        R = np.linalg.norm(coords[0] - coords[1])
+        print(f' ######     {R:8.4f}     ######')
+        V11 = 0.5 * self.k1 * (R - self.R1)**2
+        V22 = 0.5 * self.k2 * (R - self.R2)**2
+        return np.array([[V11, self.V12], [self.V12, V22]])
 
-    def _dHdx(self, x: float) -> np.ndarray:
-        """Return derivative of diabatic Hamiltonian with respect to x."""
-        dVdx = self.A * self.B / np.cosh(self.B * x)**2
-        dcoupling_dx = -2 * self.D * x * self.C * np.exp(-self.D * x**2)
-        return np.array([[ dVdx, dcoupling_dx],
-                         [dcoupling_dx, -dVdx]])
+    def _dHdx(self, coords: np.ndarray) -> np.ndarray:
+        R = np.linalg.norm(coords[0] - coords[1])
+        dV11dx = self.k1 * (R - self.R1)
+        dV22dx = self.k2 * (R - self.R2)
+        return np.array([[dV11dx, 0.0], [0.0, dV22dx]])
 
     
-    def _diagonalize(self, x: float):
-        H = self._H(x)
+    def _diagonalize(self, coords: np.ndarray):
+        H = self._H(coords)
         evals, evecs = np.linalg.eigh(H)
         order = np.argsort(evals)
         evals = evals[order]
@@ -74,18 +87,31 @@ class DebugRunner:
 
         return evals, evecs
 
-    def _gradients(self, x: float, dHx: np.ndarray, U: np.ndarray) -> tuple[float, float]:
+    def _gradients(self, coords: np.ndarray, dHx: np.ndarray, U: np.ndarray) -> tuple[float, float]:
         """Return energy gradients dE1/dx and dE2/dx using Hellmann–Feynman theorem."""
+
+        dX = coords[0] - coords[1]
+        dX_norm = dX / np.linalg.norm(dX)
+
         grad_E1 = U[:, 0] @ dHx @ U[:, 0]
         grad_E2 = U[:, 1] @ dHx @ U[:, 1]
         grads = np.zeros((2, 6))
-        grads[0, 0] = grad_E1
-        grads[1, 0] = grad_E2
-        grads[0, 3] = -grad_E1
-        grads[1, 3] = -grad_E2
+        # grads[0, 0] = grad_E1
+        # grads[1, 0] = grad_E2
+        # grads[0, 3] = -grad_E1
+        # grads[1, 3] = -grad_E2
+
+        grads[0, 0:3] =  grad_E1 * dX_norm
+        grads[0, 3:6] = -grad_E1 * dX_norm
+        grads[1, 0:3] =  grad_E2 * dX_norm
+        grads[1, 3:6] = -grad_E2 * dX_norm
+
         return grads
 
-    def _nac(self, x: float, dHx: np.ndarray, E: np.ndarray, U: np.ndarray) -> float:
+    def _nac(self, coords: np.ndarray, dHx: np.ndarray, E: np.ndarray, U: np.ndarray) -> float:
+
+        dX = coords[0] - coords[1]
+        dX_norm = dX / np.linalg.norm(dX)
 
         phi1 = U[:, 0]
         phi2 = U[:, 1]
@@ -94,11 +120,13 @@ class DebugRunner:
             return 0.0  # Avoid division by zero
         d12 = phi1 @ dHx @ phi2 / delta_E
 
-        nac_vec = np.zeros(6)
-        nac_vec[0] = d12
-        nac_vec[3] = -d12  # Assuming symmetry in the coupling
+        # nac_vec = np.zeros(6)
+        # nac_vec[0] = d12
+        # nac_vec[3] = -d12
+        nacs = np.zeros((2, 2, 6)) 
 
-        return np.array([
-            [np.zeros(6), nac_vec],
-            [-nac_vec, np.zeros(6)]
-        ])
+        nacs[0, 1, 0:3] =  d12 * dX_norm
+        nacs[0, 1, 3:6] = -d12 * dX_norm
+        nacs[1, 0] = -nacs[0, 1] 
+
+        return nacs
