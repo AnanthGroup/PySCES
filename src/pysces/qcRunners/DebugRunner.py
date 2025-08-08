@@ -11,6 +11,8 @@ class DebugRunner:
         self.V12 = model_params.get("V12", 0.005)       # constant electronic coupling
         self.atoms = atoms
 
+        self._prev_evecs = None
+
     def set_logger_file(self, logger_file: h5py.File):
         """Set the logger file for storing results."""
         self.logger_file = logger_file
@@ -85,6 +87,11 @@ class DebugRunner:
         evals = evals[order]
         evecs = evecs[:, order]
 
+        if self._prev_evecs is not None:
+            sign_flips = np.sign(np.sum(self._prev_evecs * evecs, axis=0))
+            evecs *= sign_flips
+        self._prev_evecs = evecs.copy()
+
         return evals, evecs
 
     def _gradients(self, coords: np.ndarray, dHx: np.ndarray, U: np.ndarray) -> tuple[float, float]:
@@ -95,12 +102,8 @@ class DebugRunner:
 
         grad_E1 = U[:, 0] @ dHx @ U[:, 0]
         grad_E2 = U[:, 1] @ dHx @ U[:, 1]
-        grads = np.zeros((2, 6))
-        # grads[0, 0] = grad_E1
-        # grads[1, 0] = grad_E2
-        # grads[0, 3] = -grad_E1
-        # grads[1, 3] = -grad_E2
 
+        grads = np.zeros((2, 6))
         grads[0, 0:3] =  grad_E1 * dX_norm
         grads[0, 3:6] = -grad_E1 * dX_norm
         grads[1, 0:3] =  grad_E2 * dX_norm
@@ -120,11 +123,7 @@ class DebugRunner:
             return 0.0  # Avoid division by zero
         d12 = phi1 @ dHx @ phi2 / delta_E
 
-        # nac_vec = np.zeros(6)
-        # nac_vec[0] = d12
-        # nac_vec[3] = -d12
         nacs = np.zeros((2, 2, 6)) 
-
         nacs[0, 1, 0:3] =  d12 * dX_norm
         nacs[0, 1, 3:6] = -d12 * dX_norm
         nacs[1, 0] = -nacs[0, 1] 

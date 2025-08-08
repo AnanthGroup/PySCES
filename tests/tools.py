@@ -7,6 +7,21 @@ import shutil
 import inspect
 import json
 import pandas
+import contextlib
+import sys
+
+@contextlib.contextmanager
+def suppress_stdout():
+    """Context manager to suppress stdout but allow stderr."""
+    # Save original stdout
+    old_stdout = sys.stdout
+    # Redirect stdout to a dummy file-like object
+    sys.stdout = io.StringIO()
+    try:
+        yield
+    finally:
+        # Restore stdout
+        sys.stdout = old_stdout
 
 def parse_xyz_data(file_loc):
     n_atoms = None
@@ -68,8 +83,9 @@ def check_for_open_files():
 def cleanup(*files_and_dirs):
     
     #   clean up
-    for file in ['progress.out', 'corr.out', 'restart.json', 'restart.out', 'cas.dat', 'cas.inp', 'cas_old.inp', 'cas.out']:
+    for file in ['progress.out', 'corr.out', 'restart.json', 'restart.out', 'cas.dat', 'cas.inp', 'cas_old.inp', 'cas.out', 'logs.h5']:
         if os.path.isfile(file):
+
             os.remove(file)
     if os.path.isdir('logs'):
         try:
@@ -80,9 +96,9 @@ def cleanup(*files_and_dirs):
             check_for_open_files()
 
     #   remove directories logs.*
-    for file in os.listdir():
-        if os.path.isdir(file) and file.startswith('logs.'):
-            shutil.rmtree(file)
+    for x in os.listdir():
+        if os.path.isdir(x) and x.startswith('logs.'):
+            shutil.rmtree(x)
 
     #   remove others
     for x in files_and_dirs:
