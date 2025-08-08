@@ -20,6 +20,7 @@ from pysces.h5file import run_h5_module
 __location__ = ''
 
 from pysces.input_simulation import * 
+from pysces.md import rk4
 
 
 def main():
