@@ -419,6 +419,11 @@ def sample_SQC(qN0, frq):
     opts._sqc_gamma = np.copy(e)
     opts._sqc_gamma[init] -= 1.0
 
+    print('Sampling γ-SQC:')
+    for i in range(opts.nel):
+        print(f'  γ[{i+1}] = {opts._sqc_gamma[i]:.8f}')
+    print()
+
     q = np.random.uniform(0, 1, len(e))*2*np.pi
     p = -np.sqrt(2* e) * np.sin(q)
     x = np.sqrt(2* e) * np.cos(q)
@@ -429,12 +434,12 @@ def sample_SQC(qN0, frq):
     for i in range(nnuc-n_skip):
         coord[0, i+nel], coord[1, i+nel] = sample_nuclear(qN0[i], frq[i+n_skip])
 
-    print('In SQC: ')
-    print(f'  e = {e}')
-    print(f'  q = {x}')
-    print(f'  p = {p}')
-    print(f'  coord = {coord}')
-    input()
+    # print('In SQC: ')
+    # print(f'  e = {e}')
+    # print(f'  q = {x}')
+    # print(f'  p = {p}')
+    # print(f'  coord = {coord}')
+    # input()
 
     return coord
 
@@ -782,7 +787,18 @@ def read_gms_dat(input_name):
 ### Compute equations of motion (mapping variables derivatives)   ###
 ### of adiabatic MM-ST Hamiltonian with the symmetrized potential ###
 #####################################################################
-def get_derivatives(au_mas, q, p, nac, grad, elecE):
+
+def get_derivatives(au_mas, q_all, p_all, nac, grad, elecE):
+    if opts.sampling == 'sqc':
+        der = get_derivatives_SQC(au_mas, q_all, p_all, nac, grad, elecE)
+        print('DEBUG: Using SQC derivatives')
+        print(der)
+        input('Press Enter to continue...')
+    else:
+        der = get_derivatives_LSC(au_mas, q_all, p_all, nac, grad, elecE)
+    return der
+
+def get_derivatives_LSC(au_mas, q, p, nac, grad, elecE):
     der = np.zeros((2, ndof))
     
     # Derivatives of elctronic mapping variables
@@ -838,21 +854,22 @@ def get_derivatives_SQC(au_mas, q, p, nac, grad, elecE):
         der[1, i] = -(1.0/nel) * q[i] * sum_DE + pdpm
     
     # Derivatives of nuclear mapping variables
-    for n in range(nnuc):
+    p_e = p[:nel]
+    q_e = q[:nel]
+    n = 0.5*q_e*q_e + 0.5*p_e*p_e - opts._sqc_gamma
+    for I in range(nnuc):
         # positions
-        der[0, nel+n] = p[nel+n]/au_mas[n]
+        der[0, nel+I] = p[nel+I]/au_mas[I]
         # momenta
-        dVeff_dR = 0
+        dVeff_dR = np.mean(grad[:,I])
 
-        ppxx_DEnac = 0 # (pi * pj + qi * qj) * (Ej - Ei) * dij
+        ppxx_DEnac = 0 
         for i in range(nel):
-            dVeff_dR  += (0.5*p[i]**2 + 0.5*q[i]**2 - opts._sqc_gamma[i])*grad[i,n]
-            j = i + 1
-            while j < nel:
+            for j in range(i+1, nel):
+                dVeff_dR += (n[i] - n[j]) * (grad[i,I] - grad[j,I])/nel
+                ppxx_DEnac += (p[i]*p[j] + q[i]*q[j]) * (elecE[j] - elecE[i]) * nac[i,j,I]
 
-                ppxx_DEnac += (p[i]*p[j] + q[i]*q[j]) * (elecE[j] - elecE[i]) * nac[i,j,n]
-                j += 1
-        der[1, nel+n] = -dVeff_dR - ppxx_DEnac
+        der[1, nel+I] = -dVeff_dR - ppxx_DEnac
             
     return(der)
 
@@ -937,16 +954,21 @@ def run_gamess_at_geom(input_name, AN_mat, qC, atoms):
 
 def get_energy_SQC(au_mas, q, p, elecE):
     # Nuclear part (sum of P**2/M)
+
     p2m_sum = 0
     for n in range(nnuc):
         p2m_temp = 0
         p2m_temp = p[nel+n]**2/au_mas[n]
         p2m_sum += p2m_temp
         
-    # Electronic part Veff = ((1/2)pi^2 + (1/2)q_i^2 - gamma_i) * E_i
+    # Electronic part
     q_e = q[:nel]
     p_e = p[:nel]
-    Veff = np.sum(0.5 * p_e**2 + 0.5 * q_e**2 - opts._sqc_gamma[:nel])
+    n = 0.5 * q_e**2 + 0.5 * p_e**2 - opts._sqc_gamma
+    Veff = np.mean(elecE)
+    for i in range(nel):
+        for j in range(i+1, nel):
+            Veff += (n[i] - n[j]) * (elecE[i] - elecE[j])/nel
 
     # Total energy at updated t
     energy = 0.5*p2m_sum + Veff
@@ -1750,10 +1772,7 @@ def _rk4_nuclear_step(elecE, grad, nac, yvar, dt, au_mas):
         q_all, p_all = yvar[:ndof], yvar[ndof:]
         q_all[nel:] = q
         p_all[nel:] = p
-        if opts.sampling == 'sqc':
-            der = get_derivatives_SQC(au_mas, q_all, p_all, nac, grad, elecE)
-        else:
-            der = get_derivatives(au_mas, q_all, p_all, nac, grad, elecE)
+        der = get_derivatives(au_mas, q_all, p_all, nac, grad, elecE)
         der_q = der[0, nel:]  # nuclear derivatives
         der_p = der[1, nel:]  # nuclear derivatives
         der_flat = np.concatenate((der_q, der_p))  # concatenate nuclear derivatives
@@ -1763,7 +1782,8 @@ def _rk4_nuclear_step(elecE, grad, nac, yvar, dt, au_mas):
     p_0 = yvar[ndof:][nel:]  # initial momentum variables
     y_0 = np.concatenate((q_0, p_0))  # initial variables
     result = it.solve_ivp(get_deriv, (0,dt), y_0, method='RK45', max_step=dt, t_eval=[dt], rtol=1e-10, atol=1e-10)
-    q_new, p_new = result.y.reshape(2, -1)  
+    q_new, p_new = result.y.reshape(2, -1)
+
     return q_new, p_new
 
 def rk4_Uprop_step(elecE, grad, nac, yvar, dt, au_mas):
@@ -1886,7 +1906,7 @@ def compute_CF_single_LSC(q, p):
    return pop
 
 def compute_CF_single_SQC(q, p):
-   for e in 0.5*(q*q + p*p):
+    e = 0.5*(q*q + p*p)
     c = np.zeros(opts.nel)
     thresh = 1.0
     for i in range(opts.nel):

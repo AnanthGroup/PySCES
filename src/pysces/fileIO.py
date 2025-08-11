@@ -814,10 +814,13 @@ class CorrelationLogger(BaseLogger):
         else:
             nel = len(q)
         
-        if not opts.sqc:
+        if opts.sampling == 'wigner':
             pops = compute_CF_single_LSC(q, p)
-        else:
+        elif opts.sampling == 'sqc':
+            print('DEBUG: Using SQC for population calculation')
             pops = compute_CF_single_SQC(q, p)
+        else:
+            raise sys.exit(f'ERROR: Sampling method "{opts.sampling}" is not supported for population calculation')
 
         total = np.sum(pops)
 

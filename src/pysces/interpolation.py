@@ -254,8 +254,9 @@ class SignFlipper():
 
                 if flip_detected:
                     message += f'{self.name} NAC sign-flip detected between states {i} and {j}\n'
+                    nac_angle = nac_dot_product / (np.linalg.norm(nac[i,j,:]) * np.linalg.norm(nac_expol[i,j,:]))
                     mag = np.linalg.norm(nac[i,j,:])
-                    message += f'  NAC magnitude: {mag}\n'
+                    message += f'  NAC magnitude: {mag}; NAC angle: {nac_angle}\n'
         
         if message != '':
             print(f'\n{message}\n')
