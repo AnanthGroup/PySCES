@@ -817,7 +817,6 @@ class CorrelationLogger(BaseLogger):
         if opts.sampling == 'wigner':
             pops = compute_CF_single_LSC(q, p)
         elif opts.sampling == 'sqc':
-            print('DEBUG: Using SQC for population calculation')
             pops = compute_CF_single_SQC(q, p)
         else:
             raise sys.exit(f'ERROR: Sampling method "{opts.sampling}" is not supported for population calculation')

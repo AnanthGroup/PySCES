@@ -431,15 +431,9 @@ def sample_SQC(qN0, frq):
     coord[1, :opts.nel] = p
 
     # Nuclear phase space variables
+    print(nnuc, n_skip)
     for i in range(nnuc-n_skip):
         coord[0, i+nel], coord[1, i+nel] = sample_nuclear(qN0[i], frq[i+n_skip])
-
-    # print('In SQC: ')
-    # print(f'  e = {e}')
-    # print(f'  q = {x}')
-    # print(f'  p = {p}')
-    # print(f'  coord = {coord}')
-    # input()
 
     return coord
 
@@ -791,9 +785,6 @@ def read_gms_dat(input_name):
 def get_derivatives(au_mas, q_all, p_all, nac, grad, elecE):
     if opts.sampling == 'sqc':
         der = get_derivatives_SQC(au_mas, q_all, p_all, nac, grad, elecE)
-        print('DEBUG: Using SQC derivatives')
-        print(der)
-        input('Press Enter to continue...')
     else:
         der = get_derivatives_LSC(au_mas, q_all, p_all, nac, grad, elecE)
     return der
