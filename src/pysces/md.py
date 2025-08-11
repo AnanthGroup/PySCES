@@ -31,7 +31,6 @@ def rk4(initq, initp, tStop, H, restart, amu_mat, U, AN_mat):
 
     tc_runner       = None
     input_name      = 'cas'
-    qc_runner_data  = None
     au_mas          = np.diag(amu_mat) * amu2au # masses of atoms in atomic unit (vector)
     t               = 0.0
     initial_time    = 0.0
@@ -42,12 +41,8 @@ def rk4(initq, initp, tStop, H, restart, amu_mat, U, AN_mat):
     sign_flipper    = SignFlipper(nel, 2, nnuc, 'LSC')
     logger          = SimulationLogger(dir=opts.logging_dir, hdf5=opts.hdf5_logging)
 
-
-
     #   very first step does not need a GAMESS guess
     opt['guess'] = ''
-
-
 
     # Get atom labels
     atoms = get_atom_label()

@@ -74,6 +74,8 @@ def run_simulation():
                 print('is not implemented. Use "wigner" or "sc" option instead.\n')
                 exit()
             coord = sample_spinLSC(normal_geo, frq)
+        elif sampling == 'sqc':
+            coord = sample_SQC(normal_geo, frq)
         
         initq = coord[0,:] # A.U.
         initp = coord[1,:] # A.U.

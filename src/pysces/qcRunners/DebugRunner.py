@@ -2,6 +2,8 @@ import numpy as np
 import h5py
 from pysces.common import PhaseVars, ESVars
 
+
+
 class DebugRunner:
     def __init__(self, atoms: list[str], model_params: dict):
         self.k1 = model_params.get("k1", 0.1)          # force constant for state 1
@@ -40,8 +42,8 @@ class DebugRunner:
             'atoms': ['H', 'H'],
             'xyz': np.array([[0.0, 0.0, 0.0], [1.0, 0.0, 0.0]]),
             'hessian_vecs': np.zeros((2, 2)),
-            'freq':np.zeros(2),
-            'reduced_mass': np.zeros(2)
+            'freq': np.ones(6) * 3000,
+            'reduced_mass': np.ones(6)
         }
         return data
 

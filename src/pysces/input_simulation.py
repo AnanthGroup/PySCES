@@ -154,6 +154,10 @@ state_labels = None
 #   DEBUG ONLY
 tcr_ref_job = None
 
+#   SQC options
+sqc = False
+_sqc_gamma = None
+
 ########## END DEFAULT SETTINGS ##########
 
 ##########   DEBUGGING SETTINGS   ##########

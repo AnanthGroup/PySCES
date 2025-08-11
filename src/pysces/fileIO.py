@@ -14,6 +14,7 @@ from . import input_simulation as opts
 from .serialization import serialize, deserialize, TCRunner_Deserialize
 from .common import PhaseVars, ESVars
 from .interpolation import SignFlipper
+from .subroutines import compute_CF_single_LSC, compute_CF_single_SQC
 
 ANG_2_BOHR = 1.8897259886
 
@@ -813,11 +814,10 @@ class CorrelationLogger(BaseLogger):
         else:
             nel = len(q)
         
-        pops = np.zeros(nel)
-        common_TCF = 2**(nel+1) * np.exp(-np.dot(q, q) - np.dot(p, p))
-        for i in range(len(p)):
-                final_state_TCF = q[i]**2 + p[i]**2 - 0.5
-                pops[i] = common_TCF * final_state_TCF
+        if not opts.sqc:
+            pops = compute_CF_single_LSC(q, p)
+        else:
+            pops = compute_CF_single_SQC(q, p)
 
         total = np.sum(pops)
 

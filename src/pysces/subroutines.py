@@ -21,6 +21,7 @@ import sys
 import subprocess as sp
 import random
 import pandas
+import qcelemental as qcel
 from pysces.input_simulation import *
 from pysces import input_simulation as opts # we should start moving the global variables to the opts module
 from pysces.input_gamess import nacme_option as opt 
@@ -58,16 +59,20 @@ def set_subroutine_globals():
 
 def _dict_to_geo_hess(data: dict):
     atomic_symbols = data.get('atoms')
-    xyz_ang = data.get('xyz')
+    xyz_ang = np.array(data.get('xyz')).reshape((-1, 1))
     hessian_vecs = data.get('hessian_vecs')
-    frq = data.get('freq')
+    frq = np.array(data.get('freq')) * 2.0*pi*clight*100*autime2s*frq_scale
     redmas = data.get('reduced_mass')
     L = np.zeros_like(hessian_vecs)
     U = np.zeros_like(hessian_vecs)
 
+    # TODO: Debug
+    U = np.zeros((7, 6))
+    U[-1:] = np.array([[1, 0, 0, -1, 0, 0]])
+
     amu_masses = [qcel.periodictable.to_mass(sym) for sym in atomic_symbols for _ in range(3)]
     amu_mat = np.diag(amu_masses)
-    atom_number_mat = [] # not necesary for not-GAMESS runners
+    atom_number_mat = [] # not necesary for non-GAMESS runners
 
     return(amu_mat, xyz_ang, frq, redmas, L, U, atom_number_mat)
 
@@ -348,7 +353,10 @@ def sample_nuclear(qcenter, frq):
 
 '''LSC-IVR with Wigner population estimator'''
 def sample_wignerLSC(qN0, frq):
-    coord = np.zeros((2, ndof-6))
+    n_skip = 6
+    if natom <= 2:
+        n_skip = 5
+    coord = np.zeros((2, ndof-n_skip))
 
     # Determine the sampling radius of initially occupied electronic state
     from scipy.optimize import fsolve
@@ -379,17 +387,56 @@ def sample_wignerLSC(qN0, frq):
         coord[1, i] = p
     
     # Nuclear phase space variables
-    for i in range(nnuc-6):
-        coord[0, i+nel], coord[1, i+nel] = sample_nuclear(qN0[i], frq[i+6])
-
-#    # Nuclear phase space variables
-#    for i in range(nnuc-6):
-#        # position
-#        coord[0,i+nel] = np.random.normal(loc=qN0[i], scale=np.sqrt(1.0/(2.0*frq[i+6]*np.tanh(beta*frq[i+6]/2.0))))
-#        # momentum
-#        coord[1,i+nel] = np.random.normal(loc=pN0, scale=np.sqrt(frq[i+6]/(2.0*np.tanh(beta*frq[i+6]/2.0))))
+    for i in range(nnuc-n_skip):
+        coord[0, i+nel], coord[1, i+nel] = sample_nuclear(qN0[i], frq[i+n_skip])
     
     return(coord)
+
+def sample_SQC(qN0, frq):
+    n_skip = 6
+    if natom <= 2:
+        n_skip = 5
+    coord = np.zeros((2, ndof-n_skip))
+        
+    e = np.zeros(opts.nel)
+    init = opts.init_state - 1
+
+    # Weighted sampling for the initial state's degree of freedom
+    while True:
+        n_init = np.random.uniform(0, 1)
+        if 1 - n_init > np.random.uniform(0, 1):
+            break
+    e[init] = n_init
+
+    # Sample the rest of the unoccupied DOF
+    for i in range(opts.nel):
+        if i != init:
+            e[i] = np.random.uniform(0, 1 - e[init])
+
+    # Shift the occupied state's value
+    e[init] += 1
+
+    opts._sqc_gamma = np.copy(e)
+    opts._sqc_gamma[init] -= 1.0
+
+    q = np.random.uniform(0, 1, len(e))*2*np.pi
+    p = -np.sqrt(2* e) * np.sin(q)
+    x = np.sqrt(2* e) * np.cos(q)
+    coord[0, :opts.nel] = x
+    coord[1, :opts.nel] = p
+
+    # Nuclear phase space variables
+    for i in range(nnuc-n_skip):
+        coord[0, i+nel], coord[1, i+nel] = sample_nuclear(qN0[i], frq[i+n_skip])
+
+    print('In SQC: ')
+    print(f'  e = {e}')
+    print(f'  q = {x}')
+    print(f'  p = {p}')
+    print(f'  coord = {coord}')
+    input()
+
+    return coord
 
 
 '''LSC-IVR with semiclassical population estimator'''
@@ -465,6 +512,18 @@ def get_atom_label():
 ### Rotate q&p sampled in normal coordinate into Cartesian coordinate ###
 #########################################################################
 def rotate_norm_to_cart(qN, pN, U, amu_mat):
+    '''
+        Parameters
+        ----------
+        qN : numpy.ndarray
+            Normal coordinates in atomic units of length (3N)
+        pN : numpy.ndarray
+            Normal momenta in atomic units of momentum (3N)
+        U : numpy.ndarray
+            Normal mode transformation matrix (3N, 3N) such that U @ U.T = I
+        amu_mat : numpy.ndarray
+            Diagonal matrix of atomic masses in atomic units (3N, 3N)
+    '''
     au_mass_half, au_mass_halfinv = np.zeros((nnuc,nnuc)), np.zeros((nnuc,nnuc))
     for i in range(nnuc):
         au_mass_half[i,i] = np.sqrt(amu_mat[i,i] * amu2au)
@@ -760,6 +819,43 @@ def get_derivatives(au_mas, q, p, nac, grad, elecE):
             
     return(der)
 
+def get_derivatives_SQC(au_mas, q, p, nac, grad, elecE):
+    der = np.zeros((2, ndof))
+    
+    # Derivatives of elctronic mapping variables
+    for i in range(nel):
+        xdpm   = 0 # x*d*p/m
+        pdpm   = 0 # p*d*p/m
+        sum_DE = 0 # sum(Ei - Ej)
+        for j in range(nel):
+            if j != i:
+                xdpm   += q[j] * np.matmul(nac[j,i,:], p[nel:]/au_mas)
+                pdpm   += p[j] * np.matmul(nac[j,i,:], p[nel:]/au_mas)
+                sum_DE += elecE[i] - elecE[j]
+        # postions
+        der[0, i] =  (1.0/nel) * p[i] * sum_DE + xdpm
+        # momenta
+        der[1, i] = -(1.0/nel) * q[i] * sum_DE + pdpm
+    
+    # Derivatives of nuclear mapping variables
+    for n in range(nnuc):
+        # positions
+        der[0, nel+n] = p[nel+n]/au_mas[n]
+        # momenta
+        dVeff_dR = 0
+
+        ppxx_DEnac = 0 # (pi * pj + qi * qj) * (Ej - Ei) * dij
+        for i in range(nel):
+            dVeff_dR  += (0.5*p[i]**2 + 0.5*q[i]**2 - opts._sqc_gamma[i])*grad[i,n]
+            j = i + 1
+            while j < nel:
+
+                ppxx_DEnac += (p[i]*p[j] + q[i]*q[j]) * (elecE[j] - elecE[i]) * nac[i,j,n]
+                j += 1
+        der[1, nel+n] = -dVeff_dR - ppxx_DEnac
+            
+    return(der)
+
 
 ##########################################################
 ### Compute the preductor of modified Euler integrator ###
@@ -798,6 +894,9 @@ def compute_ABM_corrector(timestep, init_coord, f1, f2, f3, f4):
 ### the symmetrized potential
 ##############################################################################
 def get_energy(au_mas, q, p, elecE):
+    if opts.sampling == 'sqc':
+        return get_energy_SQC(au_mas, q, p, elecE)
+
     # Nuclear part (sum of P**2/M)
     p2m_sum = 0
     for n in range(nnuc):
@@ -835,6 +934,23 @@ def run_gamess_at_geom(input_name, AN_mat, qC, atoms):
 
     return ESVars(elecE=elecE, grads=grad, nacs=nac)
     # return elecE, grad, nac
+
+def get_energy_SQC(au_mas, q, p, elecE):
+    # Nuclear part (sum of P**2/M)
+    p2m_sum = 0
+    for n in range(nnuc):
+        p2m_temp = 0
+        p2m_temp = p[nel+n]**2/au_mas[n]
+        p2m_sum += p2m_temp
+        
+    # Electronic part Veff = ((1/2)pi^2 + (1/2)q_i^2 - gamma_i) * E_i
+    q_e = q[:nel]
+    p_e = p[:nel]
+    Veff = np.sum(0.5 * p_e**2 + 0.5 * q_e**2 - opts._sqc_gamma[:nel])
+
+    # Total energy at updated t
+    energy = 0.5*p2m_sum + Veff
+    return(energy)
 
 # #######################################################
 # ### Compute the population of the electronic states ###
@@ -1558,6 +1674,8 @@ def scipy_rk4(elecE, grad, nac, yvar, dt, au_mas):
     def get_deriv(t, y0):
         der = get_derivatives(au_mas, y0[:ndof], y0[ndof:], nac, grad, elecE)
         der = der.flatten()
+        # print(t, y0, der)
+        # input()
         return(der)
     result = it.solve_ivp(get_deriv, (0,dt), yvar, method='RK45', max_step=dt, t_eval=[dt], rtol=1e-10, atol=1e-10)
     return(result.y.flatten())
@@ -1632,7 +1750,10 @@ def _rk4_nuclear_step(elecE, grad, nac, yvar, dt, au_mas):
         q_all, p_all = yvar[:ndof], yvar[ndof:]
         q_all[nel:] = q
         p_all[nel:] = p
-        der = get_derivatives(au_mas, q_all, p_all, nac, grad, elecE)
+        if opts.sampling == 'sqc':
+            der = get_derivatives_SQC(au_mas, q_all, p_all, nac, grad, elecE)
+        else:
+            der = get_derivatives(au_mas, q_all, p_all, nac, grad, elecE)
         der_q = der[0, nel:]  # nuclear derivatives
         der_p = der[1, nel:]  # nuclear derivatives
         der_flat = np.concatenate((der_q, der_p))  # concatenate nuclear derivatives
@@ -1753,13 +1874,7 @@ def integrate_rk4_main(yvar, dt, au_mas, t, es_history, es_vars: ESVars):
     return y_new
 
 
-
-
-'''h
-Main driver of RK4 and electronic structure 
-'''
-
-def compute_CF_single(q, p):
+def compute_CF_single_LSC(q, p):
    ### Compute the estimator of electronic state population ###
    pop = np.zeros(nel)
 
@@ -1769,6 +1884,18 @@ def compute_CF_single(q, p):
         pop[i] = common_TCF * final_state_TCF
 
    return pop
+
+def compute_CF_single_SQC(q, p):
+   for e in 0.5*(q*q + p*p):
+    c = np.zeros(opts.nel)
+    thresh = 1.0
+    for i in range(opts.nel):
+        c[i] = 1
+        for j in range(opts.nel):
+            if (j == i and e[j] < thresh) or (j != i and e[j] >= thresh):
+                c[i] = 0
+    
+    return c
 
 
 '''
