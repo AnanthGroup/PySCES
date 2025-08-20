@@ -339,14 +339,3 @@ def print_settings():
         #   older versions of git don't have the -C option
         print("Cound not obtain git tag: If ithis is not desired, check your git version")
 
-
-    # print(fmt_string.format("Number of atoms")'natom')
-    # print(fmt_string.format("Number of electronic states", nel))
-    # print(fmt_string.format("Total degress of freedom", 3*natom+nel))
-    # print(fmt_string.format("Sampling method", sampling))
-    # print(fmt_string.format("Type fo integrator", integrator))
-    # print(fmt_string.format("Maximum simulation time", integrator))
-
-# _check_settings()
-# _set_seed()
-

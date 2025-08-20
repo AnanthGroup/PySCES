@@ -20,7 +20,7 @@ from pysces.h5file import run_h5_module
 __location__ = ''
 
 from pysces.input_simulation import * 
-from pysces.md import rk4
+from pysces.md import rk4, verlet_main
 
 
 def main():
@@ -91,8 +91,13 @@ def run_simulation():
         time_array, coord, initial_time = BulStoer(initq,initp,tmax_bsh,Hbsh,tol,restart,amu_mat,U, AN_mat)
         compute_CF(time_array, coord)
 
-    elif integrator.lower() in ['rk4', 'rk4-uprop', 'verlet-uprop']:
+    elif integrator.lower() in ['rk4', 'rk4-uprop']:
         time_array, coord, initial_time = rk4(initq, initp, tmax_rk4, Hrk4, restart, amu_mat, U, AN_mat)
+        compute_CF(time_array, coord)
+
+    
+    elif integrator.lower() == 'verlet-uprop':
+        time_array, coord, initial_time = verlet_main(initq, initp, tmax_rk4, Hrk4, restart, amu_mat, U, AN_mat)
         compute_CF(time_array, coord)
 
 

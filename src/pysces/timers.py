@@ -32,8 +32,8 @@ class _TrajectoryTimer:
             return
 
         diff_traj_time = traj_time - self.start_traj_time
-        if diff_traj_time <= 0:
-            raise ValueError("Simulation time must be greater than the initial simulation time.")
+        if diff_traj_time < 0:
+            raise ValueError("Simulation time must be greater than or equal the initial simulation time.")
 
         total_time = time.time()
         total_time_elapsed = total_time - self.start_time

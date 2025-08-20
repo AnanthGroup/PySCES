@@ -50,7 +50,7 @@ ang2bohr = 1.8897259886         # angstroms to bohr
 k2autmp  = kb/eh2j              # Kelvin to atomic unit temperature
 beta     = 1.0/(temp * k2autmp) # inverse temperature in atomic unit
 
-
+_p_half = None
 
 # TODO: Temporary fix for the global variables
 def set_subroutine_globals():
@@ -341,6 +341,9 @@ def get_normal_geo(U, xyz_ang, amu_mat, debug=False):
 def sample_nuclear(qcenter, frq):
     if(frq >= 0):
         # position
+        scale_Q = np.sqrt(1.0/(2.0*frq*np.tanh(beta*frq/2.0)))
+        scale_P = np.sqrt(frq/(2.0*np.tanh(beta*frq/2.0)))
+        print(scale_Q, scale_P)
         Q = np.random.normal(loc=qcenter, scale=np.sqrt(1.0/(2.0*frq*np.tanh(beta*frq/2.0))))
         # print("WARNING: Ignoring the nuclear coordinate sampling!!!!!!")
         # Q = qcenter
@@ -848,6 +851,7 @@ def get_derivatives_SQC(au_mas, q, p, nac, grad, elecE):
     p_e = p[:nel]
     q_e = q[:nel]
     n = 0.5*q_e*q_e + 0.5*p_e*p_e - opts._sqc_gamma
+    dVeff_dR_record = np.zeros(nnuc)
     for I in range(nnuc):
         # positions
         der[0, nel+I] = p[nel+I]/au_mas[I]
@@ -859,9 +863,9 @@ def get_derivatives_SQC(au_mas, q, p, nac, grad, elecE):
             for j in range(i+1, nel):
                 dVeff_dR += (n[i] - n[j]) * (grad[i,I] - grad[j,I])/nel
                 ppxx_DEnac += (p[i]*p[j] + q[i]*q[j]) * (elecE[j] - elecE[i]) * nac[i,j,I]
-
+        dVeff_dR_record[I] = dVeff_dR
         der[1, nel+I] = -dVeff_dR - ppxx_DEnac
-            
+
     return(der)
 
 
@@ -1706,7 +1710,8 @@ def interpolate_rk4(yvar: list, t: float, dt: float, au_mas: np.ndarray, es_hist
     result = it.solve_ivp(get_deriv, (t,t+dt), yvar, method='RK45', max_step=dt, t_eval=[t+dt], rtol=1e-10, atol=1e-10)
     return(result.y.flatten())
 
-def _verlet_step(elecE, grad, nac, yvar, t, dt, au_mas):
+def _verlet_step_old(elecE, grad, nac, yvar, t, dt, au_mas):
+    global _p_half
     q_all = yvar[:ndof]  # position variables
     p_all = yvar[ndof:]  # momentum variables
 
@@ -1715,21 +1720,56 @@ def _verlet_step(elecE, grad, nac, yvar, t, dt, au_mas):
     nuc_der = np.array(all_der[1, nel:])
     p_nuc_old = p_all[nel:]  # old nuclear momentum variables
     q_nuc_old = q_all[nel:]  # old nuclear position variables
+    # if t == 0.0:
+    #     p_nuc_new = p_nuc_old + 0.5*dt * nuc_der
+    # else:
+    #     p_nuc_new = p_nuc_old + dt * nuc_der
+    # q_nuc_new = q_nuc_old + dt * p_nuc_new / au_mas
+
+
     if t == 0.0:
-        p_nuc_new = p_nuc_old + 0.5*dt * nuc_der
+        _p_half = p_nuc_old + 0.5*dt * nuc_der
     else:
-        p_nuc_new = p_nuc_old + dt * nuc_der
-    q_nuc_new = q_nuc_old + dt * p_nuc_new / au_mas
+        _p_half += p_nuc_old + dt * nuc_der
+    q_nuc_new = q_nuc_old + dt * _p_half / au_mas
+    p_nuc_new = _p_half - 0.5 * dt * nuc_der
 
     return q_nuc_new, p_nuc_new
 
-def _uprop_step(elecE, nac, yvar, dt, au_mas, p_nuc_new):
+def _verlet_position_step(elecE, grad, nac, yvar, dt, au_mas):
+
+    q_all = yvar[:ndof]  # position variables
+    p_all = yvar[ndof:]  # momentum variables
+
+    #   Verlet Velocity update for nuclear variables
+    all_der = get_derivatives(au_mas, q_all, p_all, nac, grad, elecE)
+    nuc_der = np.array(all_der[1, nel:])
+    p_nuc_old = p_all[nel:]  # old nuclear momentum variables
+    q_nuc_old = q_all[nel:]  # old nuclear position variables
+
+    _p_half = p_nuc_old + 0.5*dt * nuc_der
+    q_nuc_new = q_nuc_old + dt * _p_half / au_mas
+
+    return q_nuc_new, _p_half
+
+def _verlet_velocity_step(elecE, grad, nac, yvar, dt, au_mas, p_half):
+    q_all = yvar[:ndof]  # position variables
+    p_all = yvar[ndof:]  # momentum variables
+
+    #   Verlet Velocity update for nuclear variables
+    all_der = get_derivatives(au_mas, q_all, p_all, nac, grad, elecE)
+    nuc_der = np.array(all_der[1, nel:])
+
+    p_nuc_new = p_half + 0.5 * dt * nuc_der
+
+    return p_nuc_new
+
+def _uprop_step(elecE, nac, yvar, dt, au_mas):
     q_all = yvar[:ndof]  # position variables
     p_all = yvar[ndof:]  # momentum variables
     p_nuc_old = p_all[nel:]  # old nuclear momentum variables
 
-    # nuc_vel_old = 0.5*(p_nuc_old + p_nuc_new) / au_mas  # average nuclear velocity
-    nuc_vel_old = p_nuc_new / au_mas  # nuclear velocity at the old time step
+    nuc_vel_old = p_nuc_old / au_mas  # nuclear velocity at the old time step
 
     #   equation 8
     H = np.zeros((nel, nel), dtype=np.complex128)
@@ -1738,7 +1778,10 @@ def _uprop_step(elecE, nac, yvar, dt, au_mas, p_nuc_new):
             if i == j:
                 H[i, j] = np.mean(elecE[i] - elecE)
             else:
-                H[i, j] = - (1j)*np.dot(nac[i, j], nuc_vel_old)
+                # this WAS implimented before
+                H[i, j] = (1j)*np.dot(nac[j, i], nuc_vel_old)
+                # this is the WRONG paper implimentation
+                # H[i, j] = - (1j)*np.dot(nac[j, i], nuc_vel_old)
     
     #   equation 9
     eps, U = np.linalg.eigh(H)
@@ -1751,6 +1794,7 @@ def _uprop_step(elecE, nac, yvar, dt, au_mas, p_nuc_new):
     C_new = propagator @ C_old  # new complex electronic variables
     x_new = np.sqrt(2.0) * C_new.real  # new electronic position variables
     p_new = np.sqrt(2.0) * C_new.imag  # new electronic momentum variables
+
 
     return x_new, p_new
 
@@ -1783,17 +1827,19 @@ def rk4_Uprop_step(elecE, grad, nac, yvar, dt, au_mas):
     y_new = np.concatenate((q_new, q_nuc_new, p_new, p_nuc_new))
     return y_new
 
-def verlet_Uprop_step(elecE, grad, nac, yvar, dt, au_mas, t):
-    '''
-        This integrator impliments a Velocity-Verlet scheme for the nuclear variables
-        and a Schrodinger equation propagator for the electronic variables. set of
-        variables (electronic, nuclear) assumes the other are kept constant.
-        Details are from Talbot, Head-Gordon, and Cotton (2023)
-        doi.org/10.1080/00268976.2022.2153761
-    '''
-    q_nuc_new, p_nuc_new = _verlet_step(elecE, grad, nac, yvar, t, dt, au_mas)
-    q_new, p_new = _uprop_step(elecE, nac, yvar, dt, au_mas, p_nuc_new)
-    y_new = np.concatenate((q_new, q_nuc_new, p_new, p_nuc_new))
+def verlet_Uprop_step_first_half(elecE, grad, nac, yvar, dt, au_mas):
+ 
+    q_nuc_new, p_nuc_half = _verlet_position_step(elecE, grad, nac, yvar, dt, au_mas)
+    q_new, p_new = _uprop_step(elecE, nac, yvar, dt, au_mas)
+    y_new = np.concatenate((q_new, q_nuc_new, p_new, p_nuc_half))
+    return y_new
+
+def verlet_Uprop_step_second_half(elecE, grad, nac, yvar_half, dt, au_mas):
+
+    p_nuc_half = yvar_half[opts.ndof:][opts.nel:]  # nuclear momentum variables at the half step
+    p_nuc_new= _verlet_velocity_step(elecE, grad, nac, yvar_half, dt, au_mas, p_nuc_half)
+    y_new = np.copy(yvar_half)
+    y_new[opts.ndof:][opts.nel:] = p_nuc_new  # update nuclear momentum variables
     return y_new
 
 def incremental_integrate(yvar: list, t: float, dt: float, au_mas: np.ndarray, es_history: ESVarsHistory, es_vars: ESVars, n_substeps: int = 100):
@@ -1849,16 +1895,19 @@ def incremental_integrate(yvar: list, t: float, dt: float, au_mas: np.ndarray, e
         eval_func = update_fun
 
     for n in range(n_substeps+1):
-        
         t_n = t + n * sub_dt
         P_points.append(y_var_new[ndof:][nel:])
         elecE, grads, nacs = eval_func(t_n, y_var_new)
-
         
         if integrator.lower() == 'rk4':
             y_var_new = scipy_rk4(elecE, grads, nacs, y_var_new, sub_dt, au_mas)
         elif integrator.lower() == 'verlet-uprop':
-            y_var_new = verlet_Uprop_step(elecE, grads, nacs, y_var_new, sub_dt, au_mas, t_n)
+            y_var_new_half = verlet_Uprop_step_first_half(elecE, grads, nacs, y_var_new, sub_dt, au_mas, t_n)
+            elecE = es_history.elecE(t_n + sub_dt)      # update electronic energy after first half step
+            grads = es_history.grads(t_n + sub_dt)      # update gradients after first half step
+            nacs  = es_history.nacs(t_n + sub_dt)       # update NACs after first half step
+            p_nuc_half = y_var_new_half[ndof:][nel:]    # nuclear momentum variables at the half step
+            y_var_new = verlet_Uprop_step_second_half(elecE, grads, nacs, y_var_new, sub_dt, au_mas, p_nuc_half)
         else:
             y_var_new = rk4_Uprop_step(elecE, grads, nacs, y_var_new, sub_dt, au_mas)
 
@@ -1875,9 +1924,9 @@ def integrate_rk4_main(yvar, dt, au_mas, t, es_history, es_vars: ESVars):
     elif integrator.lower() == 'rk4':
         print('Performing RK4 integration')
         y_new = scipy_rk4(elecE, grad, nac, yvar, dt, au_mas)
-    elif integrator.lower() == 'verlet-uprop':
-        print('Performing Verlet-Uprop integration')
-        y_new = verlet_Uprop_step(elecE, grad, nac, yvar, dt, au_mas, t)
+    # elif integrator.lower() == 'verlet-uprop':
+    #     print('Performing Verlet-Uprop integration')
+    #     y_new = verlet_Uprop_step(elecE, grad, nac, yvar, dt, au_mas, t)
     else:
         print('Performing RK4-Uprop integration')
         y_new = rk4_Uprop_step(elecE, grad, nac, yvar, dt, au_mas)
