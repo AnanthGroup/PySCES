@@ -16,6 +16,7 @@ from pysces.subroutines import (
     integrate_rk4_main,
     verlet_Uprop_step_first_half,
     verlet_Uprop_step_second_half,
+    print_energy_summary,
     __location__,
     amu2au,
 )
@@ -242,7 +243,7 @@ def verlet_main(initq, initp, tStop, H, restart, amu_mat, U, AN_mat):
         else:
             es_vars = qc_runner.run_new_geom(PhaseVars(time=t, nuc_q0=qC))
         # Total initial energy at t=0
-        init_energy = get_energy(au_mas, q, p, es_vars.elecE)
+        init_energy = print_energy_summary(au_mas, q, p, es_vars.elecE)
 
         # Record nuclear geometry in angstrom and log the rest
         record_nuc_geo(restart, t, atoms, qC, logger)
@@ -293,7 +294,7 @@ def verlet_main(initq, initp, tStop, H, restart, amu_mat, U, AN_mat):
         Y.append(y)
 
         # Compute energy
-        new_energy = get_energy(au_mas, y[:ndof], y[ndof:], es_vars.elecE)
+        new_energy = print_energy_summary(au_mas, y[:ndof], y[ndof:], es_vars.elecE)
 
         # Record nuclear geometry, logs, and restarts
         record_nuc_geo(restart, t, atoms, qC, logger)

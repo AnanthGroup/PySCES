@@ -258,6 +258,7 @@ def read_restart(file_loc: str='restart.out',
             time = data.pop('time')
             nac_hist = np.array(data.pop('nac_hist', np.empty(0)))
             tdm_hist = np.array(data.pop('tdm_hist', np.empty(0)))
+            opts._sqc_gamma = data.pop('sqc_gamma', opts._sqc_gamma)
 
             combo_q = np.array(elec_q + nucl_q)
             combo_p = np.array(elec_p + nucl_p)
@@ -410,6 +411,7 @@ def write_restart(  coord: np.ndarray | list,
             data['grads'] = np.array(grads).tolist()
             data['nac_mat'] = np.array(nac_mat).tolist()
             data['com'] = np.array(com).tolist()
+            data['sqc_gamma'] = list(opts._sqc_gamma) if opts._sqc_gamma is not None else None
 
             from .qcRunners.TeraChem import TCJobBatch, TCJob
 

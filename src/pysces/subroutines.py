@@ -343,7 +343,6 @@ def sample_nuclear(qcenter, frq):
         # position
         scale_Q = np.sqrt(1.0/(2.0*frq*np.tanh(beta*frq/2.0)))
         scale_P = np.sqrt(frq/(2.0*np.tanh(beta*frq/2.0)))
-        print(scale_Q, scale_P)
         Q = np.random.normal(loc=qcenter, scale=np.sqrt(1.0/(2.0*frq*np.tanh(beta*frq/2.0))))
         # print("WARNING: Ignoring the nuclear coordinate sampling!!!!!!")
         # Q = qcenter
@@ -905,9 +904,9 @@ def compute_ABM_corrector(timestep, init_coord, f1, f2, f3, f4):
 ### Compute the total energy of adiabatic mapping Hamiltonian defined with ###
 ### the symmetrized potential
 ##############################################################################
-def get_energy(au_mas, q, p, elecE):
+def get_energy(au_mas, q, p, elecE, return_parts=False):
     if opts.sampling == 'sqc':
-        return get_energy_SQC(au_mas, q, p, elecE)
+        return get_energy_SQC(au_mas, q, p, elecE, return_parts)
 
     # Nuclear part (sum of P**2/M)
     p2m_sum = 0
@@ -923,10 +922,29 @@ def get_energy(au_mas, q, p, elecE):
         while j < nel:
             p2x2_DE += (p[i]**2 - p[j]**2 + q[i]**2 - q[j]**2) * (elecE[i] - elecE[j])
             j += 1
+
+    V_eff = np.mean(elecE) + (1.0/nel)*p2x2_DE
+    P_kin = 0.5 * p2m_sum
+    energy = P_kin + V_eff
+    if return_parts:
+        return energy, P_kin, V_eff
     
     # Total energy at updated t
     energy = 0.5*p2m_sum + (1.0/nel)*sum(elecE) + (0.5/nel)*p2x2_DE
     return(energy)
+
+def print_energy_summary(au_mas, q, p, elecE):
+    if opts.sampling == 'sqc':
+        energy, Pkin, Veff = get_energy_SQC(au_mas, q, p, elecE, return_parts=True)
+    else:
+        energy, Pkin, Veff = get_energy(au_mas, q, p, elecE, return_parts=True)
+    
+    print('--------------------------------------')
+    print('Total energy:        %12.6f a.u.' %energy)
+    print('Nuclear Kinetic:     %12.6f a.u.' %Pkin)
+    print('Effective Potential: %10.6f a.u.' %Veff)
+    print('--------------------------------------')
+    return energy
 
 def run_gamess_at_geom(input_name, AN_mat, qC, atoms):
     proceed = True
@@ -947,7 +965,7 @@ def run_gamess_at_geom(input_name, AN_mat, qC, atoms):
     return ESVars(elecE=elecE, grads=grad, nacs=nac)
     # return elecE, grad, nac
 
-def get_energy_SQC(au_mas, q, p, elecE):
+def get_energy_SQC(au_mas, q, p, elecE, return_parts=False):
     # Nuclear part (sum of P**2/M)
 
     p2m_sum = 0
@@ -964,6 +982,11 @@ def get_energy_SQC(au_mas, q, p, elecE):
     for i in range(nel):
         for j in range(i+1, nel):
             Veff += (n[i] - n[j]) * (elecE[i] - elecE[j])/nel
+
+    Pkin = 0.5 * p2m_sum
+    energy = Pkin + Veff
+    if return_parts:
+        return energy, Pkin, Veff
 
     # Total energy at updated t
     energy = 0.5*p2m_sum + Veff
